@@ -1,7 +1,7 @@
 # Kumo — Seanime-style anime app for Arch Linux.
 #
 # Build & install from a checkout of this repository:
-#     cd packaging/arch && makepkg -si
+#     cd packaging/arch && makepkg -si      (after a git pull: makepkg -sif)
 #
 # The package is built straight from the checkout two levels up, so local
 # changes are picked up without committing them.

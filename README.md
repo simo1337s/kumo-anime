@@ -71,7 +71,7 @@ gh repo clone simo1337s/animetest kumo && cd kumo
 cd packaging/arch && makepkg -si
 ```
 
-Update later with `cd kumo && git pull && cd packaging/arch && makepkg -si`.
+Update later with `cd kumo && git pull && cd packaging/arch && makepkg -sif` (`-f` rebuilds; without it makepkg reinstalls the package it built last time).
 
 Start **Kumo** from your app menu (or run `kumo`).
 
