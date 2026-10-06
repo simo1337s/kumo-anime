@@ -24,11 +24,28 @@ type Platform struct {
 	db     *db.DB
 	hub    *events.Hub
 
-	mu          sync.RWMutex
-	viewer      *Viewer
+	// authMu serialises logins and logouts, so the token and viewer saved in
+	// the database always match the ones in memory.
+	authMu sync.Mutex
+
+	mu     sync.RWMutex
+	viewer *Viewer
+	// session is incremented on every login and logout. Work that started in
+	// an earlier session (a fetch, a list update, a rejected token) must not
+	// change the state of the current one.
+	session uint64
+	// collections holds snapshots shared with every caller of Collection.
+	// They are never modified: a change builds a new Collection and swaps
+	// the pointer, so readers keep a consistent copy.
 	collections map[string]*Collection
 	fetchedAt   map[string]time.Time
-	fetchMu     sync.Mutex
+	// versions counts the changes made to each cached collection, so that a
+	// fetch already running (whose result may predate a change) isn't cached.
+	versions map[string]uint64
+
+	// fetchSem allows one collection fetch at a time. Unlike a mutex, the
+	// wait for it ends when the caller's context does.
+	fetchSem chan struct{}
 }
 
 const (
@@ -45,6 +62,8 @@ func NewPlatform(d *db.DB, hub *events.Hub) *Platform {
 		hub:         hub,
 		collections: map[string]*Collection{},
 		fetchedAt:   map[string]time.Time{},
+		versions:    map[string]uint64{},
+		fetchSem:    make(chan struct{}, 1),
 	}
 	var tok string
 	if ok, _ := d.GetKV(kvToken, &tok); ok && tok != "" {
@@ -64,34 +83,58 @@ func (p *Platform) Login(ctx context.Context, token string) (*Viewer, error) {
 	if token == "" {
 		return nil, errors.New("empty token")
 	}
-	tmp := NewClient()
-	tmp.SetToken(token)
-	v, err := tmp.Viewer(ctx)
+	v, err := p.client.withToken(token).Viewer(ctx)
 	if err != nil {
 		return nil, err
 	}
+	p.authMu.Lock()
+	defer p.authMu.Unlock()
 	if err := p.db.SetKV(kvToken, token); err != nil {
 		return nil, err
 	}
 	_ = p.db.SetKV(kvViewer, v)
-	p.client.SetToken(token)
 	p.mu.Lock()
+	p.session++
 	p.viewer = v
+	p.client.SetToken(token)
 	p.collections = map[string]*Collection{}
 	p.fetchedAt = map[string]time.Time{}
 	p.mu.Unlock()
 	return v, nil
 }
 
-func (p *Platform) Logout() {
-	_ = p.db.DeleteKV(kvToken)
-	_ = p.db.DeleteKV(kvViewer)
-	p.client.SetToken("")
+// Logout forgets the token; the app switches to the local list.
+func (p *Platform) Logout() { p.endSession(nil) }
+
+// expire handles AniList rejecting the token of session s: the user is
+// logged out, unless they already logged out or in again since (then the
+// rejection is stale and must not end the newer session).
+func (p *Platform) expire(s uint64) {
+	if p.endSession(&s) {
+		p.hub.Warn("Your AniList session expired, please log in again.")
+	}
+}
+
+// endSession logs out; when only is set, only if the session is still *only.
+// It reports whether a logged-in user was logged out.
+func (p *Platform) endSession(only *uint64) bool {
+	p.authMu.Lock()
+	defer p.authMu.Unlock()
 	p.mu.Lock()
+	if only != nil && *only != p.session {
+		p.mu.Unlock()
+		return false
+	}
+	wasLoggedIn := p.viewer != nil
+	p.session++
 	p.viewer = nil
+	p.client.SetToken("")
 	p.collections = map[string]*Collection{}
 	p.fetchedAt = map[string]time.Time{}
 	p.mu.Unlock()
+	_ = p.db.DeleteKV(kvToken)
+	_ = p.db.DeleteKV(kvViewer)
+	return wasLoggedIn
 }
 
 func (p *Platform) Viewer() *Viewer {
@@ -100,91 +143,185 @@ func (p *Platform) Viewer() *Viewer {
 	return p.viewer
 }
 
-func (p *Platform) LoggedIn() bool { return p.Viewer() != nil && p.client.Token() != "" }
+// state returns the current session and the logged-in viewer (nil when
+// logged out), read together so they belong to the same session.
+func (p *Platform) state() (uint64, *Viewer) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.viewer == nil || p.client.Token() == "" {
+		return p.session, nil
+	}
+	return p.session, p.viewer
+}
+
+func (p *Platform) LoggedIn() bool {
+	_, v := p.state()
+	return v != nil
+}
 
 // RefreshViewer re-fetches the viewer (avatar/name changes) in the background.
 func (p *Platform) RefreshViewer(ctx context.Context) {
-	if !p.LoggedIn() {
+	session, v := p.state()
+	if v == nil {
 		return
 	}
-	v, err := p.client.Viewer(ctx)
+	fresh, err := p.client.Viewer(ctx)
 	if errors.Is(err, ErrUnauthorized) {
-		p.hub.Warn("Your AniList session expired, please log in again.")
-		p.Logout()
+		p.expire(session)
 		return
 	}
-	if err == nil {
-		p.mu.Lock()
-		p.viewer = v
-		p.mu.Unlock()
-		_ = p.db.SetKV(kvViewer, v)
+	if err != nil {
+		return
+	}
+	p.authMu.Lock()
+	defer p.authMu.Unlock()
+	p.mu.Lock()
+	same := p.session == session // not logged out or in again meanwhile
+	if same {
+		p.viewer = fresh
+	}
+	p.mu.Unlock()
+	if same {
+		_ = p.db.SetKV(kvViewer, fresh)
 	}
 }
 
 // ---------------------------------------------------------------------------
 // Collections
 
-// Collection returns the user's anime ("ANIME") or manga ("MANGA") list.
+// Collection returns the user's anime ("ANIME") or manga ("MANGA") list. The
+// result may be shared with other callers and must not be modified.
 func (p *Platform) Collection(ctx context.Context, mediaType string, refresh bool) (*Collection, error) {
 	if mediaType == "" {
 		mediaType = "ANIME"
 	}
-	if !p.LoggedIn() {
-		return p.localCollection(mediaType)
+	maxAge := 15 * time.Minute
+	if refresh {
+		maxAge = 5 * time.Second // only reuse a fetch that just finished
 	}
-	p.mu.RLock()
-	c, ok := p.collections[mediaType]
-	at := p.fetchedAt[mediaType]
-	p.mu.RUnlock()
-	if ok && !refresh && time.Since(at) < 15*time.Minute {
-		return c, nil
-	}
-
-	p.fetchMu.Lock()
-	defer p.fetchMu.Unlock()
-	// Someone else may have refreshed while we waited.
-	p.mu.RLock()
-	c, ok = p.collections[mediaType]
-	at = p.fetchedAt[mediaType]
-	p.mu.RUnlock()
-	if ok && time.Since(at) < 5*time.Second {
-		return c, nil
-	}
-
-	v := p.Viewer()
-	fresh, err := p.client.Collection(ctx, v.ID, mediaType)
-	if err != nil {
-		if errors.Is(err, ErrUnauthorized) {
-			p.hub.Warn("Your AniList session expired, please log in again.")
-			p.Logout()
-			return p.localCollection(mediaType)
+	for attempt := 1; ; attempt++ {
+		c, retry, err := p.collection(ctx, mediaType, maxAge)
+		if !retry || attempt == 3 {
+			return c, err
 		}
-		// Offline: fall back to the last saved copy.
-		var stale Collection
-		if c != nil {
-			return c, nil
-		}
-		if p.db.GetStaleCache("collection:"+mediaType, &stale) {
-			return &stale, nil
-		}
-		return nil, err
 	}
-	p.mu.Lock()
-	p.collections[mediaType] = fresh
-	p.fetchedAt[mediaType] = time.Now()
-	p.mu.Unlock()
-	p.db.SetCache("collection:"+mediaType, fresh, 0)
-	// Seed the media cache so detail lookups don't need extra requests.
-	for _, e := range fresh.Entries() {
-		p.db.SetCache(liteKey(e.MediaID), e.Media, 24*time.Hour)
-	}
-	return fresh, nil
 }
 
-func (p *Platform) invalidate(mediaType string) {
+// collState is what Collection needs to know about the session and the
+// cached copy, read under one lock so that it is consistent.
+type collState struct {
+	session uint64
+	viewer  *Viewer     // nil when logged out
+	cached  *Collection // last fetched copy (maybe patched since), or nil
+	version uint64
+	fresh   bool // cached is recent enough to be returned as is
+}
+
+func (p *Platform) collState(mediaType string, maxAge time.Duration) collState {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	st := collState{session: p.session, cached: p.collections[mediaType], version: p.versions[mediaType]}
+	if p.client.Token() != "" {
+		st.viewer = p.viewer
+	}
+	at, ok := p.fetchedAt[mediaType]
+	st.fresh = st.cached != nil && ok && time.Since(at) < maxAge
+	return st
+}
+
+// collection makes one attempt at Collection. retry reports that AniList
+// rejected the token: the session has ended (or another one started) since,
+// so the call should be repeated against the new state.
+func (p *Platform) collection(ctx context.Context, mediaType string, maxAge time.Duration) (_ *Collection, retry bool, _ error) {
+	st := p.collState(mediaType, maxAge)
+	if st.viewer == nil {
+		c, err := p.localCollection(mediaType)
+		return c, false, err
+	}
+	if st.fresh {
+		return st.cached, false, nil
+	}
+
+	select {
+	case p.fetchSem <- struct{}{}:
+		defer func() { <-p.fetchSem }()
+	case <-ctx.Done():
+		if st.cached != nil {
+			return st.cached, false, nil
+		}
+		return nil, false, ctx.Err()
+	}
+	// While we waited, someone else may have refreshed the list, or found
+	// the token expired and logged the user out.
+	st = p.collState(mediaType, maxAge)
+	if st.viewer == nil {
+		c, err := p.localCollection(mediaType)
+		return c, false, err
+	}
+	if st.fresh {
+		return st.cached, false, nil
+	}
+
+	got, err := p.client.Collection(ctx, st.viewer.ID, mediaType)
+	if err != nil {
+		if errors.Is(err, ErrUnauthorized) {
+			p.expire(st.session)
+			return nil, true, err
+		}
+		// Offline: fall back to the last copy we have.
+		if st.cached != nil {
+			return st.cached, false, nil
+		}
+		if saved := p.loadSavedCollection(st.viewer.ID, mediaType); saved != nil {
+			return saved, false, nil
+		}
+		return nil, false, err
+	}
+
 	p.mu.Lock()
-	delete(p.fetchedAt, mediaType)
+	// After a logout or login the result belongs to another session, and
+	// after a list update it may predate the update: return it, but don't
+	// cache it.
+	current := p.session == st.session && p.versions[mediaType] == st.version
+	if current {
+		p.collections[mediaType] = got
+		p.fetchedAt[mediaType] = time.Now()
+	}
 	p.mu.Unlock()
+	if current {
+		p.db.SetCache(collectionKey(mediaType), savedCollection{UserID: st.viewer.ID, Collection: got}, 0)
+	}
+	// Seed the media cache so detail lookups don't need extra requests.
+	for _, e := range got.Entries() {
+		p.db.SetCache(liteKey(e.MediaID), e.Media, 24*time.Hour)
+	}
+	return got, false, nil
+}
+
+// invalidateLocked marks the cached collection of a media type as outdated:
+// the next read refetches it, and a fetch already running isn't cached.
+// p.mu must be held.
+func (p *Platform) invalidateLocked(mediaType string) {
+	delete(p.fetchedAt, mediaType)
+	p.versions[mediaType]++
+}
+
+func collectionKey(mediaType string) string { return "collection:" + mediaType }
+
+// savedCollection is the copy of a collection kept in the database as an
+// offline fallback. It records whose list it is, so that after switching
+// accounts the previous user's list is never shown.
+type savedCollection struct {
+	UserID     int         `json:"userId"`
+	Collection *Collection `json:"collection"`
+}
+
+func (p *Platform) loadSavedCollection(userID int, mediaType string) *Collection {
+	var s savedCollection
+	if !p.db.GetStaleCache(collectionKey(mediaType), &s) || s.UserID != userID {
+		return nil
+	}
+	return s.Collection
 }
 
 var listNames = map[string]string{
@@ -244,19 +381,19 @@ func (p *Platform) Media(ctx context.Context, id int, refresh bool) (*Media, err
 		p.attachListEntry(ctx, &m)
 		return &m, nil
 	}
+	session, _ := p.state()
 	fresh, err := p.client.Media(ctx, id)
+	if errors.Is(err, ErrUnauthorized) {
+		// The token was rejected: log out, then retry as a guest.
+		p.expire(session)
+		fresh, err = p.client.Media(ctx, id)
+	}
 	if err != nil {
-		if errors.Is(err, ErrUnauthorized) {
-			p.Logout()
-			fresh, err = p.client.Media(ctx, id)
+		if p.db.GetStaleCache(detailKey(id), &m) {
+			p.attachListEntry(ctx, &m)
+			return &m, nil
 		}
-		if err != nil {
-			if p.db.GetStaleCache(detailKey(id), &m) {
-				p.attachListEntry(ctx, &m)
-				return &m, nil
-			}
-			return nil, err
-		}
+		return nil, err
 	}
 	// The list entry is per-user state, don't cache it with the media.
 	fresh.MediaListEntry = nil
@@ -374,11 +511,16 @@ func (p *Platform) Schedule(ctx context.Context, start, end int64) ([]*AiringEpi
 		return out, nil
 	}
 	res, err := p.client.Schedule(ctx, start, end)
-	if err != nil && len(res) == 0 {
+	if err != nil {
+		// A page failed: prefer an older complete copy, else show what we
+		// got, but never cache an incomplete schedule.
 		if p.db.GetStaleCache(key, &out) {
 			return out, nil
 		}
-		return nil, err
+		if len(res) == 0 {
+			return nil, err
+		}
+		return res, nil
 	}
 	p.db.SetCache(key, res, time.Hour)
 	return res, nil
@@ -394,154 +536,122 @@ func (p *Platform) UpdateEntry(ctx context.Context, u EntryUpdate) error {
 		return err
 	}
 	mt := typeOr(media.Type)
-	if p.LoggedIn() {
-		if _, err := p.client.SaveEntry(ctx, u); err != nil {
+	if session, v := p.state(); v != nil {
+		saved, err := p.client.SaveEntry(ctx, u)
+		if err != nil {
+			if errors.Is(err, ErrUnauthorized) {
+				p.expire(session)
+			}
 			return err
 		}
-		p.patchCachedEntry(mt, media, u)
-		p.invalidate(mt)
+		p.patchCachedEntry(session, mt, media, u, saved)
 		p.hub.Publish(events.CollectionUpdate, map[string]any{"mediaId": u.MediaID})
 		return nil
 	}
 
-	// Local list
-	cur := struct {
-		status   string
-		progress int
-		score    float64
-		repeat   int
-	}{status: "PLANNING"}
-	_ = p.db.QueryRow(`SELECT status, progress, score, repeat FROM local_list WHERE media_id = ?`, u.MediaID).
-		Scan(&cur.status, &cur.progress, &cur.score, &cur.repeat)
-	if u.Status != nil {
-		cur.status = *u.Status
-	}
-	if u.Progress != nil {
-		cur.progress = *u.Progress
-	}
-	if u.Score != nil {
-		cur.score = *u.Score
-	}
-	if u.Repeat != nil {
-		cur.repeat = *u.Repeat
-	}
+	// Local list. A single statement, so concurrent updates of one entry
+	// can't undo each other: fields the update leaves out keep their value.
 	raw, _ := json.Marshal(media.Lite())
 	_, err = p.db.Write(`INSERT INTO local_list(media_id, type, status, progress, score, repeat, media, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(media_id) DO UPDATE SET status = excluded.status, progress = excluded.progress, score = excluded.score,
-			repeat = excluded.repeat, media = excluded.media, updated_at = excluded.updated_at`,
-		u.MediaID, mt, cur.status, cur.progress, cur.score, cur.repeat, string(raw), time.Now().Unix())
+		VALUES(?1, ?2, COALESCE(?3, 'PLANNING'), COALESCE(?4, 0), COALESCE(?5, 0), COALESCE(?6, 0), ?7, ?8)
+		ON CONFLICT(media_id) DO UPDATE SET status = COALESCE(?3, status), progress = COALESCE(?4, progress),
+			score = COALESCE(?5, score), repeat = COALESCE(?6, repeat), media = excluded.media, updated_at = excluded.updated_at`,
+		u.MediaID, mt, orNull(u.Status), orNull(u.Progress), orNull(u.Score), orNull(u.Repeat), string(raw), time.Now().Unix())
 	if err == nil {
 		p.hub.Publish(events.CollectionUpdate, map[string]any{"mediaId": u.MediaID})
 	}
 	return err
 }
 
-// patchCachedEntry applies an update to the in-memory collection so the UI
-// reflects it immediately, before the next full refresh.
-func (p *Platform) patchCachedEntry(mt string, media *Media, u EntryUpdate) {
+// orNull is v's value, or nil (SQL NULL) when v is nil.
+func orNull[T any](v *T) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// patchCachedEntry applies an update AniList accepted to the cached
+// collection, so the UI reflects it before the next refresh, and marks the
+// cache outdated. saved is the entry as AniList returned it, if it did. The
+// change goes into a new Collection: readers keep the snapshot they have.
+func (p *Platform) patchCachedEntry(session uint64, mt string, media *Media, u EntryUpdate, saved *ListEntryLite) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.session != session {
+		return // logged out, or into another account, since the update
+	}
+	p.invalidateLocked(mt)
 	c := p.collections[mt]
 	if c == nil {
 		return
 	}
-	e := c.Find(u.MediaID)
-	if e == nil {
-		e = &ListEntry{MediaID: u.MediaID, Media: media, Status: "PLANNING"}
-		status := "PLANNING"
-		if u.Status != nil {
-			status = *u.Status
-		}
-		var list *List
-		for _, l := range c.Lists {
-			if l.Status == status && !l.IsCustomList {
-				list = l
-			}
-		}
-		if list == nil {
-			list = &List{Name: listNames[status], Status: status}
-			c.Lists = append(c.Lists, list)
-		}
-		list.Entries = append(list.Entries, e)
+	e := ListEntry{MediaID: u.MediaID, Media: media, Status: "PLANNING"}
+	if old := c.Find(u.MediaID); old != nil {
+		e = *old
 	}
-	if u.Status != nil && *u.Status != e.Status {
-		// move between lists
-		for _, l := range c.Lists {
-			for i, x := range l.Entries {
-				if x == e {
-					l.Entries = append(l.Entries[:i], l.Entries[i+1:]...)
-					break
-				}
-			}
+	u.applyTo(&e)
+	if saved != nil {
+		if saved.ID != 0 {
+			e.ID = saved.ID
 		}
-		var target *List
-		for _, l := range c.Lists {
-			if l.Status == *u.Status && !l.IsCustomList {
-				target = l
-			}
+		if saved.Status != "" {
+			e.Status = saved.Status
 		}
-		if target == nil {
-			target = &List{Name: listNames[*u.Status], Status: *u.Status}
-			c.Lists = append(c.Lists, target)
-		}
-		target.Entries = append(target.Entries, e)
-		e.Status = *u.Status
-	}
-	if u.Progress != nil {
-		e.Progress = *u.Progress
-	}
-	if u.Score != nil {
-		e.Score = *u.Score
-	}
-	if u.Repeat != nil {
-		e.Repeat = *u.Repeat
+		e.Progress, e.Score, e.Repeat = saved.Progress, saved.Score, saved.Repeat
 	}
 	e.UpdatedAt = time.Now().Unix()
+	p.collections[mt] = c.withEntry(&e)
 }
 
 // DeleteEntry removes a media from the list.
 func (p *Platform) DeleteEntry(ctx context.Context, mediaID int) error {
-	if p.LoggedIn() {
-		media, _ := p.MediaLite(ctx, mediaID)
-		mt := "ANIME"
-		if media != nil {
-			mt = typeOr(media.Type)
-		}
-		c, err := p.Collection(ctx, mt, false)
-		if err != nil {
-			return err
-		}
-		e := c.Find(mediaID)
-		if e == nil {
-			return nil
-		}
-		if err := p.client.DeleteEntry(ctx, e.ID); err != nil {
-			return err
-		}
-		p.mu.Lock()
-		for _, l := range c.Lists {
-			for i, x := range l.Entries {
-				if x.MediaID == mediaID {
-					l.Entries = append(l.Entries[:i], l.Entries[i+1:]...)
-					break
-				}
-			}
-		}
-		p.mu.Unlock()
-		p.invalidate(mt)
-	} else {
+	session, v := p.state()
+	if v == nil {
 		if _, err := p.db.Write(`DELETE FROM local_list WHERE media_id = ?`, mediaID); err != nil {
 			return err
 		}
+		p.hub.Publish(events.CollectionUpdate, map[string]any{"mediaId": mediaID})
+		return nil
 	}
+	media, _ := p.MediaLite(ctx, mediaID)
+	mt := "ANIME"
+	if media != nil {
+		mt = typeOr(media.Type)
+	}
+	c, err := p.Collection(ctx, mt, false)
+	if err != nil {
+		return err
+	}
+	if now, _ := p.state(); now != session {
+		// Logged out (the token expired) or into another account meanwhile:
+		// c isn't the list the entry was meant to leave.
+		return errors.New("your AniList login changed, please try again")
+	}
+	e := c.Find(mediaID)
+	if e == nil {
+		return nil
+	}
+	if err := p.client.DeleteEntry(ctx, e.ID); err != nil {
+		if errors.Is(err, ErrUnauthorized) {
+			p.expire(session)
+		}
+		return err
+	}
+	p.mu.Lock()
+	if p.session == session {
+		p.invalidateLocked(mt)
+		if c := p.collections[mt]; c != nil {
+			p.collections[mt] = c.without(mediaID)
+		}
+	}
+	p.mu.Unlock()
 	p.hub.Publish(events.CollectionUpdate, map[string]any{"mediaId": mediaID})
 	return nil
 }
 
-// UpdateProgress records that the user finished `episode` of a media. It only
-// ever moves progress forward, and handles status transitions:
-// not in list/planning -> watching, last episode -> completed.
+// UpdateProgress records that the user finished `episode` of a media; see
+// progressUpdate for the rules. It reports whether the list was changed.
 func (p *Platform) UpdateProgress(ctx context.Context, mediaID, episode int) (bool, error) {
 	media, err := p.MediaLite(ctx, mediaID)
 	if err != nil {
@@ -551,50 +661,77 @@ func (p *Platform) UpdateProgress(ctx context.Context, mediaID, episode int) (bo
 	if err != nil {
 		return false, err
 	}
-	entry := c.Find(mediaID)
 	total := 0
 	if media.Episodes != nil {
 		total = *media.Episodes
 	}
-	status := "CURRENT"
-	progress := episode
-	u := EntryUpdate{MediaID: mediaID}
-	now := time.Now()
-	y, mth, d := now.Year(), int(now.Month()), now.Day()
-	today := &FuzzyDate{Year: &y, Month: &mth, Day: &d}
+	u, ok := progressUpdate(c.Find(mediaID), mediaID, episode, total, time.Now())
+	if !ok {
+		return false, nil
+	}
+	if err := p.UpdateEntry(ctx, u); err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
+// progressUpdate works out the list update for having finished `episode` of
+// a media with `total` episodes (0 when unknown), given its list entry (nil
+// when it isn't in the list). ok is false when nothing needs to change.
+//
+// Progress only moves forward: finishing an episode at or before the
+// recorded progress changes nothing, except that a planned show becomes
+// "watching" (keeping its progress). The one exception is watching a
+// completed show again, which starts a rewatch from that episode.
+//
+//	not in list, PLANNING, PAUSED, DROPPED -> CURRENT
+//	COMPLETED, before the last episode     -> REPEATING
+//	reaching the last episode              -> COMPLETED (a rewatch: repeat+1)
+//
+// The start and finish dates are filled in when they are still empty.
+func progressUpdate(entry *ListEntry, mediaID, episode, total int, now time.Time) (u EntryUpdate, ok bool) {
+	u.MediaID = mediaID
+	if episode <= 0 {
+		return u, false
+	}
+	status, progress := "CURRENT", episode
 	if entry != nil {
-		if entry.Status == "COMPLETED" && (total == 0 || episode >= total) {
-			return false, nil
-		}
-		if entry.Status == "COMPLETED" && episode < total {
-			// Rewatching a completed show.
+		switch entry.Status {
+		case "COMPLETED":
+			if total == 0 || episode >= total {
+				return u, false // already finished
+			}
 			status = "REPEATING"
-		} else if entry.Status == "REPEATING" {
+		case "REPEATING":
+			if episode <= entry.Progress {
+				return u, false
+			}
 			status = "REPEATING"
+		case "PLANNING":
+			progress = max(episode, entry.Progress)
+		default: // CURRENT, PAUSED, DROPPED
+			if episode <= entry.Progress {
+				return u, false
+			}
 		}
-		if entry.Progress >= episode && entry.Status != "COMPLETED" && entry.Status != "PLANNING" {
-			return false, nil
-		}
-		if entry.Status == "PLANNING" || entry.Progress == 0 {
-			u.StartedAt = today
-		}
-	} else {
+	}
+	y, m, d := now.Date()
+	month := int(m)
+	today := &FuzzyDate{Year: &y, Month: &month, Day: &d}
+	if entry == nil || (entry.StartedAt.Year == nil && (entry.Status == "PLANNING" || entry.Progress == 0)) {
 		u.StartedAt = today
 	}
-	if total > 0 && episode >= total {
+	if total > 0 && progress >= total {
 		progress = total
 		if entry != nil && entry.Status == "REPEATING" {
 			r := entry.Repeat + 1
 			u.Repeat = &r
 		}
 		status = "COMPLETED"
-		u.CompletedAt = today
+		if entry == nil || entry.CompletedAt.Year == nil {
+			u.CompletedAt = today
+		}
 	}
-	u.Status = &status
-	u.Progress = &progress
-	if err := p.UpdateEntry(ctx, u); err != nil {
-		return false, err
-	}
-	return true, nil
+	u.Status, u.Progress = &status, &progress
+	return u, true
 }

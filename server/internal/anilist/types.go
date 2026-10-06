@@ -254,6 +254,9 @@ type List struct {
 	Entries      []*ListEntry `json:"entries"`
 }
 
+// Collection is a user's list. The Platform shares one Collection between
+// all its readers, so it is never modified in place: withEntry and without
+// return a changed copy instead.
 type Collection struct {
 	Lists []*List `json:"lists"`
 }
@@ -288,6 +291,60 @@ func (c *Collection) Find(mediaID int) *ListEntry {
 		}
 	}
 	return nil
+}
+
+// withEntry returns a copy of c in which e replaces the entry of the same
+// media: in place if its status is unchanged, otherwise moved to the end of
+// the list for its new status. It is added there if c doesn't have it yet.
+// Custom lists keep the entry, with the new data. c is not modified.
+func (c *Collection) withEntry(e *ListEntry) *Collection {
+	out := &Collection{Lists: make([]*List, 0, len(c.Lists)+1)}
+	placed := false
+	var target *List
+	for _, l := range c.Lists {
+		nl := *l
+		nl.Entries = make([]*ListEntry, 0, len(l.Entries)+1)
+		for _, x := range l.Entries {
+			switch {
+			case x.MediaID != e.MediaID:
+				nl.Entries = append(nl.Entries, x)
+			case l.IsCustomList:
+				nl.Entries = append(nl.Entries, e)
+			case !placed && l.Status == e.Status:
+				nl.Entries = append(nl.Entries, e)
+				placed = true
+			}
+		}
+		if target == nil && !l.IsCustomList && l.Status == e.Status {
+			target = &nl
+		}
+		out.Lists = append(out.Lists, &nl)
+	}
+	if !placed {
+		if target == nil {
+			target = &List{Name: listNames[e.Status], Status: e.Status}
+			out.Lists = append(out.Lists, target)
+		}
+		target.Entries = append(target.Entries, e)
+	}
+	return out
+}
+
+// without returns a copy of c without the entries of a media; c is not
+// modified.
+func (c *Collection) without(mediaID int) *Collection {
+	out := &Collection{Lists: make([]*List, 0, len(c.Lists))}
+	for _, l := range c.Lists {
+		nl := *l
+		nl.Entries = make([]*ListEntry, 0, len(l.Entries))
+		for _, x := range l.Entries {
+			if x.MediaID != mediaID {
+				nl.Entries = append(nl.Entries, x)
+			}
+		}
+		out.Lists = append(out.Lists, &nl)
+	}
+	return out
 }
 
 type Viewer struct {
@@ -349,4 +406,26 @@ type EntryUpdate struct {
 	Repeat      *int       `json:"repeat,omitempty"`
 	StartedAt   *FuzzyDate `json:"startedAt,omitempty"`
 	CompletedAt *FuzzyDate `json:"completedAt,omitempty"`
+}
+
+// applyTo sets the fields the update carries on e.
+func (u EntryUpdate) applyTo(e *ListEntry) {
+	if u.Status != nil {
+		e.Status = *u.Status
+	}
+	if u.Progress != nil {
+		e.Progress = *u.Progress
+	}
+	if u.Score != nil {
+		e.Score = *u.Score
+	}
+	if u.Repeat != nil {
+		e.Repeat = *u.Repeat
+	}
+	if u.StartedAt != nil {
+		e.StartedAt = *u.StartedAt
+	}
+	if u.CompletedAt != nil {
+		e.CompletedAt = *u.CompletedAt
+	}
 }

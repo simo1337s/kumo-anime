@@ -16,19 +16,29 @@ import (
 	"github.com/simo1337s/animetest/server/internal/util"
 )
 
-const endpoint = "https://graphql.anilist.co"
+const defaultEndpoint = "https://graphql.anilist.co"
 
 var ErrUnauthorized = errors.New("anilist: invalid or expired token")
 
+var errRateLimited = errors.New("anilist: rate limited, try again in a minute")
+
 // Client is a minimal AniList GraphQL client with rate-limit handling.
 type Client struct {
-	http  *http.Client
-	mu    sync.RWMutex
-	token string
+	http     *http.Client
+	endpoint string
+	mu       sync.RWMutex
+	token    string
 }
 
 func NewClient() *Client {
-	return &Client{http: &http.Client{Timeout: 25 * time.Second}}
+	return &Client{http: &http.Client{Timeout: 25 * time.Second}, endpoint: defaultEndpoint}
+}
+
+// withToken returns a client for the same server that sends token t.
+func (c *Client) withToken(t string) *Client {
+	n := &Client{http: c.http, endpoint: c.endpoint}
+	n.SetToken(t)
+	return n
 }
 
 func (c *Client) SetToken(t string) {
@@ -68,8 +78,9 @@ func (c *Client) query(ctx context.Context, query string, vars map[string]any, o
 	if err != nil {
 		return err
 	}
-	for attempt := 0; attempt < 4; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	const attempts = 4
+	for attempt := 0; attempt < attempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 		if err != nil {
 			return err
 		}
@@ -81,8 +92,7 @@ func (c *Client) query(ctx context.Context, query string, vars map[string]any, o
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
-			if attempt < 2 && ctx.Err() == nil {
-				time.Sleep(time.Second)
+			if attempt < 2 && ctx.Err() == nil && sleepCtx(ctx, time.Second) == nil {
 				continue
 			}
 			return fmt.Errorf("anilist: %w", err)
@@ -91,19 +101,19 @@ func (c *Client) query(ctx context.Context, query string, vars map[string]any, o
 		resp.Body.Close()
 
 		if resp.StatusCode == http.StatusTooManyRequests {
-			wait := 5
-			if ra, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && ra > 0 {
-				wait = ra
+			wait := retryAfter(resp.Header)
+			// Waiting is pointless after the last attempt, or when the
+			// caller's deadline comes first.
+			if attempt == attempts-1 {
+				return errRateLimited
 			}
-			if wait > 65 {
-				wait = 65
+			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait {
+				return errRateLimited
 			}
-			select {
-			case <-time.After(time.Duration(wait) * time.Second):
-				continue
-			case <-ctx.Done():
-				return ctx.Err()
+			if err := sleepCtx(ctx, wait); err != nil {
+				return err
 			}
+			continue
 		}
 
 		var gr gqlResponse
@@ -127,7 +137,29 @@ func (c *Client) query(ctx context.Context, query string, vars map[string]any, o
 		}
 		return nil
 	}
-	return errors.New("anilist: rate limited, try again in a minute")
+	return errRateLimited // not reached: the last attempt always returns
+}
+
+// retryAfter is how long AniList asks us to wait after a 429: Retry-After
+// (in seconds), 5s when it's missing, at most 65s.
+func retryAfter(h http.Header) time.Duration {
+	wait := 5
+	if ra, err := strconv.Atoi(strings.TrimSpace(h.Get("Retry-After"))); err == nil && ra > 0 {
+		wait = min(ra, 65)
+	}
+	return time.Duration(wait) * time.Second
+}
+
+// sleepCtx waits for d, or until ctx is done (returning its error).
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // ---------------------------------------------------------------------------
