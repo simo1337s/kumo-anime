@@ -22,7 +22,7 @@ optdepends=(
     'transmission-gtk: alternative torrent client'
     'discord: rich presence'
 )
-options=('!lto' '!debug' '!strip')
+options=('!lto' '!debug' '!strip' '!buildflags') # pure Go (CGO off): makepkg's C/LD flags don't apply
 install=kumo.install
 
 _root="$(realpath "${startdir}/../..")"
