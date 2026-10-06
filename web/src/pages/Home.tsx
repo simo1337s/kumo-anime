@@ -1,5 +1,5 @@
 import { ArrowDownUp, ChevronLeft, ChevronRight, Download, FolderOpen, FolderSearch, FolderSync, HardDrive, LibraryBig, ListFilter, LogIn, MoreVertical, Puzzle, RefreshCw, Settings2, Sparkles } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { EpisodeCard } from "@/components/EpisodeCard"
 import { LoginDialog } from "@/components/LoginDialog"
@@ -7,6 +7,7 @@ import { MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
 import { PluginSlot } from "@/components/plugins/PluginSlot"
 import { Button, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, EmptyState, IconButton, Skeleton } from "@/components/ui"
 import { api } from "@/lib/api"
+import { usePersisted } from "@/lib/hooks"
 import { usePlay } from "@/lib/play"
 import { useCollection, useScan, useStatus } from "@/lib/queries"
 import { scanStore, useStore } from "@/lib/store"
@@ -16,25 +17,6 @@ import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 type SortKey = "activity" | "title" | "score" | "progress" | "airing"
-
-function usePersisted<T>(key: string, initial: T) {
-    const [v, setV] = useState<T>(() => {
-        try {
-            const raw = localStorage.getItem(key)
-            return raw ? (JSON.parse(raw) as T) : initial
-        } catch {
-            return initial
-        }
-    })
-    useEffect(() => {
-        try {
-            localStorage.setItem(key, JSON.stringify(v))
-        } catch {
-            /* ignore */
-        }
-    }, [key, v])
-    return [v, setV] as const
-}
 
 export default function HomePage() {
     const { data: status } = useStatus()
@@ -104,6 +86,9 @@ export default function HomePage() {
                 loading={isLoading}
                 toolbar={
                     <div className="flex items-center gap-1.5">
+                        <Button size="sm" variant="subtle" className="glass" icon={<HardDrive className="size-4" />} onClick={() => navigate("/local")}>
+                            Local library
+                        </Button>
                         <IconButton label="Library tools" variant="subtle" size="sm" className="glass" onClick={() => navigate("/library")}>
                             <LibraryBig className="size-4" />
                         </IconButton>

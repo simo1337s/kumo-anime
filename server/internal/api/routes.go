@@ -387,8 +387,14 @@ func (s *Server) openPath(r *http.Request) (any, error) {
 		}
 		target = body.URL
 	} else {
-		if _, err := os.Stat(target); err != nil {
+		st, err := os.Stat(target)
+		if err != nil {
 			return nil, badRequest(err.Error())
+		}
+		// Only ever open folders: xdg-open on a file could run it
+		// (.desktop files, scripts).
+		if !st.IsDir() {
+			target = filepath.Dir(target)
 		}
 	}
 	return nil, startDetached("xdg-open", target)

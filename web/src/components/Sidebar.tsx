@@ -4,6 +4,7 @@ import {
     Compass,
     Download,
     FolderSearch,
+    HardDrive,
     Home,
     ListChecks,
     LogIn,
@@ -59,6 +60,7 @@ export function Sidebar() {
 
     const items: Item[] = [
         { to: "/", label: "Home", icon: <Home />, match: p => p === "/" },
+        { to: "/local", label: "Local library", icon: <HardDrive /> },
         { to: "/schedule", label: "Schedule", icon: <CalendarDays /> },
         ...(settings?.manga.enabled !== false ? [{ to: "/manga", label: "Manga", icon: <BookOpen />, match: (p: string) => p.startsWith("/manga") }] : []),
         { to: "/lists", label: "My lists", icon: <ListChecks /> },

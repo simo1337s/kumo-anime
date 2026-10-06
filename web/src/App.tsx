@@ -23,6 +23,8 @@ const TorrentsPage = lazy(() => import("./pages/Torrents"))
 const DownloadsPage = lazy(() => import("./pages/Downloads"))
 const AutoDownloaderPage = lazy(() => import("./pages/AutoDownloader"))
 const LibraryPage = lazy(() => import("./pages/Library"))
+const LocalLibraryPage = lazy(() => import("./pages/LocalLibrary"))
+const AuthCallbackPage = lazy(() => import("./pages/AuthCallback"))
 const ExtensionsPage = lazy(() => import("./pages/Extensions"))
 const SettingsPage = lazy(() => import("./pages/Settings"))
 const MangaPage = lazy(() => import("./pages/Manga"))
@@ -85,6 +87,8 @@ export default function App() {
                             <Route path="/downloads" element={<DownloadsPage />} />
                             <Route path="/auto-downloader" element={<AutoDownloaderPage />} />
                             <Route path="/library" element={<LibraryPage />} />
+                            <Route path="/local" element={<LocalLibraryPage />} />
+                            <Route path="/auth/callback" element={<AuthCallbackPage />} />
                             <Route path="/extensions" element={<ExtensionsPage />} />
                             <Route path="/settings" element={<SettingsPage />} />
                             <Route path="/manga" element={<MangaPage />} />
