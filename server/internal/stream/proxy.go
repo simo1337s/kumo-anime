@@ -131,9 +131,17 @@ func ServeProxy(w http.ResponseWriter, r *http.Request) {
 
 	ctype := resp.Header.Get("Content-Type")
 	path := strings.ToLower(tu.Path)
+	if resp.StatusCode >= 400 && (format != "" || strings.HasSuffix(path, ".m3u8") || strings.Contains(strings.ToLower(ctype), "mpegurl")) {
+		// Pass errors on as errors: an HTML error page rewritten into a
+		// "playlist" or "subtitle" would hide the real cause (an expired
+		// link, a missing Referer…) behind a parse error.
+		http.Error(w, "upstream: "+resp.Status, resp.StatusCode)
+		return
+	}
 	isPlaylist := strings.Contains(strings.ToLower(ctype), "mpegurl") || strings.HasSuffix(path, ".m3u8")
-	if !isPlaylist && resp.ContentLength >= 0 && resp.ContentLength < 4<<20 && format == "" {
-		// Some hosts serve playlists as text/plain or octet-stream.
+	if !isPlaylist && resp.StatusCode < 400 && format == "" {
+		// Some hosts serve playlists as text/plain or octet-stream (also
+		// gzipped or chunked, so the length is often unknown).
 		peek := bufio.NewReader(resp.Body)
 		head, _ := peek.Peek(7)
 		if string(head) == "#EXTM3U" {

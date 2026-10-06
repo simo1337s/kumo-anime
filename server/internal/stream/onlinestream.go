@@ -187,7 +187,9 @@ func (s *Service) Episodes(ctx context.Context, provider string, media *anilist.
 		res.Episodes = append(res.Episodes, Episode{Number: e.Number, ID: e.ID, Title: e.Title})
 	}
 	sort.SliceStable(res.Episodes, func(i, j int) bool { return res.Episodes[i].Number < res.Episodes[j].Number })
-	s.db.SetCache(cacheKey, res, time.Hour)
+	if len(res.Episodes) > 0 { // don't remember a temporary failure for an hour
+		s.db.SetCache(cacheKey, res, time.Hour)
+	}
 	return res, nil
 }
 

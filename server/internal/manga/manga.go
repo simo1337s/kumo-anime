@@ -134,7 +134,9 @@ func (s *Service) Chapters(ctx context.Context, provider string, media *anilist.
 		return chapters[i].Index < chapters[j].Index
 	})
 	res := &ChaptersResult{Provider: provider, Mapping: m, Chapters: chapters}
-	s.db.SetCache(key, res, time.Hour)
+	if len(chapters) > 0 { // an empty list is often a temporary provider hiccup
+		s.db.SetCache(key, res, time.Hour)
+	}
 	return res, nil
 }
 
@@ -153,7 +155,11 @@ func (s *Service) Pages(ctx context.Context, provider, chapterID string) ([]exte
 		return nil, err
 	}
 	sort.SliceStable(pages, func(i, j int) bool { return pages[i].Index < pages[j].Index })
-	s.db.SetCache(key, pages, 6*time.Hour)
+	// Page URLs often expire quickly (MangaDex@Home links last ~15 minutes),
+	// so only keep them while a chapter is likely still being read.
+	if len(pages) > 0 {
+		s.db.SetCache(key, pages, 10*time.Minute)
+	}
 	return pages, nil
 }
 
