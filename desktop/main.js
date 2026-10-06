@@ -12,25 +12,60 @@ const os = require("node:os")
 const path = require("node:path")
 const http = require("node:http")
 
-const APP_ID = "kumo"
+const isWindows = process.platform === "win32"
+
+// On Windows this is the AppUserModelID, which must match "appId" in
+// electron-builder.yml: the installer's shortcuts carry it, and the taskbar
+// groups the window with them.
+const APP_ID = isWindows ? "app.kumo.desktop" : "kumo"
 app.setName("Kumo")
 app.setAppUserModelId?.(APP_ID)
-// Smooth video and scrolling on Linux.
-app.commandLine.appendSwitch("enable-features", "VaapiVideoDecodeLinuxGL,VaapiVideoDecoder")
-app.commandLine.appendSwitch("ignore-gpu-blocklist")
+if (process.platform === "linux") {
+    // Smooth video and scrolling on Linux.
+    app.commandLine.appendSwitch("enable-features", "VaapiVideoDecodeLinuxGL,VaapiVideoDecoder")
+    app.commandLine.appendSwitch("ignore-gpu-blocklist")
+}
+if (isWindows && process.env.LOCALAPPDATA) {
+    // Electron would keep the window's browser data (caches, the AniList
+    // login window's cookies) in %APPDATA%\Kumo, which is the server's data
+    // folder on Windows: keep it apart, with Kumo's other local files.
+    app.setPath("userData", path.join(process.env.LOCALAPPDATA, "Kumo", "electron"))
+}
 
-const runtimeDir = path.join(process.env.XDG_RUNTIME_DIR || os.tmpdir(), "kumo")
+const runtimeDir = serverRuntimeDir()
 let serverProc = null
 let mainWindow = null
 let baseUrl = null
 
-function findServerBinary() {
-    const candidates = [
+// Where the server writes server.json and the shell token: the same folder
+// as its config.RuntimeDir().
+function serverRuntimeDir() {
+    if (isWindows) {
+        const local = process.env.LOCALAPPDATA
+        return local ? path.join(local, "Kumo", "run") : path.join(os.tmpdir(), "kumo")
+    }
+    return path.join(process.env.XDG_RUNTIME_DIR || os.tmpdir(), "kumo")
+}
+
+function serverCandidates() {
+    if (isWindows) {
+        return [
+            process.env.KUMO_SERVER,
+            path.join(process.resourcesPath, "kumo.exe"), // installed or portable app: resources\kumo.exe
+            path.join(__dirname, "..", "dist", "windows", "kumo.exe"), // development checkout
+        ]
+    }
+    return [
         process.env.KUMO_SERVER,
         path.join(__dirname, "..", "kumo"), // /usr/lib/kumo/app -> /usr/lib/kumo/kumo
         path.join(__dirname, "..", "dist", "kumo"), // development checkout
         "/usr/lib/kumo/kumo",
-    ].filter(Boolean)
+    ]
+}
+
+function findServerBinary() {
+    const candidates = serverCandidates().filter(Boolean)
+    // X_OK is only an existence check on Windows.
     return candidates.find(p => {
         try {
             fs.accessSync(p, fs.constants.X_OK)
@@ -86,8 +121,16 @@ async function existingServer() {
 function startServer() {
     return new Promise((resolve, reject) => {
         const bin = findServerBinary()
-        if (!bin) return reject(new Error("Could not find the Kumo server binary (kumo). Reinstall the package or set KUMO_SERVER."))
-        serverProc = spawn(bin, ["--desktop"], { stdio: ["ignore", "pipe", "pipe"], env: process.env })
+        if (!bin) {
+            const msg = isWindows
+                ? "Could not find the Kumo server (kumo.exe). Reinstall Kumo or set KUMO_SERVER."
+                : "Could not find the Kumo server binary (kumo). Reinstall the package or set KUMO_SERVER."
+            return reject(new Error(msg))
+        }
+        // windowsHide: on Windows the server, and the ffmpeg, ffprobe and bash
+        // processes it starts (they share its console), never pop up a console
+        // window. Elsewhere it does nothing.
+        serverProc = spawn(bin, ["--desktop"], { stdio: ["ignore", "pipe", "pipe"], env: process.env, windowsHide: true })
         let resolved = false
         const onData = buf => {
             const text = buf.toString()
@@ -174,6 +217,9 @@ function createWindow() {
         if (input.type === "keyDown" && input.control && input.key.toLowerCase() === "r") mainWindow.webContents.reload()
     })
     mainWindow.on("closed", () => (mainWindow = null))
+    // Windows is shutting down or signing out, which stops the server too:
+    // that isn't worth an error box (the event only exists on Windows).
+    mainWindow.on("query-session-end", () => (app.isQuitting = true))
     mainWindow.loadURL(baseUrl)
 }
 
@@ -255,6 +301,7 @@ if (!app.requestSingleInstanceLock()) {
     app.on("window-all-closed", () => app.quit())
     app.on("before-quit", () => {
         app.isQuitting = true
+        // Windows has no signals: there this ends the server at once.
         if (serverProc) serverProc.kill("SIGTERM")
     })
 }
