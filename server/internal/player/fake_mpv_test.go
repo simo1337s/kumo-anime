@@ -53,16 +53,31 @@ func startFakeMpv(path string, tracks []Track, onExit func()) (*Mpv, *fakeMpv, e
 		return nil, nil, err
 	}
 	defer ln.Close()
+	// Accept while dialing: a named pipe listener only lets a client in once
+	// Accept runs (until then the pipe is "busy").
+	type accepted struct {
+		conn net.Conn
+		err  error
+	}
+	acc := make(chan accepted, 1)
+	go func() {
+		conn, err := ln.Accept()
+		acc <- accepted{conn, err}
+	}()
 	client, err := util.DialIPC(path, 5*time.Second)
 	if err != nil {
+		_ = ln.Close() // ends the Accept
+		if a := <-acc; a.conn != nil {
+			_ = a.conn.Close()
+		}
 		return nil, nil, err
 	}
-	server, err := ln.Accept()
-	if err != nil {
+	a := <-acc
+	if a.err != nil {
 		_ = client.Close()
-		return nil, nil, err
+		return nil, nil, a.err
 	}
-	f := &fakeMpv{conn: server, tracks: tracks, onExit: onExit, exited: make(chan struct{})}
+	f := &fakeMpv{conn: a.conn, tracks: tracks, onExit: onExit, exited: make(chan struct{})}
 	go f.serve()
 	return newMpv(client, path, f.exit), f, nil
 }

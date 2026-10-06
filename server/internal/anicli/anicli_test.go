@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -403,8 +402,12 @@ func TestMenuShim(t *testing.T) {
 		{"rofi", "-p", "Select Quality: ", "quality"},
 	} {
 		dump := t.TempDir()
-		cmd := exec.Command(filepath.Join(h.drv.shimDir, c.menu), "-sort", c.flag, c.prompt, "-multi-select")
-		cmd.Env = append(os.Environ(), "KUMO_DUMP_DIR="+dump)
+		// Run like ani-cli runs it (on Windows: with Git's bash).
+		cmd, err := scriptCommand(context.Background(), filepath.Join(h.drv.shimDir, c.menu), "-sort", c.flag, c.prompt, "-multi-select")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd.Env = append(os.Environ(), "KUMO_DUMP_DIR="+shellPath(dump))
 		cmd.Stdin = strings.NewReader("next\nreplay\nquit\n")
 		if out, err := cmd.Output(); err == nil || len(out) > 0 {
 			t.Errorf("%s %q: selected %q (%v)", c.menu, c.prompt, out, err)

@@ -153,12 +153,15 @@ func (h *HLS) spawn(key, file string, p *Probe, pl plan, start float64) (*hlsSes
 		// A keyframe where each segment starts, so segments play on their own.
 		args = append(args, "-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", hlsSegmentSeconds))
 	}
+	// Paths with "/": ffmpeg puts init.mp4 next to the playlist only when it
+	// finds one in its path (with Windows' "\" it lands in the working
+	// directory instead).
 	args = append(args,
 		"-f", "hls", "-hls_time", strconv.Itoa(hlsSegmentSeconds), "-hls_playlist_type", "event",
 		"-hls_segment_type", "fmp4", "-hls_fmp4_init_filename", "init.mp4",
-		"-hls_segment_filename", filepath.Join(dir, "seg_%05d.m4s"),
+		"-hls_segment_filename", filepath.ToSlash(filepath.Join(dir, "seg_%05d.m4s")),
 		"-hls_flags", "independent_segments+temp_file",
-		filepath.Join(dir, "index.m3u8"))
+		filepath.ToSlash(filepath.Join(dir, "index.m3u8")))
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, cfg.Transcode.FfmpegPath, args...)
 	s := &hlsSession{id: id, key: key, dir: dir, cancel: cancel, cmd: cmd, stderr: &headWriter{max: 8 << 10}, done: make(chan struct{}), lastUse: time.Now(), requested: -1}
@@ -194,7 +197,7 @@ func (h *HLS) Serve(w http.ResponseWriter, r *http.Request, id, name string) {
 	}
 	s.touch()
 	if name == "index.m3u8" {
-		b, err := os.ReadFile(filepath.Join(s.dir, name))
+		b, err := util.ReadFileShared(filepath.Join(s.dir, name))
 		if err != nil {
 			http.Error(w, "the stream isn't ready", http.StatusNotFound)
 			return
@@ -214,7 +217,7 @@ func (h *HLS) Serve(w http.ResponseWriter, r *http.Request, id, name string) {
 		s.mu.Unlock()
 		s.throttle()
 	}
-	f, err := os.Open(filepath.Join(s.dir, name))
+	f, err := util.OpenShared(filepath.Join(s.dir, name))
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -374,7 +377,8 @@ func (s *hlsSession) failed() bool {
 // segments counts the segments in the playlist so far, and reports whether
 // it's complete.
 func (s *hlsSession) segments() (int, bool) {
-	b, err := os.ReadFile(filepath.Join(s.dir, "index.m3u8"))
+	// Shared: ffmpeg must be able to replace the playlist while it's read.
+	b, err := util.ReadFileShared(filepath.Join(s.dir, "index.m3u8"))
 	if err != nil {
 		return 0, false
 	}
