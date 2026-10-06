@@ -32,6 +32,7 @@ export function TorrentPanel({ entry }: { entry: EntryView }) {
     }, [])
 
     const results = search.data ?? []
+    const providerName = (id: string) => providers?.find(p => p.id === id)?.name ?? id
     const key = (r: TorrentResult) => r.infoHash || r.link || r.name
     const chosen = useMemo(() => results.filter(r => selected.has(key(r))), [results, selected])
 
@@ -52,7 +53,14 @@ export function TorrentPanel({ entry }: { entry: EntryView }) {
             <div className="card flex flex-wrap items-end gap-3 p-4">
                 <label className="flex w-48 flex-col gap-1.5">
                     <span className="text-xs font-medium text-subtle">Provider</span>
-                    <Select value={provider} onChange={setProvider} options={(providers ?? []).map(p => ({ value: p.id, label: p.name + (p.extension ? " (extension)" : "") }))} />
+                    <Select
+                        value={provider}
+                        onChange={setProvider}
+                        options={[
+                            { value: "all", label: `All providers${providers ? ` (${providers.length})` : ""}` },
+                            ...(providers ?? []).map(p => ({ value: p.id, label: p.name + (p.extension ? " (extension)" : "") })),
+                        ]}
+                    />
                 </label>
                 <label className="flex w-28 flex-col gap-1.5">
                     <span className="text-xs font-medium text-subtle">Episode</span>
@@ -125,6 +133,7 @@ export function TorrentPanel({ entry }: { entry: EntryView }) {
                                         {r.name}
                                     </p>
                                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                        {provider === "all" && r.provider && <Badge>{providerName(r.provider)}</Badge>}
                                         {r.releaseGroup && <Badge tone="brand">{r.releaseGroup}</Badge>}
                                         {r.resolution && <Badge>{r.resolution}</Badge>}
                                         {r.isBatch && <Badge tone="blue">Batch</Badge>}

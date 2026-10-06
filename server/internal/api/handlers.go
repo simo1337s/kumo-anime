@@ -626,25 +626,35 @@ func (s *Server) torrentSearch(r *http.Request) (any, error) {
 	if err := decode(r, &body); err != nil {
 		return nil, err
 	}
-	p, err := s.app.Torrents.Provider(body.Provider)
-	if err != nil {
-		return nil, err
-	}
+	var search func(ctx context.Context, p torrent.Provider) ([]*torrent.SearchResult, error)
 	if body.MediaID <= 0 {
 		if body.Query == "" {
 			return nil, badRequest("type something to search")
 		}
-		return p.Search(r.Context(), body.Query)
+		search = func(ctx context.Context, p torrent.Provider) ([]*torrent.SearchResult, error) {
+			return p.Search(ctx, body.Query)
+		}
+	} else {
+		media, err := s.app.Platform.MediaLite(r.Context(), body.MediaID)
+		if err != nil {
+			return nil, err
+		}
+		q := torrent.SmartQuery{Media: media, Query: body.Query, Episode: body.Episode, Batch: body.Batch, Resolution: body.Resolution}
+		if meta, err := s.app.Meta.Get(r.Context(), media.ID); err == nil {
+			q.AnidbAID = meta.Mappings.AnidbID
+		}
+		search = func(ctx context.Context, p torrent.Provider) ([]*torrent.SearchResult, error) {
+			return p.SmartSearch(ctx, q)
+		}
 	}
-	media, err := s.app.Platform.MediaLite(r.Context(), body.MediaID)
+	if body.Provider == allProviders {
+		return s.searchAllProviders(r.Context(), search)
+	}
+	p, err := s.app.Torrents.Provider(body.Provider)
 	if err != nil {
 		return nil, err
 	}
-	q := torrent.SmartQuery{Media: media, Query: body.Query, Episode: body.Episode, Batch: body.Batch, Resolution: body.Resolution}
-	if meta, err := s.app.Meta.Get(r.Context(), media.ID); err == nil {
-		q.AnidbAID = meta.Mappings.AnidbID
-	}
-	res, err := p.SmartSearch(r.Context(), q)
+	res, err := search(r.Context(), p)
 	if err != nil {
 		return nil, err
 	}
@@ -663,10 +673,6 @@ func (s *Server) torrentDownload(r *http.Request) (any, error) {
 	if err := decode(r, &body); err != nil {
 		return nil, err
 	}
-	p, err := s.app.Torrents.Provider(body.Provider)
-	if err != nil {
-		return nil, err
-	}
 	title := ""
 	if body.MediaID > 0 {
 		if media, err := s.app.Platform.MediaLite(r.Context(), body.MediaID); err == nil {
@@ -675,6 +681,15 @@ func (s *Server) torrentDownload(r *http.Request) (any, error) {
 	}
 	var uris []string
 	for _, res := range body.Results {
+		// Results of a multi-provider search each come from their own provider.
+		id := body.Provider
+		if res.Provider != "" && (id == allProviders || id == "") {
+			id = res.Provider
+		}
+		p, err := s.app.Torrents.Provider(id)
+		if err != nil {
+			return nil, err
+		}
 		m, err := p.Magnet(r.Context(), res)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", res.Name, err)

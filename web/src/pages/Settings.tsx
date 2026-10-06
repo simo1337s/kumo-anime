@@ -670,7 +670,7 @@ function TorrentProviderSection({ draft, set }: SectionProps) {
     return (
         <Group title="Search">
             <Row label="Default torrent provider" help="Install more from Extensions › Marketplace">
-                <Select className="w-56" value={draft.torrent.defaultProvider} onChange={v => set("torrent", { defaultProvider: v })} options={(providers ?? []).map(p => ({ value: p.id, label: p.name + (p.extension ? " (extension)" : "") }))} />
+                <Select className="w-56" value={draft.torrent.defaultProvider} onChange={v => set("torrent", { defaultProvider: v })} options={[{ value: "all", label: "All providers" }, ...(providers ?? []).map(p => ({ value: p.id, label: p.name + (p.extension ? " (extension)" : "") }))]} />
             </Row>
             <Row label="Preferred resolution">
                 <Select
