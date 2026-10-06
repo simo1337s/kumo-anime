@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -337,12 +336,7 @@ func (s *Server) serverLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func startDetached(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	go func() { _ = cmd.Wait() }()
-	return nil
+	return util.Detach(name, args...)
 }
 
 func (s *Server) listDirs(r *http.Request) (any, error) {

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -239,11 +240,13 @@ func FirstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// Detach starts a command that outlives the request that launched it.
+// Detach starts a command that outlives the request that launched it. It
+// gets its own session so Ctrl+C on Kumo's terminal doesn't also close it.
 func Detach(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
 	}

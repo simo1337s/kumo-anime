@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -159,12 +158,11 @@ func (m *Manager) StartClient(ctx context.Context) error {
 	if _, ok := util.LookPath(parts[0]); !ok {
 		return fmt.Errorf("torrent client executable not found: %s", parts[0])
 	}
-	cmd := exec.Command(parts[0], parts[1:]...)
-	if err := cmd.Start(); err != nil {
+	if err := util.Detach(parts[0], parts[1:]...); err != nil {
 		return err
 	}
-	go func() { _ = cmd.Wait() }()
-	deadline := time.Now().Add(20 * time.Second)
+	// Flatpak apps can take a while on their first start.
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(time.Second)
 		if st := m.Status(ctx); st.Connected {

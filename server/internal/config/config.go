@@ -219,7 +219,7 @@ func Defaults() Settings {
 			PreferredResolution: "1080",
 			AutoDownloadMinutes: 20,
 		},
-		Qbittorrent:  TorrentClientConfig{Host: "127.0.0.1", Port: 8081, Username: "admin", Executable: "/usr/bin/qbittorrent"},
+		Qbittorrent:  TorrentClientConfig{Host: "127.0.0.1", Port: 8081, Username: "admin", Executable: findQbittorrent(home)},
 		Transmission: TorrentClientConfig{Host: "127.0.0.1", Port: 9091, Executable: "/usr/bin/transmission-gtk"},
 		Manga:        MangaSettings{Enabled: true, ReadingMode: "long-strip", Direction: "ltr"},
 		Anilist:      AnilistSettings{ClientID: DefaultAnilistClient, HideAdult: true},
@@ -360,6 +360,21 @@ func sanitize(s Settings) Settings {
 		s.Playback.DefaultPlayer = "mpv"
 	}
 	return s
+}
+
+// findQbittorrent prefers a native qBittorrent and falls back to the
+// Flatpak export (system-wide or per-user install).
+func findQbittorrent(home string) string {
+	for _, p := range []string{
+		"/usr/bin/qbittorrent",
+		"/var/lib/flatpak/exports/bin/org.qbittorrent.qBittorrent",
+		filepath.Join(home, ".local/share/flatpak/exports/bin/org.qbittorrent.qBittorrent"),
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return "/usr/bin/qbittorrent"
 }
 
 // LibraryDirs returns the main library dir followed by the extra ones.
