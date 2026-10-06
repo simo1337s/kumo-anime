@@ -643,7 +643,6 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
 
     const total = duration || 0
     const pct = total > 0 ? (time / total) * 100 : 0
-    const nearEnd = total > 0 && time / total > 0.88
     const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2
 
     return (
@@ -751,16 +750,11 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                 </div>
             </div>
 
-            {/* skip / next */}
+            {/* skip (the next episode is in the controls, and n) */}
             <div className="absolute right-8 bottom-32 flex flex-col items-end gap-3">
                 {currentSkip && (
                     <button onClick={() => seekTo(currentSkip.end)} className="flex h-11 items-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black shadow-2xl rise-in hover:bg-white/90">
                         <FastForward className="size-4 fill-black" /> Skip {currentSkip.type.includes("ed") ? "ending" : currentSkip.type === "recap" ? "recap" : "opening"}
-                    </button>
-                )}
-                {nearEnd && nextEp && (
-                    <button onClick={playNext} className="flex h-11 items-center gap-2 rounded-xl bg-brand px-5 text-sm font-semibold text-white shadow-2xl rise-in hover:brightness-110">
-                        <SkipForward className="size-4 fill-white" /> Episode {nextEp.episode}
                     </button>
                 )}
             </div>
