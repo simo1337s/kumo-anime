@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simo1337s/animetest/server/internal/anilist"
 )
@@ -215,5 +216,20 @@ func TestMatchMovie(t *testing.T) {
 	eps, err := h.drv.Episodes(context.Background(), m.Mapping.Query, m.Mapping.Index, "sub")
 	if err != nil || len(eps) != 1 || eps[0] != "1" {
 		t.Fatalf("episodes: %q %v", eps, err)
+	}
+}
+
+func TestSearchCache(t *testing.T) {
+	d := &Driver{searchTTL: time.Minute}
+	d.searches = map[string]cachedSearch{"sub\x00Frieren": {res: []Result{{Index: 1, Title: "Sousou no Frieren", Episodes: 28}}, at: time.Now()}}
+	// A cached search doesn't run ani-cli (there is none configured here).
+	res, err := d.Search(context.Background(), "  Frieren ", "sub")
+	if err != nil || len(res) != 1 || res[0].Title != "Sousou no Frieren" {
+		t.Fatalf("cached search: %v %v", res, err)
+	}
+	// Callers may change the returned slice without touching the cache.
+	res[0].Title = "changed"
+	if again, _ := d.Search(context.Background(), "Frieren", "sub"); again[0].Title != "Sousou no Frieren" {
+		t.Fatal("cache was modified through a returned slice")
 	}
 }

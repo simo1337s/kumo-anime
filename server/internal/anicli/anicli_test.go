@@ -110,6 +110,7 @@ func newHarnessWith(t *testing.T, script string, catalog ...string) *harness {
 		t.Fatal(err)
 	}
 	h.drv, h.db = New(store), d
+	h.drv.searchTTL = 0 // the tests change what ani-cli lists between searches
 	return h
 }
 

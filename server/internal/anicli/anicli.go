@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,14 +75,26 @@ type Driver struct {
 	timeout  time.Duration // for one ani-cli run
 	once     sync.Once
 	initErr  error
+
+	// Search results are reused for a while: matches are checked against
+	// a fresh search on every play, and each ani-cli search takes seconds.
+	searchTTL time.Duration
+	cacheMu   sync.Mutex
+	searches  map[string]cachedSearch
+}
+
+type cachedSearch struct {
+	res []Result
+	at  time.Time
 }
 
 func New(s *config.Store) *Driver {
 	return &Driver{
-		settings: s,
-		shimDir:  filepath.Join(config.RuntimeDir(), "anicli-shims"),
-		histDir:  filepath.Join(config.DataDir(), "ani-cli"),
-		timeout:  90 * time.Second,
+		settings:  s,
+		shimDir:   filepath.Join(config.RuntimeDir(), "anicli-shims"),
+		histDir:   filepath.Join(config.DataDir(), "ani-cli"),
+		timeout:   90 * time.Second,
+		searchTTL: 10 * time.Minute,
 	}
 }
 
@@ -292,8 +305,31 @@ var (
 	reEpCount    = regexp.MustCompile(`\((\d+)\s+episodes?\)\s*$`)
 )
 
-// Search returns the search results ani-cli shows for a query.
+// Search returns the search results ani-cli shows for a query (from a
+// short-lived cache when the same search ran recently).
 func (d *Driver) Search(ctx context.Context, query, mode string) ([]Result, error) {
+	key := mode + "\x00" + cleanQuery(query)
+	if d.searchTTL > 0 {
+		d.cacheMu.Lock()
+		c, ok := d.searches[key]
+		d.cacheMu.Unlock()
+		if ok && time.Since(c.at) < d.searchTTL {
+			return slices.Clone(c.res), nil
+		}
+	}
+	res, err := d.search(ctx, query, mode)
+	if err == nil && len(res) > 0 && d.searchTTL > 0 {
+		d.cacheMu.Lock()
+		if d.searches == nil || len(d.searches) > 500 {
+			d.searches = map[string]cachedSearch{}
+		}
+		d.searches[key] = cachedSearch{res: slices.Clone(res), at: time.Now()}
+		d.cacheMu.Unlock()
+	}
+	return res, err
+}
+
+func (d *Driver) search(ctx context.Context, query, mode string) ([]Result, error) {
 	query = strings.TrimSpace(query)
 	q, err := queryArg(query)
 	if err != nil {
