@@ -264,10 +264,11 @@ func start(cmd *exec.Cmd) error {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	detachAttrs(cmd)
-	if err := cmd.Start(); err != nil {
+	started, err := startDetached(cmd)
+	if err != nil {
 		return err
 	}
-	go func() { _ = cmd.Wait() }()
+	go func() { _ = started.Wait() }()
 	return nil
 }
 

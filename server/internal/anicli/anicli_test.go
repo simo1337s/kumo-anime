@@ -86,6 +86,9 @@ func newHarness(t *testing.T, catalog ...string) *harness {
 
 func newHarnessWith(t *testing.T, script string, catalog ...string) *harness {
 	t.Helper()
+	if _, err := scriptCommand(context.Background(), script); err != nil {
+		t.Skip("can't run ani-cli here:", err) // Windows without Git for Windows
+	}
 	tmp := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", tmp)
 	t.Setenv("LOCALAPPDATA", tmp) // the runtime dir on Windows

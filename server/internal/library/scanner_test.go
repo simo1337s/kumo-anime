@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -74,6 +75,9 @@ func TestScanFollowsSymlinks(t *testing.T) {
 	other := filepath.Join(base, "other", "Bocchi")
 	touch(t, filepath.Join(other, "Bocchi the Rock! - 01.mkv"))
 	if err := os.Symlink(other, filepath.Join(real, "Bocchi")); err != nil { // symlinked show folder
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows only lets administrators (or Developer Mode) make symlinks:", err)
+		}
 		t.Fatal(err)
 	}
 	if err := os.Symlink(real, filepath.Join(real, "Frieren", "loop")); err != nil { // loop back to the root

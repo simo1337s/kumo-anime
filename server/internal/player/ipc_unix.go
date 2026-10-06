@@ -12,3 +12,5 @@ import (
 func ipcAddress(name string) string {
 	return filepath.Join(config.RuntimeDir(), name+".sock")
 }
+
+func mpvProgram(path string) string { return path }

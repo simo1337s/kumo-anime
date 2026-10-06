@@ -129,8 +129,11 @@ function startServer() {
         }
         // windowsHide: on Windows the server, and the ffmpeg, ffprobe and bash
         // processes it starts (they share its console), never pop up a console
-        // window. Elsewhere it does nothing.
-        serverProc = spawn(bin, ["--desktop"], { stdio: ["ignore", "pipe", "pipe"], env: process.env, windowsHide: true })
+        // window. Elsewhere it does nothing. Windows has no signals to ask the
+        // server to stop: there it stops when its input closes (see
+        // before-quit).
+        const args = isWindows ? ["--desktop", "--exit-with-stdin"] : ["--desktop"]
+        serverProc = spawn(bin, args, { stdio: [isWindows ? "pipe" : "ignore", "pipe", "pipe"], env: process.env, windowsHide: true })
         let resolved = false
         const onData = buf => {
             const text = buf.toString()
@@ -299,9 +302,24 @@ if (!app.requestSingleInstanceLock()) {
     })
     app.whenReady().then(boot)
     app.on("window-all-closed", () => app.quit())
-    app.on("before-quit", () => {
+    app.on("before-quit", event => {
         app.isQuitting = true
-        // Windows has no signals: there this ends the server at once.
-        if (serverProc) serverProc.kill("SIGTERM")
+        if (!serverProc) return
+        if (!isWindows) {
+            serverProc.kill("SIGTERM")
+            return
+        }
+        // Windows: closing its input lets the server stop what it started
+        // (mpv, ffmpeg) and save; quit once it's gone, or after 5 seconds.
+        // kill() would end it at once.
+        event.preventDefault()
+        const proc = serverProc
+        const timer = setTimeout(() => proc.kill(), 5000)
+        proc.once("exit", () => {
+            clearTimeout(timer)
+            serverProc = null
+            app.quit()
+        })
+        proc.stdin?.end()
     })
 }

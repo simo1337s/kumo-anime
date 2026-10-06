@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"github.com/simo1337s/animetest/server/internal/api"
 	"github.com/simo1337s/animetest/server/internal/app"
 	"github.com/simo1337s/animetest/server/internal/config"
+	"github.com/simo1337s/animetest/server/internal/util"
 	"github.com/simo1337s/animetest/server/internal/webui"
 )
 
@@ -25,11 +27,19 @@ func main() {
 		webUI   = flag.Bool("web-ui", false, "force-enable the browser web UI for this run")
 		desktop = flag.Bool("desktop", false, "started by the desktop app")
 		version = flag.Bool("version", false, "print the version")
+		// Windows has no signals to ask a program to stop: the desktop app
+		// closes the server's input instead.
+		exitWithStdin = flag.Bool("exit-with-stdin", false, "stop when standard input closes")
 	)
 	flag.Parse()
 	if *version {
 		fmt.Println(config.AppName, config.AppVersion)
 		return
+	}
+	// Whatever Kumo starts (ffmpeg, ani-cli, mpv) ends with it, even when
+	// it's killed.
+	if err := util.BindChildren(); err != nil {
+		log.Printf("child processes won't end with Kumo: %v", err)
 	}
 	if err := os.MkdirAll(*dataDir, 0o700); err != nil {
 		log.Fatal(err)
@@ -70,6 +80,12 @@ func main() {
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	if *exitWithStdin {
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			sig <- syscall.SIGTERM
+		}()
+	}
 	<-sig
 	log.Printf("shutting down…")
 	srv.Shutdown()

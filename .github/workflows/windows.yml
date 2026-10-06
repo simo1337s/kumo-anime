@@ -106,9 +106,11 @@ jobs:
         working-directory: server
         run: go vet ./...
 
+      # A hang fails after 8 minutes with every goroutine's stack, instead of
+      # Go's default 10.
       - name: go test
         working-directory: server
-        run: go test -count 1 ./...
+        run: go test -count 1 -timeout 8m ./...
 
       - name: Build kumo.exe
         working-directory: server

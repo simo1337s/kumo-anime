@@ -11,10 +11,17 @@ import (
 	"time"
 )
 
+// BindChildren is for Windows; here a killed Kumo's children end with the
+// desktop app's process group, or keep running like any orphan.
+func BindChildren() error { return nil }
+
 func detachAttrs(cmd *exec.Cmd) {
 	// A session of its own, so Ctrl+C on Kumo's terminal doesn't close it.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
+
+// startDetached starts a detached command, and returns the one started.
+func startDetached(cmd *exec.Cmd) (*exec.Cmd, error) { return cmd, cmd.Start() }
 
 // OwnProcessGroup makes cmd the leader of a new process group, so that
 // KillGroup stops it and everything it started.

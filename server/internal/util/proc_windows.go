@@ -10,18 +10,64 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
 )
 
 const (
-	createNewProcessGroup = 0x00000200
-	detachedProcess       = 0x00000008
-	processSuspendResume  = 0x0800
+	createNewProcessGroup  = 0x00000200
+	detachedProcess        = 0x00000008
+	createBreakawayFromJob = 0x01000000
+	processSuspendResume   = 0x0800
 )
 
+// BindChildren puts Kumo in a job object that ends every process in it when
+// it closes, which it does when Kumo exits, also when it's killed (the
+// desktop app can't do anything else on Windows) or crashes: the ffmpeg,
+// ani-cli and mpv processes it started end with it. The handle stays open
+// for as long as Kumo runs. Detached programs (a torrent client, Explorer)
+// break away from the job.
+func BindChildren() error {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return err
+	}
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | windows.JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+		},
+	}
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+		_ = windows.CloseHandle(job)
+		return err
+	}
+	if err := windows.AssignProcessToJobObject(job, windows.CurrentProcess()); err != nil {
+		_ = windows.CloseHandle(job)
+		return err
+	}
+	return nil
+}
+
 func detachAttrs(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess | createBreakawayFromJob}
+}
+
+// startDetached starts a detached command, and returns the one started.
+// Breaking away from Kumo's job fails when a job Kumo runs in doesn't allow
+// it: then it starts in the job.
+func startDetached(cmd *exec.Cmd) (*exec.Cmd, error) {
+	err := cmd.Start()
+	if err == nil {
+		return cmd, nil
+	}
+	retry := exec.Command(cmd.Path, cmd.Args[1:]...)
+	retry.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess}
+	if retry.Start() == nil {
+		return retry, nil
+	}
+	return nil, err
 }
 
 // OwnProcessGroup makes cmd the root of a process tree that KillGroup stops

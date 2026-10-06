@@ -119,7 +119,7 @@ func LaunchMpv(mpvPath string, opts LaunchOptions) (*Mpv, error) {
 	args = append(args, opts.ExtraArgs...)
 	args = append(args, "--", opts.Target)
 
-	cmd := exec.Command(mpvPath, args...)
+	cmd := exec.Command(mpvProgram(mpvPath), args...)
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("could not start mpv (%s): %w — install it (%s) or set its path in Settings", mpvPath, err, util.InstallHint("mpv"))
