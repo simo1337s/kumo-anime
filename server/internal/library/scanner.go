@@ -345,6 +345,11 @@ func (s *Scanner) StartWatcher() {
 				if !ok {
 					return
 				}
+				// Hidden folders (e.g. downloads in progress) are skipped,
+				// like the scanner does.
+				if strings.HasPrefix(filepath.Base(ev.Name), ".") {
+					continue
+				}
 				if ev.Op&fsnotify.Create != 0 {
 					if st, err := os.Stat(ev.Name); err == nil && st.IsDir() {
 						_ = w.Add(ev.Name)
