@@ -100,6 +100,9 @@ type Manager struct {
 
 	NextResolver NextResolver
 	OnProgress   []ProgressHook
+	// viewed observes every viewing that crossed the completion threshold,
+	// whether or not the list was updated (tests).
+	viewed func(mediaID, episode int)
 	// OnStatus hooks run one at a time, in order, on a background goroutine.
 	// Statuses that arrive while a hook is busy collapse into the newest one.
 	OnStatus []func(s *Session)
@@ -453,6 +456,9 @@ func (m *Manager) tick(s *Session) (save *history.Entry, fire bool) {
 }
 
 func (m *Manager) fireProgress(mediaID, episode int) {
+	if m.viewed != nil {
+		m.viewed(mediaID, episode)
+	}
 	if !m.settings.Get().Playback.AutoUpdateProgress {
 		return
 	}

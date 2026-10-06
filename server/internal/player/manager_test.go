@@ -322,11 +322,11 @@ func TestAutoNextYields(t *testing.T) {
 func TestBuiltinRewatchUpdatesProgressAgain(t *testing.T) {
 	m, _ := newTestManager(t, nil)
 	var updates atomic.Int32
-	m.OnProgress = []ProgressHook{func(mediaID, episode int) {
+	m.viewed = func(mediaID, episode int) {
 		if mediaID == 3 && episode == 2 {
 			updates.Add(1)
 		}
-	}}
+	}
 	watch := func() {
 		m.ResetBuiltinProgress(3, 2) // the in-app player opens the episode
 		for _, pos := range []float64{600, 1250, 1300, 1390} {
