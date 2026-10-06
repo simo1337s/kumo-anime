@@ -209,7 +209,7 @@ export type Settings = {
     }
     qbittorrent: TorrentClientConfig
     transmission: TorrentClientConfig
-    manga: { enabled: boolean; defaultProvider: string; readingMode: string; direction: string }
+    manga: { enabled: boolean; defaultProvider: string; readingMode: "long-strip" | "paged" | "double"; direction: string }
     anilist: { clientId: string; hideAdult: boolean }
     server: { host: string; port: number; allowLan: boolean; password: string; webUi: boolean }
     ui: {

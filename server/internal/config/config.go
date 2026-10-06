@@ -129,7 +129,7 @@ type TorrentClientConfig struct {
 type MangaSettings struct {
 	Enabled         bool   `json:"enabled"`
 	DefaultProvider string `json:"defaultProvider"`
-	ReadingMode     string `json:"readingMode"` // paged | long-strip
+	ReadingMode     string `json:"readingMode"` // long-strip | paged | double
 	Direction       string `json:"direction"`   // ltr | rtl
 }
 

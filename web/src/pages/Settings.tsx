@@ -1029,10 +1029,11 @@ function MangaSection({ draft, set }: SectionProps) {
                 <Select
                     className="w-44"
                     value={draft.manga.readingMode}
-                    onChange={v => set("manga", { readingMode: v })}
+                    onChange={v => set("manga", { readingMode: v as "double" })}
                     options={[
                         { value: "long-strip", label: "Long strip" },
                         { value: "paged", label: "Single page" },
+                        { value: "double", label: "Two pages" },
                     ]}
                 />
             </Row>
