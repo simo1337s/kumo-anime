@@ -7,6 +7,7 @@ import type {
     DownloadItem,
     EntryView,
     ExtensionInfo,
+    ListEntry,
     LocalFile,
     MangaChapter,
     MarketEntry,
@@ -68,6 +69,32 @@ export function useUpdateEntry(mediaId: number) {
         },
         onError: (e: Error) => toast.error(e.message),
     })
+}
+
+// Marks single episodes as watched or unwatched. AniList only stores how far
+// you got, so "episode 7 watched" means progress 7 (1-6 count as watched too)
+// and "unwatched" means progress 6. Finishing the last episode completes the
+// show (a rewatch counts +1); marking an earlier one reopens it.
+export function useEpisodeMarker(media: Media | undefined, listEntry: Pick<ListEntry, "status" | "progress" | "repeat"> | null | undefined) {
+    const update = useUpdateEntry(media?.id ?? 0)
+    const mark = (episode: number, watched: boolean) => {
+        if (!media) return
+        const total = media.episodes ?? 0
+        const progress = Math.max(0, watched ? episode : episode - 1)
+        let status = listEntry?.status
+        let repeat: number | undefined
+        if (total > 0 && progress >= total) {
+            if (status === "REPEATING") repeat = (listEntry?.repeat ?? 0) + 1
+            status = "COMPLETED"
+        } else if (status !== "REPEATING") {
+            status = progress > 0 || status === "COMPLETED" ? "CURRENT" : (status ?? "PLANNING")
+        }
+        update.mutate(
+            { status, progress, repeat },
+            { onSuccess: () => toast.success(`${media.format === "MOVIE" ? "Movie" : `Episode ${episode}`} marked as ${watched ? "watched" : "unwatched"}`) },
+        )
+    }
+    return { mark, pending: update.isPending }
 }
 
 export function useDeleteEntry(mediaId: number) {

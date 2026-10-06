@@ -1,5 +1,6 @@
-import { Check, Clock, HardDrive, Play } from "lucide-react"
+import { Check, CheckCheck, Clock, HardDrive, Play } from "lucide-react"
 import { cn, formatDuration, img } from "@/lib/utils"
+import { Tooltip } from "./ui"
 
 type Props = {
     image?: string
@@ -79,5 +80,29 @@ export function EpisodeCard({ image, number, title, subtitle, runtime, watched, 
                 {!!runtime && <span className="shrink-0 pt-0.5 text-sm text-subtle">{runtime}m</span>}
             </div>
         </div>
+    )
+}
+
+// Small "mark as watched / unwatched" button for episode card actions.
+export function WatchedToggle({ watched, onToggle, disabled }: { watched: boolean; onToggle: () => void; disabled?: boolean }) {
+    const label = watched ? "Mark as unwatched" : "Mark as watched"
+    return (
+        <Tooltip content={label}>
+            <button
+                aria-label={label}
+                disabled={disabled}
+                onClick={e => {
+                    e.stopPropagation()
+                    onToggle()
+                }}
+                onKeyDown={e => e.stopPropagation()}
+                className={cn(
+                    "grid size-8 place-items-center rounded-lg text-white backdrop-blur transition disabled:opacity-50",
+                    watched ? "bg-emerald-500/80 hover:bg-emerald-500" : "bg-black/60 hover:bg-black/80",
+                )}
+            >
+                {watched ? <CheckCheck className="size-4" /> : <Check className="size-4" />}
+            </button>
+        </Tooltip>
     )
 }

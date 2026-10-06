@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { api, qs } from "@/lib/api"
 import { usePlay } from "@/lib/play"
-import { useOnlineProviders, useStatus, useStreamEpisodes } from "@/lib/queries"
+import { useEpisodeMarker, useOnlineProviders, useStatus, useStreamEpisodes } from "@/lib/queries"
 import type { EntryView } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { EpisodeCard } from "../EpisodeCard"
+import { EpisodeCard, WatchedToggle } from "../EpisodeCard"
 import { Badge, Button, Dialog, EmptyState, Field, IconButton, Input, Select, Skeleton, Tooltip } from "../ui"
 
 export function StreamPanel({ entry }: { entry: EntryView }) {
@@ -24,6 +24,7 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
     const [matchOpen, setMatchOpen] = useState(false)
     const [dlOpen, setDlOpen] = useState(false)
     const { playStream, streamPlayer, remote } = usePlay()
+    const marker = useEpisodeMarker(media, entry.listEntry)
     const qc = useQueryClient()
 
     useEffect(() => {
@@ -154,6 +155,7 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
                             onClick={() => playStream(provider, media.id, ep.number, dub)}
                             actions={
                                 <div className="flex gap-1">
+                                    <WatchedToggle watched={ep.watched} disabled={marker.pending} onToggle={() => marker.mark(ep.number, !ep.watched)} />
                                     {!remote && (
                                         <Tooltip content={streamPlayer() === "mpv" ? "Play in the in-app player" : "Play in mpv"}>
                                             <button

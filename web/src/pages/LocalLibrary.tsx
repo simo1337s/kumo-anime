@@ -1,14 +1,14 @@
-import { ChevronDown, FolderOpen, FolderSearch, FolderSync, HardDrive, Info, LayoutGrid, List as ListIcon, Play, Search, Settings2 } from "lucide-react"
+import { Check, CheckCheck, ChevronDown, FolderOpen, FolderSearch, FolderSync, HardDrive, Info, LayoutGrid, List as ListIcon, Play, Search, Settings2 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { EpisodeCard } from "@/components/EpisodeCard"
 import { Carousel, MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
-import { Badge, Button, EmptyState, IconButton, Input, Select, Tabs } from "@/components/ui"
+import { Badge, Button, EmptyState, IconButton, Input, Progress, Select, Tabs, Tooltip } from "@/components/ui"
 import { api } from "@/lib/api"
 import { usePersisted } from "@/lib/hooks"
 import { usePlay } from "@/lib/play"
-import { useCollection, useLibraryFiles, useScan, useStatus } from "@/lib/queries"
+import { useCollection, useEpisodeMarker, useLibraryFiles, useScan, useStatus } from "@/lib/queries"
 import { scanStore, useStore } from "@/lib/store"
 import type { CollectionItem, LocalFile } from "@/lib/types"
 import { banner, cn, cover, entryUrl, formatBytes, formatLabel, LIST_STATUS, relativeTime, title, totalEpisodes } from "@/lib/utils"
@@ -218,7 +218,7 @@ export default function LocalLibraryPage() {
                             <Settings2 className="size-4" />
                         </IconButton>
                         <Button variant="primary" loading={scanning || scan.isPending} icon={<FolderSync className="size-4" />} onClick={() => scan.mutate(false)}>
-                            {scanning ? scanState.message || "Scanning…" : "Scan for new files"}
+                            {scanning ? "Scanning…" : "Scan for new files"}
                         </Button>
                     </div>
                 </div>
@@ -238,7 +238,23 @@ export default function LocalLibraryPage() {
             <div className="flex flex-col gap-10 px-6 pt-8 md:px-10 xl:px-14">
                 {error && <EmptyState title="Couldn't load your library">{(error as Error).message}</EmptyState>}
 
-                {!loading && groups.length === 0 && !error && (
+                {scanning && groups.length === 0 && (
+                    <div className="card mx-auto w-full max-w-xl p-6 rise-in">
+                        <div className="flex items-center gap-3">
+                            <FolderSync className="size-5 animate-pulse text-brand-strong" />
+                            <div className="min-w-0 flex-1">
+                                <p className="font-semibold">Scanning your library…</p>
+                                <p className="truncate text-sm text-muted">{scanState.message || "Looking for video files…"}</p>
+                            </div>
+                        </div>
+                        <Progress value={scanState.total > 0 ? scanState.done / scanState.total : 0} className={cn("mt-4 h-1.5", scanState.total === 0 && "animate-pulse")} />
+                        <p className="mt-3 text-xs text-subtle">
+                            Every show is looked up on AniList, then artwork and episode titles are downloaded. A big first scan can take a few minutes.
+                        </p>
+                    </div>
+                )}
+
+                {!loading && !scanning && groups.length === 0 && !error && (
                     <EmptyState
                         icon={<HardDrive className="size-6" />}
                         title={libraryDir ? "No downloaded anime yet" : "Choose your library folder"}
@@ -370,6 +386,7 @@ function LibraryRow({ group: g, trusted, onOpen, onPlay }: { group: Group; trust
     const total = totalEpisodes(m)
     const isMovie = m.format === "MOVIE"
     const extras = g.files.length - g.files.filter(f => f.kind === "main").length
+    const marker = useEpisodeMarker(m, le)
 
     return (
         <div className="card overflow-hidden">
@@ -433,22 +450,34 @@ function LibraryRow({ group: g, trusted, onOpen, onPlay }: { group: Group; trust
                     {g.files.map(f => {
                         const watched = le?.status === "COMPLETED" || (f.kind === "main" && (le?.progress ?? 0) >= f.episode)
                         return (
-                            <button
-                                key={f.path}
-                                onClick={() => onPlay(f)}
-                                title={f.path}
-                                className="group/file flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition hover:bg-white/[0.04]"
-                            >
-                                <span className="grid size-7 shrink-0 place-items-center rounded-full bg-white/[0.06] text-muted transition group-hover/file:bg-brand group-hover/file:text-white">
-                                    <Play className="ml-0.5 size-3 fill-current" />
-                                </span>
-                                <span className={cn("w-16 shrink-0 font-semibold tabular-nums", watched && "text-subtle")}>
-                                    {f.kind === "main" ? (isMovie ? "Movie" : `Ep ${f.episode}`) : f.kind === "nc" ? "NC" : "Special"}
-                                </span>
-                                <span className={cn("min-w-0 flex-1 truncate", watched ? "text-subtle" : "text-fg/85")}>{f.name}</span>
+                            <div key={f.path} className="group/file flex w-full items-center gap-3 px-4 py-2 text-sm transition hover:bg-white/[0.04]">
+                                <button onClick={() => onPlay(f)} title={f.path} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                                    <span className="grid size-7 shrink-0 place-items-center rounded-full bg-white/[0.06] text-muted transition group-hover/file:bg-brand group-hover/file:text-white">
+                                        <Play className="ml-0.5 size-3 fill-current" />
+                                    </span>
+                                    <span className={cn("w-16 shrink-0 font-semibold tabular-nums", watched && "text-subtle")}>
+                                        {f.kind === "main" ? (isMovie ? "Movie" : `Ep ${f.episode}`) : f.kind === "nc" ? "NC" : "Special"}
+                                    </span>
+                                    <span className={cn("min-w-0 flex-1 truncate", watched ? "text-subtle" : "text-fg/85")}>{f.name}</span>
+                                </button>
                                 {f.parsed?.resolution && <span className="hidden shrink-0 text-xs text-subtle sm:inline">{f.parsed.resolution}</span>}
                                 <span className="w-20 shrink-0 text-right text-xs text-subtle tabular-nums">{formatBytes(f.size)}</span>
-                            </button>
+                                {f.kind === "main" && (
+                                    <Tooltip content={watched ? "Mark as unwatched" : "Mark as watched"}>
+                                        <button
+                                            aria-label={watched ? "Mark as unwatched" : "Mark as watched"}
+                                            disabled={marker.pending}
+                                            onClick={() => marker.mark(f.episode, !watched)}
+                                            className={cn(
+                                                "grid size-7 shrink-0 place-items-center rounded-full transition disabled:opacity-50",
+                                                watched ? "bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25" : "text-subtle hover:bg-white/[0.08] hover:text-fg",
+                                            )}
+                                        >
+                                            {watched ? <CheckCheck className="size-3.5" /> : <Check className="size-3.5" />}
+                                        </button>
+                                    </Tooltip>
+                                )}
+                            </div>
                         )
                     })}
                     {g.dir && <p className="truncate px-4 py-2 font-mono text-[11px] text-subtle">{g.dir}</p>}

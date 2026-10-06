@@ -18,7 +18,7 @@ import {
 import { useEffect, useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
-import { EpisodeCard } from "@/components/EpisodeCard"
+import { EpisodeCard, WatchedToggle } from "@/components/EpisodeCard"
 import { ListStatusButton, ProgressEditor, ScoreEditor } from "@/components/entry/ListEditor"
 import { StreamPanel } from "@/components/entry/StreamPanel"
 import { TorrentPanel } from "@/components/entry/TorrentPanel"
@@ -28,8 +28,8 @@ import { sendPluginEvent } from "@/components/plugins/PluginRenderer"
 import { Badge, Button, Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTrigger, EmptyState, Skeleton, Tabs } from "@/components/ui"
 import { api } from "@/lib/api"
 import { usePlay } from "@/lib/play"
-import { useEntry, useStatus, useUpdateEntry } from "@/lib/queries"
-import type { EntryView, EpisodeView } from "@/lib/types"
+import { useEntry, useEpisodeMarker, useStatus } from "@/lib/queries"
+import type { EntryView } from "@/lib/types"
 import { banner, cleanDescription, cn, cover, formatLabel, img, scoreColor, seasonLabel, statusLabel, timeUntil, title, totalEpisodes } from "@/lib/utils"
 
 type Tab = "episodes" | "stream" | "torrents" | "details"
@@ -221,7 +221,7 @@ function EntryHero({ entry, onTab }: { entry: EntryView; onTab: (t: Tab) => void
 function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStream: () => void; onTorrents: () => void }) {
     const { playLocal, localPlayer, remote } = usePlay()
     const { data: status } = useStatus()
-    const update = useUpdateEntry(entry.media.id)
+    const marker = useEpisodeMarker(entry.media, entry.listEntry)
     const [showAll, setShowAll] = useState(false)
     const media = entry.media
 
@@ -252,8 +252,6 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
         )
     }
 
-    const markUpTo = (ep: EpisodeView) => update.mutate({ progress: ep.number, status: totalEpisodes(media) > 0 && ep.number >= totalEpisodes(media) ? "COMPLETED" : "CURRENT" })
-
     return (
         <div className="flex flex-col gap-8">
             <div className="flex items-center justify-between">
@@ -283,28 +281,31 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
                         blur={status?.settings.ui.blurUnwatched}
                         onClick={() => (ep.file ? playLocal(ep.file.path, media.id, ep.number) : onStream())}
                         actions={
-                            <Dropdown>
-                                <DropdownTrigger asChild>
-                                    <button onClick={e => e.stopPropagation()} className="grid size-8 place-items-center rounded-lg bg-black/60 text-white backdrop-blur hover:bg-black/80">
-                                        <MoreHorizontal className="size-4" />
-                                    </button>
-                                </DropdownTrigger>
-                                <DropdownContent>
-                                    {ep.file && !remote && (
-                                        <DropdownItem icon={<MonitorPlay />} onSelect={() => playLocal(ep.file!.path, media.id, ep.number, { player: localPlayer() === "mpv" ? "builtin" : "mpv" })}>
-                                            Play in {localPlayer() === "mpv" ? "in-app player" : "mpv"}
+                            <div className="flex gap-1">
+                                {(ep.aired || ep.hasFile) && <WatchedToggle watched={ep.watched} disabled={marker.pending} onToggle={() => marker.mark(ep.number, !ep.watched)} />}
+                                <Dropdown>
+                                    <DropdownTrigger asChild>
+                                        <button onClick={e => e.stopPropagation()} className="grid size-8 place-items-center rounded-lg bg-black/60 text-white backdrop-blur hover:bg-black/80">
+                                            <MoreHorizontal className="size-4" />
+                                        </button>
+                                    </DropdownTrigger>
+                                    <DropdownContent>
+                                        {ep.file && !remote && (
+                                            <DropdownItem icon={<MonitorPlay />} onSelect={() => playLocal(ep.file!.path, media.id, ep.number, { player: localPlayer() === "mpv" ? "builtin" : "mpv" })}>
+                                                Play in {localPlayer() === "mpv" ? "in-app player" : "mpv"}
+                                            </DropdownItem>
+                                        )}
+                                        {ep.file && ep.resumeAt > 0 && (
+                                            <DropdownItem icon={<Play />} onSelect={() => playLocal(ep.file!.path, media.id, ep.number, { start: 0 })}>
+                                                Play from the beginning
+                                            </DropdownItem>
+                                        )}
+                                        <DropdownItem icon={<CheckCheck />} onSelect={() => marker.mark(ep.number, !ep.watched)}>
+                                            {ep.watched ? "Mark as unwatched" : "Mark as watched (and everything before)"}
                                         </DropdownItem>
-                                    )}
-                                    {ep.file && ep.resumeAt > 0 && (
-                                        <DropdownItem icon={<Play />} onSelect={() => playLocal(ep.file!.path, media.id, ep.number, { start: 0 })}>
-                                            Play from the beginning
-                                        </DropdownItem>
-                                    )}
-                                    <DropdownItem icon={<CheckCheck />} onSelect={() => markUpTo(ep)}>
-                                        Mark watched up to here
-                                    </DropdownItem>
-                                </DropdownContent>
-                            </Dropdown>
+                                    </DropdownContent>
+                                </Dropdown>
+                            </div>
                         }
                     />
                 ))}

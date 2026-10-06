@@ -21,6 +21,9 @@ const (
 // Settings is the whole user configuration. It is persisted as a single JSON
 // document in the kv table and edited from the Settings pages of the UI.
 type Settings struct {
+	// SchemaVersion lets newer versions migrate settings saved by older ones.
+	SchemaVersion int `json:"schemaVersion"`
+
 	Library      LibrarySettings      `json:"library"`
 	Playback     PlaybackSettings     `json:"playback"`
 	Mpv          MpvSettings          `json:"mpv"`
@@ -175,6 +178,7 @@ func Defaults() Settings {
 	home, _ := os.UserHomeDir()
 	videos := filepath.Join(home, "Videos", "Anime")
 	return Settings{
+		SchemaVersion: schemaVersion,
 		Library: LibrarySettings{
 			Dir:              videos,
 			ExtraDirs:        []string{},
@@ -185,7 +189,7 @@ func Defaults() Settings {
 			MatchOutsideList: true,
 		},
 		Playback: PlaybackSettings{
-			DefaultPlayer:       "mpv",
+			DefaultPlayer:       "builtin",
 			AutoUpdateProgress:  true,
 			CompletionThreshold: 0.85,
 			ResumePlayback:      true,
@@ -208,7 +212,7 @@ func Defaults() Settings {
 			DefaultMode: "sub",
 			Quality:     "best",
 			Downloader:  "auto",
-			Player:      "mpv",
+			Player:      "builtin",
 		},
 		OnlineStream: OnlineStreamSettings{Enabled: true, DefaultProvider: "ani-cli"},
 		Torrent: TorrentSettings{
@@ -251,12 +255,19 @@ func NewStore(d *db.DB) (*Store, error) {
 	// Decode on top of the defaults so fields added in newer versions get
 	// sane values.
 	merged := Defaults()
+	merged.SchemaVersion = 0 // missing in settings saved by older versions
 	ok, err := d.GetKV(settingsKey, &merged)
 	if err != nil {
 		return nil, err
 	}
 	if ok {
+		migrated := migrate(&merged)
 		s.current = sanitize(merged)
+		if migrated {
+			if err := d.SetKV(settingsKey, s.current); err != nil {
+				return nil, err
+			}
+		}
 	} else {
 		if err := d.SetKV(settingsKey, s.current); err != nil {
 			return nil, err
@@ -294,8 +305,26 @@ func (s *Store) OnChange(fn func(old, new Settings)) {
 	s.mu.Unlock()
 }
 
+// schemaVersion is the current settings version; add a step to migrate when
+// changing a default that existing installs should pick up too.
+const schemaVersion = 2
+
+func migrate(s *Settings) bool {
+	if s.SchemaVersion >= schemaVersion {
+		return false
+	}
+	if s.SchemaVersion < 2 {
+		// v2: the in-app player is the default for files and streams.
+		s.Playback.DefaultPlayer = "builtin"
+		s.AniCli.Player = "builtin"
+	}
+	s.SchemaVersion = schemaVersion
+	return true
+}
+
 func sanitize(s Settings) Settings {
 	d := Defaults()
+	s.SchemaVersion = schemaVersion
 	if s.Server.Port <= 0 || s.Server.Port > 65535 {
 		s.Server.Port = d.Server.Port
 	}
@@ -338,8 +367,8 @@ func sanitize(s Settings) Settings {
 	if s.AniCli.Quality == "" {
 		s.AniCli.Quality = "best"
 	}
-	if s.AniCli.Player == "" {
-		s.AniCli.Player = "mpv"
+	if s.AniCli.Player != "mpv" {
+		s.AniCli.Player = "builtin"
 	}
 	if s.Anilist.ClientID == "" {
 		s.Anilist.ClientID = DefaultAnilistClient
@@ -356,8 +385,8 @@ func sanitize(s Settings) Settings {
 	if len(s.UI.HomeSections) == 0 {
 		s.UI.HomeSections = d.UI.HomeSections
 	}
-	if s.Playback.DefaultPlayer == "" {
-		s.Playback.DefaultPlayer = "mpv"
+	if s.Playback.DefaultPlayer != "mpv" {
+		s.Playback.DefaultPlayer = "builtin"
 	}
 	return s
 }

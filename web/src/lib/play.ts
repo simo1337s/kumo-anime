@@ -9,8 +9,8 @@ export function usePlay() {
     const settings = status?.settings
     const remote = status?.client === "lan" // LAN devices can't use this PC's mpv
 
-    const localPlayer = (override?: "mpv" | "builtin") => (remote ? "builtin" : override ?? settings?.playback.defaultPlayer ?? "mpv")
-    const streamPlayer = (override?: "mpv" | "builtin") => (remote ? "builtin" : override ?? settings?.aniCli.player ?? "mpv")
+    const localPlayer = (override?: "mpv" | "builtin") => (remote ? "builtin" : override ?? settings?.playback.defaultPlayer ?? "builtin")
+    const streamPlayer = (override?: "mpv" | "builtin") => (remote ? "builtin" : override ?? settings?.aniCli.player ?? "builtin")
 
     const playLocal = async (path: string, mediaId: number, episode: number, opts: { player?: "mpv" | "builtin"; start?: number } = {}) => {
         if (localPlayer(opts.player) === "builtin") {

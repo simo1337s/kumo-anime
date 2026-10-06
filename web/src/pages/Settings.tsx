@@ -549,8 +549,8 @@ function PlaybackSection({ draft, set }: SectionProps) {
                         value={p.defaultPlayer}
                         onChange={v => set("playback", { defaultPlayer: v as "mpv" })}
                         options={[
-                            { value: "mpv", label: "mpv" },
                             { value: "builtin", label: "In-app player" },
+                            { value: "mpv", label: "mpv" },
                         ]}
                     />
                 </Row>
@@ -819,8 +819,8 @@ function StreamingSection({ draft, set }: SectionProps) {
                         value={a.player}
                         onChange={v => set("aniCli", { player: v as "mpv" })}
                         options={[
-                            { value: "mpv", label: "mpv" },
                             { value: "builtin", label: "In-app player" },
+                            { value: "mpv", label: "mpv" },
                         ]}
                     />
                 </Row>
