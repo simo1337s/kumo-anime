@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { EpisodeCard } from "@/components/EpisodeCard"
 import { Carousel, MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
+import { useLibraryCardMenu } from "@/components/library/LibraryCardMenu"
 import { Badge, Button, EmptyState, IconButton, Input, Progress, Select, Tabs, Tooltip } from "@/components/ui"
 import { api } from "@/lib/api"
 import { usePersisted } from "@/lib/hooks"
@@ -11,7 +12,7 @@ import { usePlay } from "@/lib/play"
 import { useCollection, useEpisodeMarker, useLibraryFiles, useScan, useStatus } from "@/lib/queries"
 import { scanStore, useStore } from "@/lib/store"
 import type { CollectionItem, LocalFile } from "@/lib/types"
-import { banner, cn, cover, entryUrl, formatBytes, formatLabel, LIST_STATUS, relativeTime, title, totalEpisodes } from "@/lib/utils"
+import { banner, cn, cover, entryUrl, formatBytes, formatLabel, LIST_STATUS, mostCommon, relativeTime, title, totalEpisodes } from "@/lib/utils"
 
 // "Local library": only anime that have files on this computer.
 
@@ -49,17 +50,6 @@ function statusOf(g: Group): StatusFilter {
 }
 
 const uniq = (xs: (string | undefined)[]) => [...new Set(xs.filter((x): x is string => !!x))]
-
-function mostCommon(xs: string[]) {
-    const counts = new Map<string, number>()
-    let best = ""
-    for (const x of xs) {
-        const n = (counts.get(x) ?? 0) + 1
-        counts.set(x, n)
-        if (n > (counts.get(best) ?? 0)) best = x
-    }
-    return best
-}
 
 // [1, 2, 3, 5, 7, 8] -> "1–3, 5, 7–8"
 function episodeRanges(nums: number[]) {
@@ -117,6 +107,7 @@ export default function LocalLibraryPage() {
     const scanState = useStore(scanStore)
     const { playLocal } = usePlay()
     const navigate = useNavigate()
+    const libraryMenu = useLibraryCardMenu()
 
     const [filter, setFilter] = usePersisted<StatusFilter>("kumo-local-filter", "ALL")
     const [sort, setSort] = usePersisted<SortKey>("kumo-local-sort", "added")
@@ -356,7 +347,14 @@ export default function LocalLibraryPage() {
                         ) : view === "grid" ? (
                             <MediaGrid size={status?.settings.ui.cardSize}>
                                 {shown.map(g => (
-                                    <MediaCard key={g.item.media.id} media={g.item.media} listEntry={g.item.listEntry} localCount={g.files.length} downloaded={g.episodes} />
+                                    <MediaCard
+                                        key={g.item.media.id}
+                                        media={g.item.media}
+                                        listEntry={g.item.listEntry}
+                                        localCount={g.files.length}
+                                        downloaded={g.episodes}
+                                        menu={libraryMenu.menu(g.item.media)}
+                                    />
                                 ))}
                             </MediaGrid>
                         ) : (
@@ -369,6 +367,7 @@ export default function LocalLibraryPage() {
                     </section>
                 )}
             </div>
+            {libraryMenu.dialog}
         </div>
     )
 }

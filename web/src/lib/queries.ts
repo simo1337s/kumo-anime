@@ -206,8 +206,11 @@ export function useLibraryFolders(enabled = true) {
     return useQuery({ queryKey: ["library", "folders"], queryFn: () => api.get<FolderInfo[] | null>("/api/library/folders"), enabled })
 }
 
+// Also for reading the files outside a component (qc.ensureQueryData).
+export const libraryFilesQuery = { queryKey: ["library", "files"], queryFn: () => api.get<LocalFile[] | null>("/api/library/files") }
+
 export function useLibraryFiles() {
-    return useQuery({ queryKey: ["library", "files"], queryFn: () => api.get<LocalFile[] | null>("/api/library/files") })
+    return useQuery(libraryFilesQuery)
 }
 
 export function useOnlineProviders() {

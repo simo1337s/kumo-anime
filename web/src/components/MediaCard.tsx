@@ -1,8 +1,9 @@
-import { ChevronLeft, ChevronRight, HardDrive, Play, Star } from "lucide-react"
+import { ChevronLeft, ChevronRight, Ellipsis, HardDrive, Play, Star } from "lucide-react"
 import { useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import type { ListEntry, Media } from "@/lib/types"
 import { airedEpisodes, cn, cover, entryUrl, formatLabel, timeUntil, title, totalEpisodes } from "@/lib/utils"
+import { Dropdown, DropdownContent, DropdownTrigger, IconButton } from "./ui"
 
 type Props = {
     media: Media
@@ -12,6 +13,7 @@ type Props = {
     className?: string
     showProgress?: boolean
     size?: "sm" | "md" | "lg"
+    menu?: React.ReactNode // items of a menu opened with a "⋯" button or a right-click
 }
 
 const statusDot: Record<string, string> = {
@@ -23,7 +25,7 @@ const statusDot: Record<string, string> = {
     DROPPED: "bg-rose-400",
 }
 
-export function MediaCard({ media, listEntry, localCount, downloaded, className, showProgress = true }: Props) {
+export function MediaCard({ media, listEntry, localCount, downloaded, className, showProgress = true, menu }: Props) {
     const total = media.type === "MANGA" ? media.chapters ?? 0 : totalEpisodes(media)
     const progress = listEntry?.progress ?? 0
     const aired = airedEpisodes(media)
@@ -35,8 +37,8 @@ export function MediaCard({ media, listEntry, localCount, downloaded, className,
     const nextAir = media.nextAiringEpisode
     const score = media.meanScore ?? media.averageScore
 
-    return (
-        <Link to={entryUrl(media)} className={cn("group/card focus-ring relative flex flex-col gap-2.5 rounded-2xl outline-none", className)}>
+    const card = (
+        <Link to={entryUrl(media)} className={cn("group/card focus-ring relative flex flex-col gap-2.5 rounded-2xl outline-none", !menu && className)}>
             <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-surface-2 ring-1 ring-line transition-all duration-300 group-hover/card:-translate-y-1 group-hover/card:shadow-[0_18px_40px_-12px_rgb(0_0_0/0.8)] group-hover/card:ring-line-strong">
                 {cover(media) && (
                     <img
@@ -65,7 +67,12 @@ export function MediaCard({ media, listEntry, localCount, downloaded, className,
                     )}
                 </div>
                 {score ? (
-                    <span className="absolute top-2.5 right-2.5 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold text-white opacity-0 backdrop-blur transition-opacity group-hover/card:opacity-100">
+                    <span
+                        className={cn(
+                            "absolute top-2.5 right-2.5 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold text-white opacity-0 backdrop-blur transition-opacity group-hover/card:opacity-100",
+                            menu && "right-11", // next to the menu button
+                        )}
+                    >
                         <Star className="size-3 fill-amber-300 text-amber-300" />
                         {score}%
                     </span>
@@ -99,6 +106,70 @@ export function MediaCard({ media, listEntry, localCount, downloaded, className,
                 )}
             </div>
         </Link>
+    )
+    return menu ? (
+        <CardMenu menu={menu} className={className}>
+            {card}
+        </CardMenu>
+    ) : (
+        card
+    )
+}
+
+// A card with a menu, opened with a "⋯" button (on hover, always shown on
+// touch screens, which can't hover) or by right-clicking the card, at the
+// pointer. Both are next to the card's link, not in it, so using them never
+// opens the anime.
+function CardMenu({ menu, className, children }: { menu: React.ReactNode; className?: string; children: React.ReactNode }) {
+    const [at, setAt] = useState<{ x: number; y: number } | null>(null) // in the card
+    const focused = useRef<Element | null>(null)
+    return (
+        <div
+            className={cn("group/card relative", className)}
+            onContextMenu={e => {
+                e.preventDefault()
+                // React also brings right-clicks in the open menu (a portal) here.
+                if (!e.currentTarget.contains(e.target as Node)) return
+                const r = e.currentTarget.getBoundingClientRect()
+                const x = e.clientX - r.left
+                const y = e.clientY - r.top
+                focused.current = document.activeElement
+                // Opened with the menu key there may be no pointer in the card.
+                setAt(x >= 0 && y >= 0 && x <= r.width && y <= r.height ? { x, y } : { x: r.width / 2, y: r.height / 3 })
+            }}
+        >
+            {children}
+            <Dropdown open={!!at} onOpenChange={v => !v && setAt(null)} modal={false}>
+                <DropdownTrigger asChild>
+                    <span aria-hidden className="pointer-events-none absolute" style={{ left: at?.x, top: at?.y }} />
+                </DropdownTrigger>
+                <DropdownContent
+                    align="start"
+                    sideOffset={2}
+                    // Focus goes back where it was (the card, after the menu
+                    // key), unless something else took it (a dialog, a click).
+                    onCloseAutoFocus={e => {
+                        e.preventDefault()
+                        if (document.activeElement === document.body && focused.current instanceof HTMLElement) focused.current.focus()
+                    }}
+                >
+                    {menu}
+                </DropdownContent>
+            </Dropdown>
+            <Dropdown>
+                <DropdownTrigger asChild>
+                    <IconButton
+                        label="More options"
+                        size="xs"
+                        // Lifts with the cover on hover.
+                        className="absolute top-2 right-2 rounded-full bg-black/60 text-white opacity-0 backdrop-blur duration-300 group-hover/card:-translate-y-1 group-hover/card:opacity-100 hover:bg-black/80 hover:text-white focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
+                    >
+                        <Ellipsis className="size-4" />
+                    </IconButton>
+                </DropdownTrigger>
+                <DropdownContent>{menu}</DropdownContent>
+            </Dropdown>
+        </div>
     )
 }
 

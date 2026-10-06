@@ -368,12 +368,25 @@ export function Dialog({
 export const Dropdown = DropdownPrimitive.Root
 export const DropdownTrigger = DropdownPrimitive.Trigger
 
-export function DropdownContent({ children, align = "end", className }: { children: React.ReactNode; align?: "start" | "center" | "end"; className?: string }) {
+export function DropdownContent({
+    children,
+    align = "end",
+    sideOffset = 8,
+    onCloseAutoFocus,
+    className,
+}: {
+    children: React.ReactNode
+    align?: "start" | "center" | "end"
+    sideOffset?: number
+    onCloseAutoFocus?: (e: Event) => void
+    className?: string
+}) {
     return (
         <DropdownPrimitive.Portal>
             <DropdownPrimitive.Content
                 align={align}
-                sideOffset={8}
+                sideOffset={sideOffset}
+                onCloseAutoFocus={onCloseAutoFocus}
                 className={cn("z-[60] min-w-52 rounded-xl border border-line-strong bg-surface-2 p-1.5 shadow-2xl fade-in", className)}
             >
                 {children}

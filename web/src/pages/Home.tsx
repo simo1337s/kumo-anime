@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom"
 import { EpisodeCard } from "@/components/EpisodeCard"
 import { LoginDialog } from "@/components/LoginDialog"
 import { MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
+import { useLibraryCardMenu } from "@/components/library/LibraryCardMenu"
 import { PluginSlot } from "@/components/plugins/PluginSlot"
 import { Button, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, EmptyState, IconButton, Skeleton } from "@/components/ui"
 import { api } from "@/lib/api"
@@ -29,6 +30,7 @@ export default function HomePage() {
     const [loginOpen, setLoginOpen] = useState(false)
     const navigate = useNavigate()
     const qc = useQueryClient()
+    const libraryMenu = useLibraryCardMenu()
 
     const continueItems = data?.continueWatching ?? []
     const [heroIdx, setHeroIdx] = useState(0)
@@ -233,7 +235,15 @@ export default function HomePage() {
                         </div>
                         <MediaGrid size={status?.settings.ui.cardSize}>
                             {l.items.map(it => (
-                                <MediaCard key={it.media.id} media={it.media} listEntry={it.listEntry} localCount={it.localFiles} downloaded={it.downloaded} />
+                                <MediaCard
+                                    key={it.media.id}
+                                    media={it.media}
+                                    listEntry={it.listEntry}
+                                    localCount={it.localFiles}
+                                    downloaded={it.downloaded}
+                                    // Here only because of local files, which the menu acts on.
+                                    menu={l.key === "LOCAL" ? libraryMenu.menu(it.media) : undefined}
+                                />
                             ))}
                         </MediaGrid>
                     </section>
@@ -242,6 +252,7 @@ export default function HomePage() {
                 <PluginSlot slot="home-screen-bottom" />
             </div>
             <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
+            {libraryMenu.dialog}
         </div>
     )
 }

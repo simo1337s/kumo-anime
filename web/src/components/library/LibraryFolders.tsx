@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { useCollection, useLibraryFiles, useLibraryFolders, useStatus } from "@/lib/queries"
 import type { FolderInfo, LocalFile, Media } from "@/lib/types"
-import { cn, cover, formatBytes, title } from "@/lib/utils"
+import { cn, cover, formatBytes, plural, title } from "@/lib/utils"
 import { Badge, Button, EmptyState, IconButton, Input, Tooltip } from "../ui"
 import { MatchDialog, naturalCompare } from "./MatchDialog"
 
@@ -125,8 +125,6 @@ function useIndexFolders() {
         return [...known, ...added.filter(f => !seen.has(f.path))]
     }
 }
-
-const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`
 
 // Library tools › Folders: every folder with what it's matched to, and
 // buttons to match it (or some of its files) to another anime by hand.

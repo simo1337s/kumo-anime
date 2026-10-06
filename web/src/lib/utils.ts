@@ -198,6 +198,21 @@ export async function copyText(text: string) {
     }
 }
 
+// "1 file", "2 files".
+export const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`
+
+// The value that occurs most often (the first one on a tie), or "".
+export function mostCommon(xs: string[]) {
+    const counts = new Map<string, number>()
+    let best = ""
+    for (const x of xs) {
+        const n = (counts.get(x) ?? 0) + 1
+        counts.set(x, n)
+        if (n > (counts.get(best) ?? 0)) best = x
+    }
+    return best
+}
+
 export function entryUrl(m: { id: number; type?: string }) {
     return m.type === "MANGA" ? `/manga/entry?id=${m.id}` : `/entry?id=${m.id}`
 }
