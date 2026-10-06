@@ -12,7 +12,9 @@
 - Scans your anime folders (plus extra folders), parses every file name and **matches it to AniList automatically**: seasons, parts, absolute numbering (e.g. `One Piece - 1050`, `JJK - 30` → season 2 ep 6), movies, OVAs/specials, NCOP/NCED.
 - Works with **every video format**: mkv, mp4, avi, webm, mov, wmv, flv, ts/m2ts, ogm, rmvb, vob, 3gp, divx and more.
 - **Auto refresh**: watches the folders and rescans when files appear, and refreshes on startup.
+- **Local library** page with only the anime you have on disk: recently added, filters by list status, sort by added/unwatched/size, grid or list view with downloaded episode ranges, size, resolution and release group, and one-click "play next".
 - Library tools to fix matches by hand, change episode numbers, lock files and ignore junk.
+- Safe with removable drives: an unplugged or unmounted library folder keeps its matches; symlinked folders are followed.
 - **Artwork & metadata**: covers, banners, fanart, descriptions, genres, studios, characters, relations, recommendations, **episode titles, summaries and thumbnails** (AniList + ani.zip). All artwork is **downloaded to a local cache**, so it loads instantly and still shows offline.
 
 **Watching**
@@ -64,9 +66,12 @@ The server also rejects other websites' requests (Origin check) and DNS rebindin
 sudo pacman -S --needed base-devel go nodejs npm electron mpv ffmpeg
 yay -S ani-cli            # sub/dub streaming & downloads (recommended)
 sudo pacman -S yt-dlp     # optional, better downloads
-git clone https://github.com/simo1337s/animetest.git kumo && cd kumo
+sudo pacman -S --needed github-cli && gh auth login   # the repository is private
+gh repo clone simo1337s/animetest kumo && cd kumo
 cd packaging/arch && makepkg -si
 ```
+
+Update later with `cd kumo && git pull && cd packaging/arch && makepkg -si`.
 
 Start **Kumo** from your app menu (or run `kumo`).
 
