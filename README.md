@@ -2,7 +2,7 @@
 
 <h1 align="center">Kumo</h1>
 
-<p align="center">A Seanime-style anime app for Arch Linux: your AniList, your local library, ani-cli streaming, torrents and the Seanime extension marketplace — in one desktop app that only ever talks to your own computer and home network.</p>
+<p align="center">A Seanime-style anime app for Arch Linux (and Windows): your AniList, your local library, ani-cli streaming, torrents and the Seanime extension marketplace — in one desktop app that only ever talks to your own computer and home network.</p>
 
 ---
 
@@ -87,6 +87,12 @@ systemctl --user enable --now kumo-server   # server only, web UI on 127.0.0.1:4
 ```
 Turn on **Allow devices on my network** (with a password) to use Kumo from your phone or TV at `http://<pc-name>.local:43211`. The desktop app attaches to the running server.
 
+## Windows
+
+Kumo also runs on Windows 10/11 (64-bit), released separately from the Arch package: get the installer (`Kumo-Setup-X.Y.Z-windows-x64.exe`) or the portable zip from the newest **Kumo X.Y.Z for Windows** [release](https://github.com/simo1337s/animetest/releases) (tag `windows-vX.Y.Z`). Those files are Windows-only; on Arch, use the PKGBUILD above.
+
+What to install alongside it (ffmpeg, mpv, yt-dlp, ani-cli, qBittorrent), where it keeps its data, how to build it and how releases are made: [packaging/windows/README.md](packaging/windows/README.md).
+
 ## Development
 
 ```bash
@@ -101,10 +107,10 @@ cd desktop && npm i && npx electron .   # desktop window (uses ../dist/kumo)
 |---|---|
 | `server/` | Go server: AniList, scanner/matcher, mpv IPC, ani-cli driver, downloads, torrents, extension runtime (goja), API |
 | `web/` | React + Tailwind UI (embedded into the binary) |
-| `desktop/` | Electron shell (system `electron` on Arch) |
-| `packaging/` | PKGBUILD, launcher, `.desktop`, icons, systemd user unit |
+| `desktop/` | Electron shell (system `electron` on Arch; bundled by electron-builder for Windows) |
+| `packaging/` | PKGBUILD, launcher, `.desktop`, icons, systemd user unit; `windows/`: Windows build script and notes |
 
-Data lives in `~/.local/share/kumo` (SQLite database, artwork cache, extension storage).
+Data lives in `~/.local/share/kumo` (SQLite database, artwork cache, extension storage; `%APPDATA%\Kumo` on Windows).
 
 ## Notes
 - AniList's API may rate-limit large first scans; Kumo waits and retries automatically.
