@@ -5,6 +5,7 @@ import {
     Check,
     ChevronDown,
     Clapperboard,
+    Copy,
     Cpu,
     Download,
     Eye,
@@ -34,8 +35,8 @@ import { Badge, Button, Dialog, Input, Select, Switch, Textarea } from "@/compon
 import { api } from "@/lib/api"
 import { useOnlineProviders, useSaveSettings, useStatus } from "@/lib/queries"
 import { accentPreviewStore } from "@/lib/store"
-import type { Settings } from "@/lib/types"
-import { cn, formatBytes, img } from "@/lib/utils"
+import type { Settings, Status } from "@/lib/types"
+import { cn, copyText, formatBytes, img } from "@/lib/utils"
 
 type SectionId =
     | "app"
@@ -399,6 +400,40 @@ function Detect({ ok, label }: { ok?: boolean; label: string }) {
     return ok ? <Badge tone="green">{label} found</Badge> : <Badge tone="red">{label} not found</Badge>
 }
 
+// Where other devices open Kumo, once LAN access is saved.
+function LanAddresses({ status }: { status?: Status }) {
+    const urls = status?.lanUrls ?? []
+    if (!status?.settings.server.allowLan) return <p className="px-4 py-3.5 text-sm text-muted">Save, and the address to open on your other devices shows up here.</p>
+    if (!urls.length)
+        return (
+            <p className="px-4 py-3.5 text-sm text-amber-200/80">
+                Kumo can't find this computer's address on your network. Is it connected to your router (by cable or Wi-Fi)?
+            </p>
+        )
+    return (
+        <div className="px-4 py-3.5">
+            <p className="text-sm font-medium">On your other devices, open</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+                {urls.map(u => (
+                    <button
+                        key={u}
+                        onClick={() => copyText(u).then(ok => (ok ? toast.success("Address copied") : toast.error("Couldn't copy it")))}
+                        className="flex items-center gap-2 rounded-lg bg-black/30 px-3 py-1.5 font-mono text-sm transition hover:bg-black/45"
+                        title="Copy"
+                    >
+                        {u}
+                        <Copy className="size-3.5 text-subtle" />
+                    </button>
+                ))}
+            </div>
+            <p className="mt-2 text-xs text-subtle">
+                Type it with http://, not https://. On a Mac, Chrome, Brave and Firefox first need Local Network access (System Settings › Privacy & Security ›
+                Local Network); Safari works right away. A VPN on this computer can block other devices too: in Mullvad, turn on Local network sharing.
+            </p>
+        </div>
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Sections
 
@@ -463,9 +498,10 @@ function AppSection({ draft, set }: SectionProps) {
                 >
                     <Switch checked={draft.server.webUi || !!status?.webUiForced} disabled={!isDesktop || status?.webUiForced} onChange={v => set("server", { webUi: v })} />
                 </Row>
-                <Row label="Allow devices on my network" help={`Phones, TVs and other PCs on your LAN can open http://${status?.hostname ?? "this-pc"}.local:${draft.server.port}`}>
+                <Row label="Allow devices on my network" help="Phones, tablets, TVs and other computers on your home network can open Kumo in a browser.">
                     <Switch checked={draft.server.allowLan} disabled={lan} onChange={v => set("server", { allowLan: v, webUi: v ? true : draft.server.webUi })} />
                 </Row>
+                {draft.server.allowLan && <LanAddresses status={status} />}
                 {draft.server.allowLan && (
                     <Stack label="Network password" help="Asked once per device on your network. This computer never needs it.">
                         <Password value={draft.server.password} onChange={v => set("server", { password: v })} placeholder="Leave empty for no password" />

@@ -249,6 +249,7 @@ export type Status = {
     scanning: boolean
     dataDir: string
     listenAddr: string
+    lanUrls?: string[] | null // where devices on the home network open Kumo
     webUiForced: boolean
     settings: Settings
 }

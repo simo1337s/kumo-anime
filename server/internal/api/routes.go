@@ -252,6 +252,10 @@ func (s *Server) status(r *http.Request) (any, error) {
 	_, feat.XdgOpen = util.LookPath("xdg-open")
 	kind := map[clientKind]string{clientShell: "desktop", clientLocal: "local", clientLAN: "lan"}[kindOf(r)]
 	host, _ := os.Hostname()
+	var lan []string
+	if cfg.Server.AllowLAN {
+		lan = lanURLs(cfg.Server.Port)
+	}
 	return map[string]any{
 		"version":        config.AppVersion,
 		"appName":        config.AppName,
@@ -263,7 +267,8 @@ func (s *Server) status(r *http.Request) (any, error) {
 		"hostname":       host,
 		"scanning":       s.app.Scanner.Running(),
 		"dataDir":        s.app.DataDir,
-		"listenAddr":     s.addr,
+		"listenAddr":     s.Addr(),
+		"lanUrls":        lan,
 		"webUiForced":    s.ForceWebUI,
 		"settings":       settingsFor(r, cfg),
 	}, nil
