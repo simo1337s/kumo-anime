@@ -9,6 +9,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dop251/goja"
@@ -91,7 +92,15 @@ type Runtime struct {
 	ID       string
 	manifest *Manifest
 	loop     *eventloop.EventLoop
-	vm       *goja.Runtime // only touch from the loop goroutine
+	// vm is the loop's VM, published by the loop's first job so that Close
+	// can interrupt it. Off the loop goroutine only vm.Interrupt may be used.
+	vm atomic.Pointer[goja.Runtime]
+
+	// ctx is cancelled by Close. Blocking host calls ($sleep, plugin
+	// services, fetch) watch it so they can't keep the loop busy.
+	ctx    context.Context
+	cancel context.CancelFunc
+	closed atomic.Bool
 
 	prefs   map[string]string
 	store   *MemStore
@@ -100,9 +109,6 @@ type Runtime struct {
 
 	logMu sync.Mutex
 	logs  []LogLine
-
-	closed bool
-	mu     sync.Mutex
 }
 
 type RuntimeOptions struct {
@@ -112,14 +118,38 @@ type RuntimeOptions struct {
 	Fetcher *Fetcher
 	// Extra lets callers install additional globals before the payload runs.
 	Extra func(r *Runtime, vm *goja.Runtime) error
+	// LoadTimeout bounds running the payload's top-level code
+	// (defaultLoadTimeout when zero).
+	LoadTimeout time.Duration
+	// Context aborts loading when cancelled. It has no effect once
+	// NewRuntime has returned.
+	Context context.Context
 }
+
+const (
+	defaultLoadTimeout = 30 * time.Second
+	// closeTimeout bounds how long Close waits for the event loop to stop
+	// (only reached when the loop is stuck in a Go call that ignores ctx).
+	closeTimeout = 5 * time.Second
+)
+
+// errStopped is returned to callers waiting on a runtime that was closed.
+var errStopped = errors.New("the extension was stopped")
+
+// noFileModules makes require() unable to load files: extensions are single
+// payloads, and the default loader would let them read any file on disk
+// (require("/path/to/file.json") returns its parsed content). Built-in
+// modules (buffer, url...) still load.
+func noFileModules(string) ([]byte, error) { return nil, require.ModuleFileDoesNotExistError }
 
 // NewRuntime starts an event loop, installs the bindings and runs the
 // program.
 func NewRuntime(m *Manifest, prog *goja.Program, opts RuntimeOptions) (*Runtime, error) {
-	reg := new(require.Registry)
+	reg := require.NewRegistry(require.WithLoader(noFileModules))
 	loop := eventloop.NewEventLoop(eventloop.WithRegistry(reg), eventloop.EnableConsole(false))
-	r := &Runtime{ID: m.ID, manifest: m, loop: loop, prefs: opts.Prefs, store: opts.Store, storage: opts.Storage, fetcher: opts.Fetcher}
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &Runtime{ID: m.ID, manifest: m, loop: loop, ctx: ctx, cancel: cancel,
+		prefs: opts.Prefs, store: opts.Store, storage: opts.Storage, fetcher: opts.Fetcher}
 	if r.store == nil {
 		r.store = NewMemStore()
 	}
@@ -129,13 +159,20 @@ func NewRuntime(m *Manifest, prog *goja.Program, opts RuntimeOptions) (*Runtime,
 	loop.Start()
 
 	errCh := make(chan error, 1)
+	// The loop's first job publishes the VM before running anything, then
+	// checks for a concurrent Close: either Close sees the VM and interrupts
+	// it, or this job sees the close and bails out.
 	ok := loop.RunOnLoop(func(vm *goja.Runtime) {
+		r.vm.Store(vm)
+		if r.closed.Load() {
+			errCh <- errStopped
+			return
+		}
 		defer func() {
 			if p := recover(); p != nil {
 				errCh <- fmt.Errorf("panic: %v", p)
 			}
 		}()
-		r.vm = vm
 		vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 		buffer.Enable(vm)
 		url.Enable(vm)
@@ -153,30 +190,76 @@ func NewRuntime(m *Manifest, prog *goja.Program, opts RuntimeOptions) (*Runtime,
 		errCh <- jsError(err)
 	})
 	if !ok {
+		r.Close()
 		return nil, errors.New("event loop not running")
+	}
+	timeout := opts.LoadTimeout
+	if timeout <= 0 {
+		timeout = defaultLoadTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	var abort <-chan struct{}
+	if opts.Context != nil {
+		abort = opts.Context.Done()
 	}
 	select {
 	case err := <-errCh:
 		if err != nil {
-			loop.Terminate()
+			r.Close()
 			return nil, err
 		}
-	case <-time.After(30 * time.Second):
-		loop.Terminate()
+	case <-timer.C:
+		r.Close()
 		return nil, errors.New("extension took too long to load")
+	case <-abort:
+		r.Close()
+		return nil, errStopped
 	}
 	return r, nil
 }
 
+// Close stops the runtime: blocking host calls are cancelled, running
+// JavaScript is interrupted (so an endless loop in top-level code or in a
+// callback can't keep it alive) and queued callbacks are dropped. It never
+// blocks for more than closeTimeout, and is safe to call from any goroutine
+// and more than once.
 func (r *Runtime) Close() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
+	if !r.closed.CompareAndSwap(false, true) {
 		return
 	}
-	r.closed = true
-	r.loop.Terminate()
+	r.cancel()
+	terminated := make(chan struct{})
+	go func() {
+		defer close(terminated)
+		r.loop.Terminate()
+	}()
+	r.interrupt()
+	// goja clears an interrupt once it has unwound the JS stack, and
+	// Terminate itself runs callbacks that were already queued (e.g.
+	// setImmediate), so keep interrupting until the loop is gone.
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	deadline := time.NewTimer(closeTimeout)
+	defer deadline.Stop()
+	for waiting := true; waiting; {
+		select {
+		case <-terminated:
+			waiting = false
+		case <-tick.C:
+			r.interrupt()
+		case <-deadline.C:
+			log.Printf("[ext:%s] the extension did not stop within %s", r.ID, closeTimeout)
+			waiting = false
+		}
+	}
 	r.store.Unwatch(r)
+}
+
+func (r *Runtime) interrupt() {
+	if vm := r.vm.Load(); vm != nil {
+		vm.Interrupt(errStopped)
+	}
 }
 
 func (r *Runtime) Logs() []LogLine {
@@ -204,9 +287,25 @@ func truncate(s string, n int) string {
 	return s
 }
 
-// RunOnLoop schedules fn on the VM goroutine.
+// RunOnLoop schedules fn on the VM goroutine. It returns false once the
+// runtime is closed, and a job still queued at that point is dropped. A
+// panic in fn is logged: the event loop goroutine has no recover, so it
+// would otherwise take the whole process down.
 func (r *Runtime) RunOnLoop(fn func(vm *goja.Runtime)) bool {
-	return r.loop.RunOnLoop(fn)
+	if r.closed.Load() {
+		return false
+	}
+	return r.loop.RunOnLoop(func(vm *goja.Runtime) {
+		if r.closed.Load() {
+			return
+		}
+		defer func() {
+			if p := recover(); p != nil && !r.closed.Load() {
+				r.log("error", fmt.Sprintf("unexpected error: %v", p))
+			}
+		}()
+		fn(vm)
+	})
 }
 
 func jsError(err error) error {
@@ -236,7 +335,10 @@ func (r *Runtime) awaitValue(vm *goja.Runtime, v goja.Value, done func(raw json.
 		if val == nil || goja.IsUndefined(val) || goja.IsNull(val) {
 			return json.RawMessage("null"), nil
 		}
-		js, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("stringify"))
+		js, ok := jsonFunc(vm, "stringify")
+		if !ok {
+			return nil, errors.New("JSON.stringify is not available")
+		}
 		s, err := js(goja.Undefined(), val)
 		if err != nil {
 			return nil, jsError(err)
@@ -256,7 +358,11 @@ func (r *Runtime) awaitValue(vm *goja.Runtime, v goja.Value, done func(raw json.
 			return
 		}
 		obj := v.ToObject(vm)
-		then, _ := goja.AssertFunction(obj.Get("then"))
+		then, ok := goja.AssertFunction(obj.Get("then"))
+		if !ok {
+			done(nil, errors.New("the returned promise has no then()"))
+			return
+		}
 		onOk := vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			done(stringify(call.Argument(0)))
 			return goja.Undefined()
@@ -291,12 +397,27 @@ func toJS(vm *goja.Runtime, v any) goja.Value {
 	if err != nil {
 		return goja.Undefined()
 	}
-	parse, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("parse"))
-	out, err := parse(goja.Undefined(), vm.ToValue(string(raw)))
-	if err != nil {
-		return goja.Undefined()
+	return parseJS(vm, raw)
+}
+
+// jsonFunc returns JSON.parse or JSON.stringify. Extension code can delete
+// or replace the JSON global, so this must not assume it exists: calling a
+// method on a nil goja.Value panics with a Go runtime error, which goja
+// doesn't turn into a JS exception and which would crash the process.
+func jsonFunc(vm *goja.Runtime, name string) (goja.Callable, bool) {
+	j, ok := vm.Get("JSON").(*goja.Object)
+	if !ok {
+		return nil, false
 	}
-	return out
+	return goja.AssertFunction(j.Get(name))
+}
+
+// intProp reads an integer property, treating a missing one as 0.
+func intProp(o *goja.Object, name string) int64 {
+	if v := o.Get(name); v != nil {
+		return v.ToInteger()
+	}
+	return 0
 }
 
 // CallProvider instantiates the global Provider class and calls a method,
@@ -309,7 +430,7 @@ func (r *Runtime) CallProvider(ctx context.Context, method string, args ...any) 
 	ch := make(chan result, 1)
 	var once sync.Once
 	send := func(raw json.RawMessage, err error) { once.Do(func() { ch <- result{raw, err} }) }
-	ok := r.loop.RunOnLoop(func(vm *goja.Runtime) {
+	ok := r.RunOnLoop(func(vm *goja.Runtime) {
 		defer func() {
 			if p := recover(); p != nil {
 				send(nil, fmt.Errorf("panic: %v", p))
@@ -348,7 +469,8 @@ func (r *Runtime) CallProvider(ctx context.Context, method string, args ...any) 
 	if !ok {
 		return nil, errors.New("extension is not running")
 	}
-	timeout := 90 * time.Second
+	timeout := time.NewTimer(90 * time.Second)
+	defer timeout.Stop()
 	select {
 	case res := <-ch:
 		if res.err != nil {
@@ -357,7 +479,9 @@ func (r *Runtime) CallProvider(ctx context.Context, method string, args ...any) 
 		return res.raw, res.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-time.After(timeout):
+	case <-r.ctx.Done():
+		return nil, errStopped
+	case <-timeout.C:
 		return nil, fmt.Errorf("%s() timed out", method)
 	}
 }
@@ -365,27 +489,31 @@ func (r *Runtime) CallProvider(ctx context.Context, method string, args ...any) 
 // HasMethod reports whether Provider.prototype has the method.
 func (r *Runtime) HasMethod(method string) bool {
 	ch := make(chan bool, 1)
-	ok := r.loop.RunOnLoop(func(vm *goja.Runtime) {
-		ctor := vm.Get("Provider")
-		if ctor == nil || goja.IsUndefined(ctor) {
-			ch <- false
+	ok := r.RunOnLoop(func(vm *goja.Runtime) {
+		has := false
+		defer func() { ch <- has }()
+		// Provider may be anything (null, a primitive, a Proxy...).
+		ctor, isObj := vm.Get("Provider").(*goja.Object)
+		if !isObj {
 			return
 		}
-		proto := ctor.ToObject(vm).Get("prototype")
-		if proto == nil {
-			ch <- false
+		proto, isObj := ctor.Get("prototype").(*goja.Object)
+		if !isObj {
 			return
 		}
-		_, isFn := goja.AssertFunction(proto.ToObject(vm).Get(method))
-		ch <- isFn
+		_, has = goja.AssertFunction(proto.Get(method))
 	})
 	if !ok {
 		return false
 	}
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
 	select {
 	case v := <-ch:
 		return v
-	case <-time.After(5 * time.Second):
+	case <-r.ctx.Done():
+		return false
+	case <-timeout.C:
 		return false
 	}
 }
@@ -423,7 +551,18 @@ func (r *Runtime) installBindings(vm *goja.Runtime) error {
 	})
 	_ = vm.Set("$toString", func(v goja.Value) string { return valueToString(vm, v) })
 	_ = vm.Set("$toBytes", func(v goja.Value) goja.Value { return bytesToJS(vm, valueToBytes(vm, v)) })
-	_ = vm.Set("$sleep", func(ms int64) { time.Sleep(time.Duration(ms) * time.Millisecond) })
+	// $sleep blocks the loop, so it must give up when the runtime is closed.
+	_ = vm.Set("$sleep", func(ms int64) {
+		if ms <= 0 {
+			return
+		}
+		t := time.NewTimer(time.Duration(ms) * time.Millisecond)
+		defer t.Stop()
+		select {
+		case <-t.C:
+		case <-r.ctx.Done():
+		}
+	})
 	_ = vm.Set("$isOffline", func() bool { return false })
 	_ = vm.Set("$toError", func(v string) error { return errors.New(v) })
 	_ = vm.Set("atob", func(s string) (string, error) {
@@ -467,12 +606,16 @@ func stringifyForLog(vm *goja.Runtime, v goja.Value) string {
 		return "undefined"
 	}
 	if obj, ok := v.(*goja.Object); ok {
-		if st := obj.Get("stack"); st != nil && !goja.IsUndefined(st) && obj.Get("message") != nil {
-			return obj.Get("message").String() + "\n" + st.String()
+		// Read each property once: a getter can delete it after the first read.
+		if st := obj.Get("stack"); st != nil && !goja.IsUndefined(st) {
+			if msg := obj.Get("message"); msg != nil {
+				return msg.String() + "\n" + st.String()
+			}
 		}
-		js, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("stringify"))
-		if s, err := js(goja.Undefined(), v); err == nil && !goja.IsUndefined(s) {
-			return s.String()
+		if js, ok := jsonFunc(vm, "stringify"); ok {
+			if s, err := js(goja.Undefined(), v); err == nil && !goja.IsUndefined(s) {
+				return s.String()
+			}
 		}
 	}
 	return v.String()
@@ -491,13 +634,14 @@ func valueToBytes(vm *goja.Runtime, v goja.Value) []byte {
 		return x.Bytes()
 	}
 	if obj, ok := v.(*goja.Object); ok {
-		// Typed arrays / Buffer: read through .buffer + byteOffset/length
+		// Typed arrays / Buffer: read through .buffer + byteOffset/length.
+		// Any object can have a "buffer" property, so the offsets are
+		// untrusted.
 		if buf := obj.Get("buffer"); buf != nil {
 			if ab, ok := buf.Export().(goja.ArrayBuffer); ok {
-				off := int(obj.Get("byteOffset").ToInteger())
-				n := int(obj.Get("byteLength").ToInteger())
+				off, n := intProp(obj, "byteOffset"), intProp(obj, "byteLength")
 				b := ab.Bytes()
-				if off+n <= len(b) {
+				if off >= 0 && n >= 0 && off <= int64(len(b)) && n <= int64(len(b))-off {
 					return append([]byte(nil), b[off:off+n]...)
 				}
 			}
@@ -538,9 +682,10 @@ func valueToString(vm *goja.Runtime, v goja.Value) string {
 				return string(b)
 			}
 		}
-		js, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("stringify"))
-		if s, err := js(goja.Undefined(), v); err == nil {
-			return s.String()
+		if js, ok := jsonFunc(vm, "stringify"); ok {
+			if s, err := js(goja.Undefined(), v); err == nil {
+				return s.String()
+			}
 		}
 	}
 	return v.String()

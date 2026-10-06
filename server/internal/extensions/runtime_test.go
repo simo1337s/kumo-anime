@@ -8,10 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/simo1337s/animetest/server/internal/config"
-	"github.com/simo1337s/animetest/server/internal/db"
-	"github.com/simo1337s/animetest/server/internal/events"
 )
 
 func loadSample(t *testing.T, dir string) (*Manifest, string) {
@@ -72,11 +68,7 @@ func TestPluginsStart(t *testing.T) {
 	if root == "" {
 		t.Skip("KUMO_EXT_SAMPLES not set")
 	}
-	tmp := t.TempDir()
-	d, _ := db.Open(filepath.Join(tmp, "t.db"))
-	st, _ := config.NewStore(d)
-	hub := events.NewHub()
-	mgr := NewManager(d, st, hub)
+	mgr := newTestManager(t)
 	mgr.Host = PluginHostServices{
 		Collection: func(ctx context.Context, mt string, r bool) (any, error) {
 			return map[string]any{"MediaListCollection": map[string]any{"lists": []any{}}}, nil
@@ -91,17 +83,17 @@ func TestPluginsStart(t *testing.T) {
 			if err := m.Validate(); err != nil {
 				t.Skipf("validate: %v", err)
 			}
-			l := &Loaded{mgr: mgr, Manifest: m, payload: payload, Enabled: true}
+			l := installTestExtension(t, mgr, m, payload, true)
 			mgr.startPlugin(l)
 			time.Sleep(300 * time.Millisecond)
+			if inf, _ := mgr.Get(m.ID); inf.Error != "" {
+				t.Errorf("plugin error: %s", inf.Error)
+			}
 			mgr.pluginMu.Lock()
 			h := mgr.plugins[m.ID]
 			mgr.pluginMu.Unlock()
 			if h == nil {
 				t.Fatal("no host")
-			}
-			if h.err != "" {
-				t.Errorf("plugin error: %s", h.err)
 			}
 			snap := h.Snapshot()
 			s := string(snap.State)
@@ -109,11 +101,9 @@ func TestPluginsStart(t *testing.T) {
 				s = s[:300] + "…"
 			}
 			t.Logf("state: %s", s)
-			if h.rt != nil {
-				for _, l := range h.rt.Logs() {
-					if l.Level == "error" {
-						t.Logf("log %s: %s", l.Level, strings.Split(l.Message, "\n")[0])
-					}
+			for _, l := range h.rt.Logs() {
+				if l.Level == "error" {
+					t.Logf("log %s: %s", l.Level, strings.Split(l.Message, "\n")[0])
 				}
 			}
 			mgr.stopPlugin(m.ID)

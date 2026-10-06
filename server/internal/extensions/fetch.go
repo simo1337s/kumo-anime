@@ -214,8 +214,10 @@ func (r *Runtime) fetch(vm *goja.Runtime, call goja.FunctionCall) goja.Value {
 		r.fetcher = f
 	}
 	go func() {
-		resp, err := f.Do(context.Background(), fr)
-		r.loop.RunOnLoop(func(vm *goja.Runtime) {
+		// Cancelled when the runtime closes; the Promise is settled on the
+		// loop goroutine (dropped if the runtime is gone by then).
+		resp, err := f.Do(r.ctx, fr)
+		r.RunOnLoop(func(vm *goja.Runtime) {
 			if err != nil {
 				r.log("warn", "fetch "+fr.url+": "+err.Error())
 				_ = reject(vm.NewGoError(err))
@@ -241,6 +243,9 @@ func parseFetchArgs(vm *goja.Runtime, call goja.FunctionCall) (fetchRequest, err
 		ho := h.ToObject(vm)
 		for _, k := range ho.Keys() {
 			v := ho.Get(k)
+			if v == nil {
+				continue // removed by a getter of an earlier key
+			}
 			if _, ok := v.Export().(string); ok {
 				fr.headers[k] = v.String()
 			} else if v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
@@ -276,7 +281,10 @@ func parseFetchArgs(vm *goja.Runtime, call goja.FunctionCall) (fetchRequest, err
 			} else if bo.Get("byteLength") != nil && !goja.IsUndefined(bo.Get("byteLength")) {
 				fr.body = valueToBytes(vm, b)
 			} else if bo.ClassName() == "Object" || bo.ClassName() == "Array" {
-				js, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("stringify"))
+				js, ok := jsonFunc(vm, "stringify")
+				if !ok {
+					return fr, errors.New("JSON.stringify is not available")
+				}
 				s, err := js(goja.Undefined(), b)
 				if err != nil {
 					return fr, err
@@ -302,15 +310,34 @@ func hasHeader(h map[string]string, name string) bool {
 	return false
 }
 
+// maxFormEntries caps the FormData entries encoded for a request.
+const maxFormEntries = 10000
+
 func encodeFormData(vm *goja.Runtime, fd *goja.Object) ([]byte, string, error) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
-	entries := fd.Get("_entries").ToObject(vm)
-	n := int(entries.Get("length").ToInteger())
-	for i := 0; i < n; i++ {
-		e := entries.Get(fmt.Sprint(i)).ToObject(vm)
-		k := e.Get("0").String()
+	// The marker can be set on any object: don't trust the shape.
+	entries, ok := fd.Get("_entries").(*goja.Object)
+	if !ok {
+		return nil, "", errors.New("invalid FormData")
+	}
+	n := intProp(entries, "length")
+	if n < 0 || n > maxFormEntries {
+		return nil, "", errors.New("invalid FormData")
+	}
+	for i := int64(0); i < n; i++ {
+		e, ok := entries.Get(fmt.Sprint(i)).(*goja.Object)
+		if !ok {
+			continue
+		}
+		k := ""
+		if kv := e.Get("0"); kv != nil {
+			k = kv.String()
+		}
 		v := e.Get("1")
+		if v == nil {
+			v = goja.Undefined()
+		}
 		if _, ok := v.Export().(string); ok || goja.IsUndefined(v) {
 			_ = w.WriteField(k, v.String())
 			continue
@@ -352,7 +379,10 @@ func responseObject(vm *goja.Runtime, resp *fetchResponse) goja.Value {
 	_ = o.Set("body", bytesToJS(vm, body))
 	_ = o.Set("text", func() string { return string(body) })
 	_ = o.Set("json", func() goja.Value {
-		parse, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("parse"))
+		parse, ok := jsonFunc(vm, "parse")
+		if !ok {
+			return goja.Null()
+		}
 		v, err := parse(goja.Undefined(), vm.ToValue(string(body)))
 		if err != nil {
 			return goja.Null()

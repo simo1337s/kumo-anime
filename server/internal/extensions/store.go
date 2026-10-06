@@ -13,7 +13,10 @@ func stringifyJS(vm *goja.Runtime, v goja.Value) (json.RawMessage, bool) {
 	if v == nil || goja.IsUndefined(v) {
 		return nil, false
 	}
-	js, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("stringify"))
+	js, ok := jsonFunc(vm, "stringify")
+	if !ok {
+		return nil, false
+	}
 	s, err := js(goja.Undefined(), v)
 	if err != nil || goja.IsUndefined(s) {
 		return nil, false
@@ -25,7 +28,10 @@ func parseJS(vm *goja.Runtime, raw json.RawMessage) goja.Value {
 	if raw == nil {
 		return goja.Undefined()
 	}
-	parse, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("parse"))
+	parse, ok := jsonFunc(vm, "parse")
+	if !ok {
+		return goja.Undefined()
+	}
 	v, err := parse(goja.Undefined(), vm.ToValue(string(raw)))
 	if err != nil {
 		return goja.Undefined()

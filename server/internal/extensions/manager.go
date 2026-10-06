@@ -33,37 +33,120 @@ type Loaded struct {
 
 	mu          sync.Mutex
 	rt          *Runtime
+	starting    *runtimeStart // provider runtime being started
+	removed     bool          // uninstalled or replaced by an update
 	err         string
 	configError string
+	lastLogs    []LogLine // output of a plugin that failed to start
 }
 
-// Runtime returns the running VM, starting it on first use.
+// runtimeStart is a provider runtime start in progress. Concurrent callers
+// wait for it instead of starting runtimes of their own.
+type runtimeStart struct {
+	done   chan struct{}
+	cancel context.CancelFunc
+	rt     *Runtime
+	err    error
+}
+
+// Runtime returns the running VM, starting it on first use. The start runs
+// without holding l.mu, so listing, logs, disabling or uninstalling the
+// extension don't wait for a slow (or stuck) payload; stop cancels it.
 func (l *Loaded) Runtime() (*Runtime, error) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.rt != nil {
-		return l.rt, nil
+	if rt := l.rt; rt != nil {
+		l.mu.Unlock()
+		return rt, nil
+	}
+	if s := l.starting; s != nil {
+		l.mu.Unlock()
+		<-s.done
+		return s.rt, s.err
+	}
+	if l.removed {
+		l.mu.Unlock()
+		return nil, fmt.Errorf("extension %s was removed", l.Manifest.Name)
 	}
 	if !l.Enabled {
+		l.mu.Unlock()
 		return nil, fmt.Errorf("extension %s is disabled", l.Manifest.Name)
 	}
-	rt, err := l.mgr.start(l)
-	if err != nil {
-		l.err = err.Error()
-		return nil, err
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &runtimeStart{done: make(chan struct{}), cancel: cancel}
+	l.starting = s
+	cfg := l.UserConfig
+	l.mu.Unlock()
+
+	payload, prefs, cfgErr := ApplyUserConfig(l.Manifest, l.payload, &cfg)
+	rt, err := l.mgr.start(ctx, l.Manifest, payload, prefs)
+	cancel()
+
+	l.mu.Lock()
+	current := l.starting == s
+	if current {
+		l.starting = nil
+		l.configError = errText(cfgErr)
+		if err != nil {
+			l.err = err.Error()
+		} else {
+			l.err = ""
+			l.rt = rt
+		}
 	}
-	l.err = ""
-	l.rt = rt
-	return rt, nil
+	l.mu.Unlock()
+	if !current {
+		// stop() ran meanwhile (disabled, reconfigured, updated, removed).
+		if rt != nil {
+			rt.Close()
+		}
+		rt, err = nil, errStopped
+	}
+	s.rt, s.err = rt, err
+	close(s.done)
+	return rt, err
 }
 
+// stop closes the runtime and cancels a start in progress.
 func (l *Loaded) stop() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.rt != nil {
-		l.rt.Close()
-		l.rt = nil
+	rt := l.rt
+	l.rt = nil
+	if s := l.starting; s != nil {
+		s.cancel()
+		l.starting = nil
 	}
+	l.mu.Unlock()
+	if rt != nil {
+		rt.Close()
+	}
+}
+
+// retire stops l for good, so a caller still holding it after an uninstall
+// or update can't start a runtime nobody would ever stop.
+func (l *Loaded) retire() {
+	l.mu.Lock()
+	l.removed = true
+	l.mu.Unlock()
+	l.stop()
+}
+
+func (l *Loaded) isEnabled() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.Enabled
+}
+
+func (l *Loaded) setConfigError(err error) {
+	l.mu.Lock()
+	l.configError = errText(err)
+	l.mu.Unlock()
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // Info is what the UI shows for an installed extension.
@@ -94,14 +177,20 @@ type Manager struct {
 	// Host services for plugins (wired by the app).
 	Host PluginHostServices
 
-	pluginMu sync.Mutex
-	plugins  map[string]*PluginHost
+	pluginMu    sync.Mutex
+	plugins     map[string]*PluginHost // running plugins
+	pluginSlots map[string]*pluginSlot
+
+	// loadTimeout bounds loading a payload, and a plugin's init.
+	loadTimeout time.Duration
 }
 
 func NewManager(d *db.DB, s *config.Store, hub *events.Hub) *Manager {
 	return &Manager{
 		db: d, settings: s, hub: hub, fetcher: NewFetcher(),
-		exts: map[string]*Loaded{}, stores: map[string]*MemStore{}, plugins: map[string]*PluginHost{},
+		exts: map[string]*Loaded{}, stores: map[string]*MemStore{},
+		plugins: map[string]*PluginHost{}, pluginSlots: map[string]*pluginSlot{},
+		loadTimeout: defaultLoadTimeout,
 	}
 }
 
@@ -173,15 +262,13 @@ func (m *Manager) info(l *Loaded) Info {
 	if l.Manifest.Type == TypePlugin {
 		inf.Granted = m.granted(l)
 		m.pluginMu.Lock()
-		if h := m.plugins[l.Manifest.ID]; h != nil {
+		h := m.plugins[l.Manifest.ID]
+		m.pluginMu.Unlock()
+		if h != nil {
 			st := h.Snapshot()
 			inf.PluginUI = &st
 			inf.Running = true
-			if h.err != "" {
-				inf.Error = h.err
-			}
 		}
-		m.pluginMu.Unlock()
 	}
 	return inf
 }
@@ -211,39 +298,44 @@ func (m *Manager) Get(id string) (Info, error) {
 	return m.info(l), nil
 }
 
-// start compiles and launches a provider runtime.
-func (m *Manager) start(l *Loaded) (*Runtime, error) {
-	payload, prefs, cfgErr := ApplyUserConfig(l.Manifest, l.payload, &l.UserConfig)
-	if cfgErr != nil {
-		l.configError = cfgErr.Error()
-	} else {
-		l.configError = ""
-	}
-	prog, err := Compile(l.Manifest, payload)
+// start compiles and launches a provider runtime. Cancelling ctx aborts
+// loading. It never panics: Runtime's waiters rely on it returning.
+func (m *Manager) start(ctx context.Context, man *Manifest, payload string, prefs map[string]string) (rt *Runtime, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			rt, err = nil, fmt.Errorf("could not start the extension: %v", p)
+		}
+	}()
+	prog, err := Compile(man, payload)
 	if err != nil {
 		return nil, err
 	}
-	return NewRuntime(l.Manifest, prog, RuntimeOptions{
-		Prefs:   prefs,
-		Store:   m.store(l.Manifest.ID),
-		Storage: NewStorage(m.db, l.Manifest.ID),
-		Fetcher: m.fetcher,
+	return NewRuntime(man, prog, RuntimeOptions{
+		Context:     ctx,
+		LoadTimeout: m.loadTimeout,
+		Prefs:       prefs,
+		Store:       m.store(man.ID),
+		Storage:     NewStorage(m.db, man.ID),
+		Fetcher:     m.fetcher,
 	})
 }
 
 func (m *Manager) persist(l *Loaded) error {
-	man, _ := json.Marshal(l.Manifest)
-	uc, _ := json.Marshal(l.UserConfig)
 	now := time.Now().Unix()
+	l.mu.Lock()
 	if l.InstalledAt == 0 {
 		l.InstalledAt = now
 	}
 	l.UpdatedAt = now
+	enabled, cfg, installedAt := l.Enabled, l.UserConfig, l.InstalledAt
+	l.mu.Unlock()
+	man, _ := json.Marshal(l.Manifest)
+	uc, _ := json.Marshal(cfg)
 	_, err := m.db.Write(`INSERT INTO extensions(id, manifest, payload, enabled, user_config, installed_at, updated_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET manifest = excluded.manifest, payload = excluded.payload, enabled = excluded.enabled,
 			user_config = excluded.user_config, updated_at = excluded.updated_at`,
-		l.Manifest.ID, string(man), l.payload, b2i(l.Enabled), string(uc), l.InstalledAt, l.UpdatedAt)
+		l.Manifest.ID, string(man), l.payload, b2i(enabled), string(uc), installedAt, now)
 	return err
 }
 
@@ -304,9 +396,9 @@ func (m *Manager) Install(ctx context.Context, manifestURI string) (Info, error)
 	old, exists := m.get(man.ID)
 	l := &Loaded{mgr: m, Manifest: man, payload: payload, Enabled: man.Type != TypePlugin}
 	if exists {
-		old.stop()
-		m.stopPlugin(man.ID)
+		old.mu.Lock()
 		l.Enabled, l.UserConfig, l.InstalledAt = old.Enabled, old.UserConfig, old.InstalledAt
+		old.mu.Unlock()
 	}
 	if err := m.persist(l); err != nil {
 		return Info{}, err
@@ -314,7 +406,11 @@ func (m *Manager) Install(ctx context.Context, manifestURI string) (Info, error)
 	m.mu.Lock()
 	m.exts[man.ID] = l
 	m.mu.Unlock()
-	if man.Type == TypePlugin && l.Enabled && m.granted(l) {
+	if exists {
+		old.retire()
+		m.stopPlugin(man.ID)
+	}
+	if man.Type == TypePlugin && l.isEnabled() && m.granted(l) {
 		go m.startPlugin(l)
 	}
 	m.hub.Publish(events.ExtensionsUpdate, nil)
@@ -326,7 +422,7 @@ func (m *Manager) Uninstall(id string) error {
 	if !ok {
 		return errors.New("extension not installed")
 	}
-	l.stop()
+	l.retire()
 	m.stopPlugin(id)
 	m.mu.Lock()
 	delete(m.exts, id)
@@ -381,7 +477,7 @@ func (m *Manager) SaveUserConfig(id string, values map[string]string) error {
 	}
 	if l.Manifest.Type == TypePlugin {
 		m.stopPlugin(id)
-		if l.Enabled && m.granted(l) {
+		if l.isEnabled() && m.granted(l) {
 			go m.startPlugin(l)
 		}
 	}
@@ -389,24 +485,26 @@ func (m *Manager) SaveUserConfig(id string, values map[string]string) error {
 	return nil
 }
 
-// Logs returns the console output of an extension.
+// Logs returns the console output of an extension (for a plugin that failed
+// to start, the output of that attempt).
 func (m *Manager) Logs(id string) []LogLine {
 	m.pluginMu.Lock()
-	if h := m.plugins[id]; h != nil && h.rt != nil {
-		m.pluginMu.Unlock()
+	h := m.plugins[id]
+	m.pluginMu.Unlock()
+	if h != nil {
 		return h.rt.Logs()
 	}
-	m.pluginMu.Unlock()
 	l, ok := m.get(id)
 	if !ok {
 		return nil
 	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.rt == nil {
-		return nil
+	rt, last := l.rt, append([]LogLine(nil), l.lastLogs...)
+	l.mu.Unlock()
+	if rt != nil {
+		return rt.Logs()
 	}
-	return l.rt.Logs()
+	return last
 }
 
 // ---------------------------------------------------------------------------
@@ -588,7 +686,7 @@ func (m *Manager) byType(t string) []*Loaded {
 	defer m.mu.RUnlock()
 	var out []*Loaded
 	for _, l := range m.exts {
-		if l.Manifest.Type == t && l.Enabled {
+		if l.Manifest.Type == t && l.isEnabled() {
 			out = append(out, l)
 		}
 	}
@@ -638,7 +736,8 @@ func (m *Manager) MangaProvider(id string) (*MangaProvider, error) {
 	return nil, fmt.Errorf("manga extension %q is not installed or disabled", id)
 }
 
-// Shutdown stops every runtime.
+// Shutdown stops every runtime (in parallel: each stop is bounded, but a
+// few stuck extensions shouldn't add up).
 func (m *Manager) Shutdown() {
 	m.mu.RLock()
 	list := make([]*Loaded, 0, len(m.exts))
@@ -646,8 +745,14 @@ func (m *Manager) Shutdown() {
 		list = append(list, l)
 	}
 	m.mu.RUnlock()
+	var wg sync.WaitGroup
 	for _, l := range list {
-		l.stop()
-		m.stopPlugin(l.Manifest.ID)
+		wg.Add(1)
+		go func(l *Loaded) {
+			defer wg.Done()
+			l.retire()
+			m.stopPlugin(l.Manifest.ID)
+		}(l)
 	}
+	wg.Wait()
 }

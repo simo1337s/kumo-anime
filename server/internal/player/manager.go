@@ -62,7 +62,8 @@ type Session struct {
 // NextResolver finds what to play after a session ended (auto play next).
 type NextResolver func(ctx context.Context, s *Session) (*PlayRequest, error)
 
-// ProgressHook is called when an episode crosses the completion threshold.
+// ProgressHook is called after the list progress was updated because an
+// episode crossed the completion threshold.
 type ProgressHook func(mediaID, episode int)
 
 type Manager struct {
@@ -322,9 +323,6 @@ func (m *Manager) tick(s *Session) {
 }
 
 func (m *Manager) fireProgress(mediaID, episode int) {
-	for _, h := range m.OnProgress {
-		go h(mediaID, episode)
-	}
 	if !m.settings.Get().Playback.AutoUpdateProgress {
 		return
 	}
@@ -336,6 +334,9 @@ func (m *Manager) fireProgress(mediaID, episode int) {
 		}
 		if ok {
 			m.hub.Success(fmt.Sprintf("Progress updated — episode %d", episode))
+			for _, h := range m.OnProgress {
+				go h(mediaID, episode)
+			}
 		}
 	}()
 }

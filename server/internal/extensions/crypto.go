@@ -221,6 +221,9 @@ func aesCBCEncrypt(pt, key, iv []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(iv) < aes.BlockSize {
+		return nil, errors.New("invalid IV")
+	}
 	pad := aes.BlockSize - len(pt)%aes.BlockSize
 	pt = append(append([]byte(nil), pt...), bytes.Repeat([]byte{byte(pad)}, pad)...)
 	out := make([]byte, len(pt))

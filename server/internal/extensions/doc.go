@@ -17,8 +17,11 @@ func installDoc(vm *goja.Runtime) {
 		return vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			sel := call.Argument(0)
 			if obj, ok := sel.(*goja.Object); ok {
-				if s, ok := obj.Get("__sel").Export().(*goquery.Selection); ok {
-					return wrapSelection(vm, s)
+				// $(el) also gets plain objects: __sel may be missing.
+				if v := obj.Get("__sel"); v != nil {
+					if s, ok := v.Export().(*goquery.Selection); ok {
+						return wrapSelection(vm, s)
+					}
 				}
 			}
 			return wrapSelection(vm, doc.Find(sel.String()))

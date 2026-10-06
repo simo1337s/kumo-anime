@@ -47,12 +47,16 @@ type PluginHost struct {
 	id     string
 	mgr    *Manager
 	man    *Manifest
-	rt     *Runtime
-	scopes map[string]bool
+	scopes map[string]bool // granted permission scopes
+	// rt is set before the host is registered in Manager.plugins and never
+	// changes afterwards.
+	rt *Runtime
+
+	// Entry points returned by the prelude; only used on the loop goroutine.
+	startUI, runHook, runEvent goja.Callable
 
 	mu    sync.Mutex
 	state json.RawMessage
-	err   string
 }
 
 func (h *PluginHost) Snapshot() PluginUIState {
@@ -65,40 +69,157 @@ func (h *PluginHost) Snapshot() PluginUIState {
 	return PluginUIState{ID: h.id, Name: h.man.Name, Icon: h.man.Icon, State: st}
 }
 
-func (m *Manager) startPlugin(l *Loaded) {
-	m.stopPlugin(l.Manifest.ID)
-	man := l.Manifest
-	h := &PluginHost{id: man.ID, mgr: m, man: man, scopes: map[string]bool{}}
+func pluginScopes(man *Manifest) map[string]bool {
+	scopes := map[string]bool{}
 	if man.Plugin != nil {
 		for _, s := range man.Plugin.Permissions.Scopes {
-			h.scopes[s] = true
+			scopes[s] = true
 		}
 	}
-	setErr := func(err error) {
-		h.mu.Lock()
-		h.err = err.Error()
-		h.mu.Unlock()
+	return scopes
+}
+
+// pluginSlot serializes starting and stopping one plugin, so overlapping
+// requests (Grant, SetEnabled and SaveUserConfig each start it in the
+// background) can't leave an orphaned runtime running.
+type pluginSlot struct {
+	run sync.Mutex // held for the whole start or stop
+
+	// Guarded by Manager.pluginMu.
+	gen    uint64             // bumped by every start or stop request
+	cancel context.CancelFunc // aborts the start in progress
+}
+
+// pluginRequest registers a start or stop request. The newest request wins:
+// the start in progress, if any, is cancelled and older requests still
+// waiting for the slot give up.
+func (m *Manager) pluginRequest(id string) (*pluginSlot, uint64) {
+	m.pluginMu.Lock()
+	defer m.pluginMu.Unlock()
+	s := m.pluginSlots[id]
+	if s == nil {
+		s = &pluginSlot{}
+		m.pluginSlots[id] = s
+	}
+	s.gen++
+	if s.cancel != nil {
+		s.cancel()
+		s.cancel = nil
+	}
+	return s, s.gen
+}
+
+// startPlugin (re)starts a plugin, provided it is still installed, enabled
+// and granted when its turn comes.
+func (m *Manager) startPlugin(l *Loaded) {
+	id := l.Manifest.ID
+	slot, gen := m.pluginRequest(id)
+	slot.run.Lock()
+	defer slot.run.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if !m.takeSlot(slot, gen, cancel) {
+		return
+	}
+	m.stopPluginLocked(id)
+	if m.pluginWanted(l) {
+		m.launchPlugin(ctx, l)
+	}
+	m.pluginMu.Lock()
+	if slot.gen == gen {
+		slot.cancel = nil
+	}
+	m.pluginMu.Unlock()
+}
+
+// stopPlugin stops a plugin, aborting a start in progress.
+func (m *Manager) stopPlugin(id string) {
+	slot, gen := m.pluginRequest(id)
+	slot.run.Lock()
+	defer slot.run.Unlock()
+	if m.takeSlot(slot, gen, nil) {
+		m.stopPluginLocked(id)
+	}
+}
+
+// takeSlot reports whether the request is still the newest one, now that it
+// holds the slot; only the newest request acts, so an older one can't undo
+// what a newer one did. cancel (if any) becomes the way to abort it.
+func (m *Manager) takeSlot(slot *pluginSlot, gen uint64, cancel context.CancelFunc) bool {
+	m.pluginMu.Lock()
+	defer m.pluginMu.Unlock()
+	if slot.gen != gen {
+		return false
+	}
+	slot.cancel = cancel
+	return true
+}
+
+// stopPluginLocked stops the running instance of a plugin. The caller holds
+// the plugin's slot.
+func (m *Manager) stopPluginLocked(id string) {
+	m.pluginMu.Lock()
+	h := m.plugins[id]
+	delete(m.plugins, id)
+	m.pluginMu.Unlock()
+	if h != nil {
+		h.rt.Close()
+		m.hub.Publish(events.PluginUI, map[string]any{"pluginId": id, "type": "removed"})
+	}
+}
+
+// pluginWanted reports whether l should be running. Starts happen in the
+// background, so this is checked again once a start holds the slot.
+func (m *Manager) pluginWanted(l *Loaded) bool {
+	l.mu.Lock()
+	ok := l.Enabled && !l.removed
+	l.mu.Unlock()
+	if !ok {
+		return false
+	}
+	cur, installed := m.get(l.Manifest.ID)
+	return installed && cur == l && m.granted(l)
+}
+
+// launchPlugin starts the plugin's runtime and runs its init. If anything
+// fails (or ctx is cancelled by a newer request) the runtime is closed and
+// unregistered. The caller holds the plugin's slot.
+func (m *Manager) launchPlugin(ctx context.Context, l *Loaded) {
+	man := l.Manifest
+	h := &PluginHost{id: man.ID, mgr: m, man: man, scopes: pluginScopes(man)}
+	var rt *Runtime
+	fail := func(err error) {
+		var logs []LogLine
+		if rt != nil {
+			m.pluginMu.Lock()
+			if m.plugins[man.ID] == h {
+				delete(m.plugins, man.ID)
+			}
+			m.pluginMu.Unlock()
+			rt.Close()
+			m.hub.Publish(events.PluginUI, map[string]any{"pluginId": man.ID, "type": "removed"})
+			logs = rt.Logs()
+		}
+		if ctx.Err() != nil {
+			return // superseded by a newer start or a stop: not an error
+		}
+		logs = append(logs, LogLine{Time: time.Now().Unix(), Level: "error", Message: err.Error()})
 		l.mu.Lock()
 		l.err = err.Error()
+		l.lastLogs = logs
 		l.mu.Unlock()
 		log.Printf("plugin %s: %v", man.ID, err)
 		m.hub.Publish(events.ExtensionsUpdate, nil)
 	}
-	m.pluginMu.Lock()
-	m.plugins[man.ID] = h
-	m.pluginMu.Unlock()
 
-	payload, prefs, cfgErr := ApplyUserConfig(man, l.payload, &l.UserConfig)
 	l.mu.Lock()
-	if cfgErr != nil {
-		l.configError = cfgErr.Error()
-	} else {
-		l.configError = ""
-	}
+	cfg := l.UserConfig
 	l.mu.Unlock()
+	payload, prefs, cfgErr := ApplyUserConfig(man, l.payload, &cfg)
+	l.setConfigError(cfgErr)
 	prog, err := Compile(man, payload)
 	if err != nil {
-		setErr(err)
+		fail(err)
 		return
 	}
 	domains := append([]string{}, builtinPluginDomains...)
@@ -115,20 +236,40 @@ func (m *Manager) startPlugin(l *Loaded) {
 	if h.scopes["storage"] {
 		storage = NewStorage(m.db, man.ID)
 	}
-	rt, err := NewRuntime(man, prog, RuntimeOptions{
-		Prefs:   prefs,
-		Store:   m.store(man.ID),
-		Storage: storage,
-		Fetcher: m.fetcher.WithDomains(domains),
-		Extra:   h.install,
+	rt, err = NewRuntime(man, prog, RuntimeOptions{
+		Context:     ctx,
+		LoadTimeout: m.loadTimeout,
+		Prefs:       prefs,
+		Store:       m.store(man.ID),
+		Storage:     storage,
+		Fetcher:     m.fetcher.WithDomains(domains),
+		Extra:       h.install,
 	})
 	if err != nil {
-		setErr(err)
+		fail(err) // rt is nil: NewRuntime closed it
 		return
 	}
 	h.rt = rt
+	m.pluginMu.Lock()
+	m.plugins[man.ID] = h
+	m.pluginMu.Unlock()
+	if err := h.init(ctx, m.loadTimeout); err != nil {
+		fail(err)
+		return
+	}
+	l.mu.Lock()
+	l.err = ""
+	l.lastLogs = nil
+	l.mu.Unlock()
+	// Give plugins that hook collection events something to work with.
+	go h.fireCollectionHooks()
+	m.hub.Publish(events.ExtensionsUpdate, nil)
+}
+
+// init runs the plugin's init() and renders its UI.
+func (h *PluginHost) init(ctx context.Context, timeout time.Duration) error {
 	done := make(chan error, 1)
-	rt.RunOnLoop(func(vm *goja.Runtime) {
+	ok := h.rt.RunOnLoop(func(vm *goja.Runtime) {
 		defer func() {
 			if p := recover(); p != nil {
 				done <- fmt.Errorf("panic: %v", p)
@@ -140,48 +281,41 @@ func (m *Manager) startPlugin(l *Loaded) {
 				return
 			}
 		}
-		start, _ := goja.AssertFunction(vm.Get("__kumoStartUI"))
-		_, err := start(goja.Undefined())
+		_, err := h.startUI(goja.Undefined())
 		done <- jsError(err)
 	})
+	if !ok {
+		return errStopped
+	}
+	t := time.NewTimer(timeout)
+	defer t.Stop()
 	select {
 	case err := <-done:
-		if err != nil {
-			setErr(err)
-			return
-		}
-	case <-time.After(30 * time.Second):
-		setErr(errors.New("plugin took too long to start"))
-		return
+		return err
+	case <-t.C:
+		return errors.New("plugin took too long to start")
+	case <-ctx.Done():
+		return errStopped
+	case <-h.rt.ctx.Done():
+		return errStopped
 	}
-	l.mu.Lock()
-	l.err = ""
-	l.mu.Unlock()
-	// Give plugins that hook collection events something to work with.
-	go h.fireCollectionHooks()
-	m.hub.Publish(events.ExtensionsUpdate, nil)
 }
 
-func (m *Manager) stopPlugin(id string) {
+func (m *Manager) runningPlugins() []*PluginHost {
 	m.pluginMu.Lock()
-	h := m.plugins[id]
-	delete(m.plugins, id)
-	m.pluginMu.Unlock()
-	if h != nil && h.rt != nil {
-		h.rt.Close()
-		m.hub.Publish(events.PluginUI, map[string]any{"pluginId": id, "type": "removed"})
+	defer m.pluginMu.Unlock()
+	hosts := make([]*PluginHost, 0, len(m.plugins))
+	for _, h := range m.plugins {
+		hosts = append(hosts, h)
 	}
+	return hosts
 }
 
 // PluginStates returns the UI state of every running plugin.
 func (m *Manager) PluginStates() []PluginUIState {
-	m.pluginMu.Lock()
-	defer m.pluginMu.Unlock()
 	out := []PluginUIState{}
-	for _, h := range m.plugins {
-		if h.rt != nil {
-			out = append(out, h.Snapshot())
-		}
+	for _, h := range m.runningPlugins() {
+		out = append(out, h.Snapshot())
 	}
 	return out
 }
@@ -192,7 +326,7 @@ func (m *Manager) DispatchPluginEvent(id string, evt map[string]any) error {
 	m.pluginMu.Lock()
 	h := m.plugins[id]
 	m.pluginMu.Unlock()
-	if h == nil || h.rt == nil {
+	if h == nil {
 		return errors.New("plugin is not running")
 	}
 	h.dispatch(evt)
@@ -201,56 +335,34 @@ func (m *Manager) DispatchPluginEvent(id string, evt map[string]any) error {
 
 // BroadcastPluginEvent sends an event (e.g. navigation) to every plugin.
 func (m *Manager) BroadcastPluginEvent(evt map[string]any) {
-	m.pluginMu.Lock()
-	hosts := make([]*PluginHost, 0, len(m.plugins))
-	for _, h := range m.plugins {
-		hosts = append(hosts, h)
-	}
-	m.pluginMu.Unlock()
-	for _, h := range hosts {
-		if h.rt != nil {
-			h.dispatch(evt)
-		}
+	for _, h := range m.runningPlugins() {
+		h.dispatch(evt)
 	}
 }
 
 // FireHook runs $app.on<Hook> callbacks registered by plugins.
 func (m *Manager) FireHook(name string, data any) {
-	m.pluginMu.Lock()
-	hosts := make([]*PluginHost, 0, len(m.plugins))
-	for _, h := range m.plugins {
-		hosts = append(hosts, h)
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return
 	}
-	m.pluginMu.Unlock()
-	for _, h := range hosts {
-		h.fireHook(name, data)
+	for _, h := range m.runningPlugins() {
+		h.fireHook(name, raw)
 	}
 }
 
 func (h *PluginHost) dispatch(evt map[string]any) {
 	raw, _ := json.Marshal(evt)
 	h.rt.RunOnLoop(func(vm *goja.Runtime) {
-		fn, ok := goja.AssertFunction(vm.Get("__kumoDispatch"))
-		if !ok {
-			return
-		}
-		if _, err := fn(goja.Undefined(), vm.ToValue(string(raw))); err != nil {
+		if _, err := h.runEvent(goja.Undefined(), vm.ToValue(string(raw))); err != nil {
 			h.rt.log("error", "event: "+jsError(err).Error())
 		}
 	})
 }
 
-func (h *PluginHost) fireHook(name string, data any) {
-	if h.rt == nil {
-		return
-	}
-	raw, _ := json.Marshal(data)
+func (h *PluginHost) fireHook(name string, raw []byte) {
 	h.rt.RunOnLoop(func(vm *goja.Runtime) {
-		fn, ok := goja.AssertFunction(vm.Get("__kumoHook"))
-		if !ok {
-			return
-		}
-		if _, err := fn(goja.Undefined(), vm.ToValue(name), vm.ToValue(string(raw))); err != nil {
+		if _, err := h.runHook(goja.Undefined(), vm.ToValue(name), vm.ToValue(string(raw))); err != nil {
 			h.rt.log("error", name+": "+jsError(err).Error())
 		}
 	})
@@ -261,21 +373,67 @@ func (h *PluginHost) fireCollectionHooks() {
 	if svc.Collection == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(h.rt.ctx, 30*time.Second)
 	defer cancel()
-	if c, err := svc.Collection(ctx, "ANIME", false); err == nil {
-		h.fireHook("onGetAnimeCollection", map[string]any{"animeCollection": c})
-		h.fireHook("onGetRawAnimeCollection", map[string]any{"animeCollection": c})
+	c, err := svc.Collection(ctx, "ANIME", false)
+	if err != nil {
+		return
 	}
+	raw, err := json.Marshal(map[string]any{"animeCollection": c})
+	if err != nil {
+		return
+	}
+	h.fireHook("onGetAnimeCollection", raw)
+	h.fireHook("onGetRawAnimeCollection", raw)
 }
 
-// install binds __host (Go services) and the plugin prelude.
+// install builds the host bindings and runs the plugin prelude. The bindings
+// are passed to the prelude as an argument instead of being a global, so
+// plugin code (which runs after the prelude) can only reach them through the
+// APIs the prelude builds for the granted scopes.
 func (h *PluginHost) install(r *Runtime, vm *goja.Runtime) error {
+	v, err := vm.RunString(pluginPrelude)
+	if err != nil {
+		return jsError(err)
+	}
+	prelude, ok := goja.AssertFunction(v)
+	if !ok {
+		return errors.New("plugin prelude is not a function")
+	}
+	ret, err := prelude(goja.Undefined(), h.bindings(r, vm))
+	if err != nil {
+		return jsError(err)
+	}
+	entry, ok := ret.(*goja.Object)
+	if !ok {
+		return errors.New("plugin prelude returned no entry points")
+	}
+	var ok1, ok2, ok3 bool
+	h.startUI, ok1 = goja.AssertFunction(entry.Get("startUI"))
+	h.runHook, ok2 = goja.AssertFunction(entry.Get("hook"))
+	h.runEvent, ok3 = goja.AssertFunction(entry.Get("dispatch"))
+	if !ok1 || !ok2 || !ok3 {
+		return errors.New("plugin prelude returned incomplete entry points")
+	}
+	return nil
+}
+
+// bindings returns the Go services the prelude builds the plugin APIs on.
+// Bindings behind a scope in the prelude ($anilist, $database) check that
+// scope themselves too, so the scopes hold even if plugin code got hold of
+// this object.
+func (h *PluginHost) bindings(r *Runtime, vm *goja.Runtime) *goja.Object {
 	svc := h.mgr.Host
-	ctx := context.Background()
+	ctx := r.ctx // cancelled when the plugin stops
+	// No prototype: a getter a plugin defines on Object.prototype must never
+	// see these objects as `this`.
 	host := vm.NewObject()
+	_ = host.SetPrototype(nil)
 	_ = host.Set("pluginId", h.id)
 	_ = host.Set("emit", func(typ string, payload goja.Value) {
+		if r.closed.Load() {
+			return // a stopping runtime must not overwrite its successor's UI
+		}
 		raw, _ := stringifyJS(vm, payload)
 		if typ == "state" {
 			h.mu.Lock()
@@ -296,33 +454,45 @@ func (h *PluginHost) install(r *Runtime, vm *goja.Runtime) error {
 		return toJS(vm, v)
 	}
 	unsupported := func(name string) error { return fmt.Errorf("%s is not available in Kumo", name) }
+	needScope := func(api, scope string) {
+		if !h.scopes[scope] {
+			panic(vm.NewGoError(fmt.Errorf("%s requires the %q permission", api, scope)))
+		}
+	}
 
+	// $anilist ("anilist" scope).
 	al := vm.NewObject()
+	_ = al.SetPrototype(nil)
 	_ = al.Set("getAnime", func(id int) goja.Value {
+		needScope("$anilist", "anilist")
 		if svc.GetAnime == nil {
 			return result(nil, unsupported("getAnime"))
 		}
 		return result(svc.GetAnime(ctx, id))
 	})
 	_ = al.Set("getAnimeDetails", func(id int) goja.Value {
+		needScope("$anilist", "anilist")
 		if svc.GetAnimeDetails == nil {
 			return result(nil, unsupported("getAnimeDetails"))
 		}
 		return result(svc.GetAnimeDetails(ctx, id))
 	})
 	_ = al.Set("getManga", func(id int) goja.Value {
+		needScope("$anilist", "anilist")
 		if svc.GetManga == nil {
 			return result(nil, unsupported("getManga"))
 		}
 		return result(svc.GetManga(ctx, id))
 	})
 	_ = al.Set("collection", func(mediaType string, refresh bool) goja.Value {
+		needScope("$anilist", "anilist")
 		if svc.Collection == nil {
 			return result(nil, unsupported("collections"))
 		}
 		return result(svc.Collection(ctx, mediaType, refresh))
 	})
 	_ = al.Set("updateEntry", func(call goja.FunctionCall) goja.Value {
+		needScope("$anilist", "anilist")
 		if svc.UpdateEntry == nil {
 			return result(nil, unsupported("updateEntry"))
 		}
@@ -345,57 +515,85 @@ func (h *PluginHost) install(r *Runtime, vm *goja.Runtime) error {
 		return result(nil, svc.UpdateEntry(ctx, id, status, score, progress))
 	})
 	_ = al.Set("deleteEntry", func(id int) goja.Value {
+		needScope("$anilist", "anilist")
 		if svc.DeleteEntry == nil {
 			return result(nil, unsupported("deleteEntry"))
 		}
 		return result(nil, svc.DeleteEntry(ctx, id))
 	})
 	_ = al.Set("customQuery", func(body map[string]any, token string) goja.Value {
+		needScope("$anilist", "anilist")
 		if svc.CustomQuery == nil {
 			return result(nil, unsupported("customQuery"))
+		}
+		// Like in Seanime, a query only carries the token it is given (none
+		// means anonymous). Plugins allowed to use the user's token may
+		// leave it out to query as the user.
+		if token == "" && h.scopes["anilist-token"] && svc.Token != nil {
+			token = svc.Token()
 		}
 		return result(svc.CustomQuery(ctx, body, token))
 	})
 	_ = al.Set("listAnime", func(page int, search string, perPage int) goja.Value {
+		needScope("$anilist", "anilist")
 		if svc.ListAnime == nil {
 			return result(nil, unsupported("listAnime"))
 		}
 		return result(svc.ListAnime(ctx, page, search, perPage))
 	})
 	_ = host.Set("anilist", al)
-	_ = host.Set("token", func() string {
-		if svc.Token == nil || !h.scopes["anilist-token"] {
-			return ""
-		}
-		return svc.Token()
-	})
-	_ = host.Set("viewer", func() goja.Value {
-		if svc.Viewer == nil {
-			return goja.Null()
-		}
-		name, avatar := svc.Viewer()
-		return toJS(vm, map[string]string{"name": name, "avatar": avatar})
-	})
+
+	// ctx.anime / ctx.manga are available to every plugin, like in Seanime.
 	_ = host.Set("animeEntry", func(id int) goja.Value {
 		if svc.AnimeEntry == nil {
 			return result(nil, unsupported("getAnimeEntry"))
 		}
 		return result(svc.AnimeEntry(ctx, id))
 	})
+	_ = host.Set("mangaCollection", func() goja.Value {
+		if svc.Collection == nil {
+			return result(nil, unsupported("collections"))
+		}
+		return result(svc.Collection(ctx, "MANGA", false))
+	})
+	_ = host.Set("manga", func(id int) goja.Value {
+		if svc.GetManga == nil {
+			return result(nil, unsupported("getManga"))
+		}
+		return result(svc.GetManga(ctx, id))
+	})
+
+	// $database ("database" scope; the token also needs "anilist-token").
+	_ = host.Set("token", func() string {
+		if svc.Token == nil || !h.scopes["database"] || !h.scopes["anilist-token"] {
+			return ""
+		}
+		return svc.Token()
+	})
+	_ = host.Set("viewer", func() goja.Value {
+		needScope("$database", "database")
+		if svc.Viewer == nil {
+			return goja.Null()
+		}
+		name, avatar := svc.Viewer()
+		return toJS(vm, map[string]string{"name": name, "avatar": avatar})
+	})
 	_ = host.Set("localFiles", func() goja.Value {
+		needScope("$database", "database")
 		if svc.LocalFiles == nil {
 			return result([]any{}, nil)
 		}
 		return result(svc.LocalFiles())
 	})
-	_ = vm.Set("__host", host)
-	_, err := vm.RunString(pluginPrelude)
-	return err
+	return host
 }
 
-// The plugin context is implemented in JavaScript on top of __host.
+// The plugin context is implemented in JavaScript on top of the host
+// bindings. The script evaluates to a function that takes the bindings and
+// returns the entry points Go calls, so neither becomes a global that plugin
+// code could reach.
 var pluginPrelude = strings.TrimSpace(`
-(function(){
+(function(host){
   var g = globalThis;
   var uid = 0;
   function nid(p){ return (p || 'n') + (++uid); }
@@ -421,7 +619,7 @@ var pluginPrelude = strings.TrimSpace(`
       if (w.contentFn) { try { html = w.contentFn(); } catch (e) { html = '<pre>' + String(e) + '</pre>'; } }
       state.webviews.push({ id: w.id, options: w.opts, hidden: w.hidden, html: html });
     });
-    __host.emit('state', state);
+    host.emit('state', state);
   }
   function scheduleRender(){ if (!renderQueued) { renderQueued = true; setTimeout(render, 0); } }
 
@@ -482,8 +680,8 @@ var pluginPrelude = strings.TrimSpace(`
     t.render = function(fn){ t.renderFn = fn; scheduleRender(); };
     t.htm = function(fn){ t.renderFn = function(){ return { id: nid('c'), type: 'html', props: { html: String(fn()) } }; }; scheduleRender(); };
     t.update = scheduleRender;
-    t.open = function(){ __host.emit('tray-open', { trayId: t.id }); };
-    t.close = function(){ __host.emit('tray-close', { trayId: t.id }); };
+    t.open = function(){ host.emit('tray-open', { trayId: t.id }); };
+    t.close = function(){ host.emit('tray-close', { trayId: t.id }); };
     t.onOpen = function(cb){ t._open.push(cb); };
     t.onClose = function(cb){ t._close.push(cb); };
     t.onClick = function(cb){ t._click.push(cb); };
@@ -519,8 +717,8 @@ var pluginPrelude = strings.TrimSpace(`
     w.onMount = function(cb){ w._mount.push(cb); }; w.onLoad = function(cb){ w._load.push(cb); }; w.onUnmount = function(cb){ w._unmount.push(cb); };
     w.channel = {
       on: function(name, cb){ (w._on[name] = w._on[name] || []).push(cb); },
-      send: function(name, payload){ __host.emit('webview-message', { webviewId: w.id, name: name, payload: payload }); },
-      sync: function(name, st){ var push = function(){ __host.emit('webview-message', { webviewId: w.id, name: name, payload: st.get ? st.get() : st }); }; if (st && st.__state) effect(push, [st]); push(); }
+      send: function(name, payload){ host.emit('webview-message', { webviewId: w.id, name: name, payload: payload }); },
+      sync: function(name, st){ var push = function(){ host.emit('webview-message', { webviewId: w.id, name: name, payload: st.get ? st.get() : st }); }; if (st && st.__state) effect(push, [st]); push(); }
     };
     webviews.push(w); scheduleRender();
     return w;
@@ -543,7 +741,7 @@ var pluginPrelude = strings.TrimSpace(`
     createElement: function(){ return Promise.resolve(fakeElement()); }, asElement: function(){ return fakeElement(); },
     onReady: function(cb){ setTimeout(safe(cb, 'dom.onReady'), 0); }, onMainTabReady: function(cb){ setTimeout(safe(cb, 'dom.onMainTabReady'), 0); },
     viewport: { getSize: function(){ return Promise.resolve({ width: 1920, height: 1080 }); }, onResize: function(){ return function(){}; } },
-    clipboard: { write: function(text){ __host.emit('clipboard', { text: String(text) }); } }
+    clipboard: { write: function(text){ host.emit('clipboard', { text: String(text) }); } }
   };
 
   // ---- cache & settings
@@ -597,9 +795,9 @@ var pluginPrelude = strings.TrimSpace(`
     eventHandler: function(key, fn){ var id = 'eh:' + key; handlers[id] = fn; return id; },
     fetch: function(url, opts){ return fetch(url, opts); },
     toast: {
-      success: function(m){ __host.toast('success', String(m)); }, error: function(m){ __host.toast('error', String(m)); },
-      info: function(m){ __host.toast('info', String(m)); }, warning: function(m){ __host.toast('warning', String(m)); },
-      alert: function(m){ __host.toast('warning', String(m)); }
+      success: function(m){ host.toast('success', String(m)); }, error: function(m){ host.toast('error', String(m)); },
+      info: function(m){ host.toast('info', String(m)); }, warning: function(m){ host.toast('warning', String(m)); },
+      alert: function(m){ host.toast('warning', String(m)); }
     },
     newTray: newTray, newWebview: newWebview,
     newCommandPalette: function(){ var p = { setItems: function(){}, refresh: function(){}, open: function(){}, close: function(){}, setInput: function(){}, getInput: function(){ return ''; }, onOpen: function(){}, onClose: function(){} }; palettes.push(p); return withComponents(p); },
@@ -616,15 +814,15 @@ var pluginPrelude = strings.TrimSpace(`
       newEpisodeGridItemMenuItem: function(p){ return newAction('episode-grid-menu', p); }
     },
     screen: {
-      navigateTo: function(path, params){ __host.emit('navigate', { path: path, searchParams: params || {} }); },
-      reload: function(){ __host.emit('reload', {}); },
+      navigateTo: function(path, params){ host.emit('navigate', { path: path, searchParams: params || {} }); },
+      reload: function(){ host.emit('reload', {}); },
       loadCurrent: function(){ var s = screenState; navCallbacks.forEach(function(cb){ setTimeout(function(){ safe(cb, 'screen.onNavigate')(s); }, 0); }); },
       onNavigate: function(cb){ navCallbacks.push(cb); return function(){ navCallbacks = navCallbacks.filter(function(x){ return x !== cb; }); }; },
       state: function(){ return screenState; }
     },
     dom: dom, cache: cache, settings: settings, jobs: jobs,
     anime: {
-      getAnimeEntry: function(id){ try { return Promise.resolve(__host.animeEntry(id)); } catch (e) { return Promise.reject(e); } },
+      getAnimeEntry: function(id){ try { return Promise.resolve(host.animeEntry(id)); } catch (e) { return Promise.reject(e); } },
       getAnimeMetadata: function(){ return Promise.resolve(null); },
       getEpisodeCollection: function(){ return Promise.resolve(null); },
       getEntryDownloadInfo: function(){ return Promise.resolve(null); },
@@ -632,13 +830,13 @@ var pluginPrelude = strings.TrimSpace(`
       clearEpisodeMetadataCache: function(){}, clearCache: function(){}
     },
     manga: {
-      getCollection: function(){ try { return Promise.resolve(__host.anilist.collection('MANGA', false)); } catch (e) { return Promise.reject(e); } },
-      getMangaEntry: function(id){ try { return Promise.resolve({ mediaId: id, media: __host.anilist.getManga(id) }); } catch (e) { return Promise.reject(e); } },
+      getCollection: function(){ try { return Promise.resolve(host.mangaCollection()); } catch (e) { return Promise.reject(e); } },
+      getMangaEntry: function(id){ try { return Promise.resolve({ mediaId: id, media: host.manga(id) }); } catch (e) { return Promise.reject(e); } },
       getChapterContainer: function(){ return Promise.resolve(null); }, getDownloadedChapters: function(){ return Promise.resolve([]); },
       refreshChapters: function(){ return Promise.resolve(); }, emptyCache: function(){ return Promise.resolve(); }, getProviders: function(){ return Promise.resolve([]); }
     },
-    notification: { send: function(m){ __host.toast('info', String(m)); } },
-    externalPlayerLink: { open: function(url){ __host.emit('open-url', { url: String(url) }); } },
+    notification: { send: function(m){ host.toast('info', String(m)); } },
+    externalPlayerLink: { open: function(url){ host.emit('open-url', { url: String(url) }); } },
     continuity: noopObject(), fillerManager: noopObject(), autoDownloader: noopObject(), autoScanner: noopObject(),
     autoSelect: noopObject(), torrentSearch: noopObject(), scanner: noopObject(), onlinestream: noopObject(), mediastream: noopObject(),
     playback: noopObject(), videoCore: noopObject(), torrentstream: noopObject(), discord: noopObject(), cron: noopObject(), chromeDP: noopObject()
@@ -655,49 +853,50 @@ var pluginPrelude = strings.TrimSpace(`
     if (typeof k === 'string' && k.indexOf('on') === 0) return function(fn){ (hooks[k] = hooks[k] || []).push(fn); };
     return undefined;
   } });
-  if (__host.hasScope('anilist')) {
+  if (host.hasScope('anilist')) {
     g.$anilist = {
-      getAnime: function(id){ return __host.anilist.getAnime(id); },
-      getAnimeDetails: function(id){ return __host.anilist.getAnimeDetails(id); },
-      getManga: function(id){ return __host.anilist.getManga(id); },
-      getMangaDetails: function(id){ return __host.anilist.getManga(id); },
-      getAnimeCollection: function(b){ return __host.anilist.collection('ANIME', !!b); },
-      getRawAnimeCollection: function(b){ return __host.anilist.collection('ANIME', !!b); },
-      getMangaCollection: function(b){ return __host.anilist.collection('MANGA', !!b); },
-      getRawMangaCollection: function(b){ return __host.anilist.collection('MANGA', !!b); },
-      getAnimeCollectionWithRelations: function(){ return __host.anilist.collection('ANIME', false); },
-      refreshAnimeCollection: function(){ __host.anilist.collection('ANIME', true); },
-      refreshMangaCollection: function(){ __host.anilist.collection('MANGA', true); },
-      updateEntry: function(mediaId, status, scoreRaw, progress){ __host.anilist.updateEntry(mediaId, status, scoreRaw, progress); },
-      updateEntryProgress: function(mediaId, progress){ __host.anilist.updateEntry(mediaId, null, null, progress); },
+      getAnime: function(id){ return host.anilist.getAnime(id); },
+      getAnimeDetails: function(id){ return host.anilist.getAnimeDetails(id); },
+      getManga: function(id){ return host.anilist.getManga(id); },
+      getMangaDetails: function(id){ return host.anilist.getManga(id); },
+      getAnimeCollection: function(b){ return host.anilist.collection('ANIME', !!b); },
+      getRawAnimeCollection: function(b){ return host.anilist.collection('ANIME', !!b); },
+      getMangaCollection: function(b){ return host.anilist.collection('MANGA', !!b); },
+      getRawMangaCollection: function(b){ return host.anilist.collection('MANGA', !!b); },
+      getAnimeCollectionWithRelations: function(){ return host.anilist.collection('ANIME', false); },
+      refreshAnimeCollection: function(){ host.anilist.collection('ANIME', true); },
+      refreshMangaCollection: function(){ host.anilist.collection('MANGA', true); },
+      updateEntry: function(mediaId, status, scoreRaw, progress){ host.anilist.updateEntry(mediaId, status, scoreRaw, progress); },
+      updateEntryProgress: function(mediaId, progress){ host.anilist.updateEntry(mediaId, null, null, progress); },
       updateEntryRepeat: function(){},
-      deleteEntry: function(mediaId){ __host.anilist.deleteEntry(mediaId); },
-      addMediaToCollection: function(ids){ (ids || []).forEach(function(id){ __host.anilist.updateEntry(id, 'PLANNING', null, null); }); },
-      customQuery: function(body, token){ return __host.anilist.customQuery(body, token || ''); },
-      listAnime: function(page, search, perPage){ return __host.anilist.listAnime(page || 1, search || '', perPage || 20); },
+      deleteEntry: function(mediaId){ host.anilist.deleteEntry(mediaId); },
+      addMediaToCollection: function(ids){ (ids || []).forEach(function(id){ host.anilist.updateEntry(id, 'PLANNING', null, null); }); },
+      customQuery: function(body, token){ return host.anilist.customQuery(body, token || ''); },
+      listAnime: function(page, search, perPage){ return host.anilist.listAnime(page || 1, search || '', perPage || 20); },
       clearCache: function(){}, getRequestProvider: function(){ return 'anilist'; }
     };
   }
-  if (__host.hasScope('database')) {
+  if (host.hasScope('database')) {
     g.$database = {
       anilist: {
-        getToken: function(){ return __host.token(); },
-        getUsername: function(){ var v = __host.viewer(); return v ? v.name : ''; },
-        getAvatarUrl: function(){ var v = __host.viewer(); return v ? v.avatar : ''; }
+        getToken: function(){ return host.token(); },
+        getUsername: function(){ var v = host.viewer(); return v ? v.name : ''; },
+        getAvatarUrl: function(){ var v = host.viewer(); return v ? v.avatar : ''; }
       },
-      localFiles: { getAll: function(){ return __host.localFiles(); }, findBy: function(fn){ return __host.localFiles().filter(fn); }, save: function(){}, insert: function(){} },
+      localFiles: { getAll: function(){ return host.localFiles(); }, findBy: function(fn){ return host.localFiles().filter(fn); }, save: function(){}, insert: function(){} },
       autoDownloaderRules: noopObject(), autoDownloaderProfiles: noopObject(), autoDownloaderItems: noopObject(),
       silencedMediaEntries: { getAllIds: function(){ return []; }, isSilenced: function(){ return false; }, setSilenced: function(){} },
       mediaFillers: noopObject()
     };
   }
 
-  g.__kumoStartUI = function(){
+  // ---- entry points called from Go
+  function startUI(){
     uiCallbacks.forEach(function(fn){ fn(ctx); });
     scheduleRender();
-  };
+  }
 
-  g.__kumoHook = function(name, raw){
+  function runHook(name, raw){
     var list = hooks[name];
     if (!list || !list.length) return;
     var data = JSON.parse(raw);
@@ -705,9 +904,9 @@ var pluginPrelude = strings.TrimSpace(`
       var e = Object.assign({}, data, { next: function(){}, preventDefault: function(){} });
       safe(fn, name)(e);
     });
-  };
+  }
 
-  g.__kumoDispatch = function(raw){
+  function dispatch(raw){
     var evt = JSON.parse(raw);
     switch (evt.kind) {
       case 'handler': {
@@ -732,6 +931,8 @@ var pluginPrelude = strings.TrimSpace(`
         break;
       }
     }
-  };
-})();
+  }
+
+  return { startUI: startUI, hook: runHook, dispatch: dispatch };
+})
 `)

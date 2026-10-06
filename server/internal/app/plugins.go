@@ -34,11 +34,12 @@ func (a *App) pluginServices() extensions.PluginHostServices {
 			}
 			vars, _ := body["variables"].(map[string]any)
 			var out any
+			// The query only carries the token it is given: without one it is
+			// anonymous, never the logged-in user's session (any GraphQL
+			// mutation would run as the user). The extension manager fills in
+			// the user's token for plugins granted "anilist-token".
 			c := anilist.NewClient()
 			c.SetToken(token)
-			if token == "" {
-				c = a.Platform.Client()
-			}
 			err := c.Query(ctx, q, vars, &out)
 			return out, err
 		},
