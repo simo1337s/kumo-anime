@@ -11,7 +11,7 @@ import { Button, Input, Spinner, TooltipProvider } from "./components/ui"
 import { api, onPasswordRequired } from "./lib/api"
 import { connectEvents, setNavigate } from "./lib/events"
 import { useStatus } from "./lib/queries"
-import { passwordStore, useStore } from "./lib/store"
+import { accentPreviewStore, passwordStore, useStore } from "./lib/store"
 import HomePage from "./pages/Home"
 
 const EntryPage = lazy(() => import("./pages/Entry"))
@@ -48,13 +48,16 @@ export default function App() {
         }
     }, [])
 
-    // Apply UI preferences.
+    // Apply UI preferences. Settings previews an accent color before it is
+    // saved; when that preview ends (Discard, leaving the page) the saved one
+    // comes back.
     const ui = status?.settings.ui
+    const accentPreview = useStore(accentPreviewStore)
     useEffect(() => {
         if (!ui) return
-        document.documentElement.style.setProperty("--brand", ui.accentColor || "#7c6cf2")
+        document.documentElement.style.setProperty("--brand", accentPreview || ui.accentColor || "#7c6cf2")
         document.documentElement.classList.toggle("reduce-motion", !!ui.reducedMotion)
-    }, [ui])
+    }, [ui, accentPreview])
 
     // Tell plugins where the user is (ctx.screen.onNavigate).
     useEffect(() => {

@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { ExternalLink, KeyRound } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { api, desktop } from "@/lib/api"
 import { useStatus } from "@/lib/queries"
@@ -14,6 +14,10 @@ export function LoginDialog({ open, onOpenChange }: { open: boolean; onOpenChang
     const [token, setToken] = useState("")
     const [busy, setBusy] = useState(false)
     const qc = useQueryClient()
+    // Don't keep a typed token around once the dialog is closed.
+    useEffect(() => {
+        if (!open) setToken("")
+    }, [open])
     const url = status?.anilistAuthUrl ?? "https://anilist.co/api/v2/oauth/authorize?client_id=13985&response_type=token"
 
     const submit = async (t: string) => {

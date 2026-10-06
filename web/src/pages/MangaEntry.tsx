@@ -5,7 +5,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import { ListStatusButton, ProgressEditor, ScoreEditor } from "@/components/entry/ListEditor"
 import { PluginSlot } from "@/components/plugins/PluginSlot"
-import { Badge, Button, Dialog, EmptyState, Input, Select, Skeleton } from "@/components/ui"
+import { Badge, Button, Dialog, EmptyState, ErrorState, Input, Select, Skeleton } from "@/components/ui"
 import { api, qs } from "@/lib/api"
 import { useMangaChapters, useStatus } from "@/lib/queries"
 import type { Media } from "@/lib/types"
@@ -15,7 +15,7 @@ export default function MangaEntryPage() {
     const [params] = useSearchParams()
     const id = Number(params.get("id"))
     const { data: status } = useStatus()
-    const { data: media, isLoading } = useQuery({ queryKey: ["manga", "media", id], queryFn: () => api.get<Media>(`/api/manga/${id}`), enabled: id > 0 })
+    const { data: media, isLoading, error: mediaError, refetch: refetchMedia, isFetching: mediaFetching } = useQuery({ queryKey: ["manga", "media", id], queryFn: () => api.get<Media>(`/api/manga/${id}`), enabled: id > 0 })
     const { data: providers } = useQuery({ queryKey: ["manga-providers"], queryFn: () => api.get<{ id: string; name: string }[]>("/api/manga/providers") })
     const [provider, setProvider] = useState<string>(() => localStorage.getItem(`kumo-manga-provider-${id}`) || status?.settings.manga.defaultProvider || "")
     const effective = provider || providers?.[0]?.id || ""
@@ -24,6 +24,28 @@ export default function MangaEntryPage() {
     const navigate = useNavigate()
     const qc = useQueryClient()
 
+    if (!(id > 0))
+        return (
+            <div className="p-10">
+                <EmptyState
+                    icon={<BookOpen className="size-6" />}
+                    title="No manga selected"
+                    action={
+                        <Link to="/manga">
+                            <Button>Go to Manga</Button>
+                        </Link>
+                    }
+                >
+                    This link doesn't point to a manga.
+                </EmptyState>
+            </div>
+        )
+    if (mediaError && !media)
+        return (
+            <div className="p-10">
+                <ErrorState title="Couldn't load this manga" error={mediaError} retrying={mediaFetching} onRetry={() => refetchMedia()} />
+            </div>
+        )
     if (isLoading || !media) return <Skeleton className="m-10 h-96" />
     const progress = media.mediaListEntry?.progress ?? 0
     const chapters = ch?.chapters ?? []
@@ -76,7 +98,7 @@ export default function MangaEntryPage() {
                         }}
                         options={(providers ?? []).map(p => ({ value: p.id, label: p.name }))}
                     />
-                    <Button variant="subtle" icon={<RefreshCw className={cn("size-4", isFetching && "animate-spin")} />} onClick={() => api.get(`/api/manga/${id}/chapters${qs({ provider: effective, refresh: 1 })}`).then(() => qc.invalidateQueries({ queryKey: ["manga", "chapters", id] }))}>
+                    <Button variant="subtle" icon={<RefreshCw className={cn("size-4", isFetching && "animate-spin")} />} onClick={() => api.get(`/api/manga/${id}/chapters${qs({ provider: effective, refresh: 1 })}`).then(() => qc.invalidateQueries({ queryKey: ["manga", "chapters", id] })).catch(e => toast.error(e.message))}>
                         Refresh
                     </Button>
                     <Button variant="subtle" icon={<Wand2 className="size-4" />} onClick={() => setMatchOpen(true)} disabled={!effective}>
@@ -146,9 +168,13 @@ function MangaMatchDialog({ open, onOpenChange, provider, mediaId, defaultQuery 
                     <button
                         key={r.id}
                         onClick={async () => {
-                            await api.post("/api/manga/mapping", { provider, mediaId, id: r.id, title: r.title })
-                            qc.invalidateQueries({ queryKey: ["manga", "chapters", mediaId] })
-                            onOpenChange(false)
+                            try {
+                                await api.post("/api/manga/mapping", { provider, mediaId, id: r.id, title: r.title })
+                                qc.invalidateQueries({ queryKey: ["manga", "chapters", mediaId] })
+                                onOpenChange(false)
+                            } catch (e: any) {
+                                toast.error(e.message)
+                            }
                         }}
                         className="flex items-center gap-3 rounded-xl p-2 text-left hover:bg-white/[0.06]"
                     >

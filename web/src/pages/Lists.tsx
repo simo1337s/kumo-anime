@@ -1,13 +1,13 @@
 import { ListChecks, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
-import { EmptyState, Input, Select, Tabs } from "@/components/ui"
+import { EmptyState, ErrorState, Input, Select, Tabs } from "@/components/ui"
 import { useRawList } from "@/lib/queries"
 import { LIST_STATUS, LIST_STATUS_MANGA, title } from "@/lib/utils"
 
 export default function ListsPage() {
     const [type, setType] = useState<"ANIME" | "MANGA">("ANIME")
-    const { data, isLoading } = useRawList(type)
+    const { data, isLoading, error, refetch, isFetching } = useRawList(type)
     const [status, setStatus] = useState("CURRENT")
     const [q, setQ] = useState("")
     const [sort, setSort] = useState("updated")
@@ -51,10 +51,13 @@ export default function ListsPage() {
             </div>
             <div className="mb-8 flex flex-wrap items-center gap-3">
                 <Tabs value={status} onChange={setStatus} tabs={Object.entries(labels).map(([k, v]) => ({ value: k, label: v, count: byStatus[k]?.length ?? 0 }))} />
-                <div className="ml-auto flex gap-3">
-                    <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter…" icon={<Search className="size-4" />} className="w-56" />
+                <div className="ml-auto flex flex-wrap gap-3">
+                    {/* Input's className only sizes the inner <input> (its own wrapper is w-full): size it from outside. */}
+                    <div className="w-56 shrink-0">
+                        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter…" icon={<Search className="size-4" />} />
+                    </div>
                     <Select
-                        className="w-44"
+                        className="w-44 shrink-0"
                         value={sort}
                         onChange={setSort}
                         options={[
@@ -72,6 +75,8 @@ export default function ListsPage() {
                         <MediaCardSkeleton key={i} />
                     ))}
                 </MediaGrid>
+            ) : error && !data ? (
+                <ErrorState title="Couldn't load your list" error={error} retrying={isFetching} onRetry={() => refetch()} />
             ) : entries.length === 0 ? (
                 <EmptyState icon={<ListChecks className="size-6" />} title="Nothing here yet">
                     Add {type === "ANIME" ? "anime" : "manga"} to your list from their page.

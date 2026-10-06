@@ -3,7 +3,7 @@ import * as DropdownPrimitive from "@radix-ui/react-dropdown-menu"
 import * as PopoverPrimitive from "@radix-ui/react-popover"
 import * as SwitchPrimitive from "@radix-ui/react-switch"
 import * as TooltipPrimitive from "@radix-ui/react-tooltip"
-import { ChevronDown, Loader2, X } from "lucide-react"
+import { AlertTriangle, ChevronDown, Loader2, RefreshCw, X } from "lucide-react"
 import React, { forwardRef } from "react"
 import { cn } from "@/lib/utils"
 
@@ -211,6 +211,45 @@ export function EmptyState({ icon, title, children, action }: { icon?: React.Rea
     )
 }
 
+// A load that failed: what went wrong and a way to try again. compact fits
+// inside dialogs and lists.
+export function ErrorState({
+    title,
+    error,
+    onRetry,
+    retrying,
+    compact,
+    className,
+}: {
+    title: string
+    error: unknown
+    onRetry?: () => void
+    retrying?: boolean
+    compact?: boolean
+    className?: string
+}) {
+    const message = error instanceof Error ? error.message : error ? String(error) : ""
+    const retry = onRetry && (
+        <Button size={compact ? "sm" : "md"} icon={<RefreshCw className="size-4" />} loading={retrying} onClick={onRetry}>
+            Try again
+        </Button>
+    )
+    if (!compact)
+        return (
+            <EmptyState icon={<AlertTriangle className="size-6" />} title={title} action={retry}>
+                {message && <span className="break-words">{message}</span>}
+            </EmptyState>
+        )
+    return (
+        <div className={cn("flex flex-col items-center gap-2 px-6 py-8 text-center", className)}>
+            <AlertTriangle className="size-5 text-amber-300" />
+            <p className="text-sm font-semibold">{title}</p>
+            {message && <p className="max-w-md text-xs break-words text-subtle">{message}</p>}
+            {retry && <div className="mt-1">{retry}</div>}
+        </div>
+    )
+}
+
 export function SectionHeader({ title, subtitle, action, className }: { title: React.ReactNode; subtitle?: React.ReactNode; action?: React.ReactNode; className?: string }) {
     return (
         <div className={cn("mb-4 flex items-end justify-between gap-4", className)}>
@@ -343,7 +382,21 @@ export function DropdownContent({ children, align = "end", className }: { childr
     )
 }
 
-export function DropdownItem({ children, onSelect, icon, danger, disabled }: { children: React.ReactNode; onSelect?: () => void; icon?: React.ReactNode; danger?: boolean; disabled?: boolean }) {
+export function DropdownItem({
+    children,
+    onSelect,
+    icon,
+    danger,
+    disabled,
+    className,
+}: {
+    children: React.ReactNode
+    onSelect?: () => void
+    icon?: React.ReactNode
+    danger?: boolean
+    disabled?: boolean
+    className?: string
+}) {
     return (
         <DropdownPrimitive.Item
             onSelect={onSelect}
@@ -351,6 +404,7 @@ export function DropdownItem({ children, onSelect, icon, danger, disabled }: { c
             className={cn(
                 "flex h-9 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-sm outline-none select-none data-[disabled]:opacity-40 data-[highlighted]:bg-white/[0.07]",
                 danger ? "text-rose-300" : "text-fg",
+                className,
             )}
         >
             {icon && <span className="text-muted [&>svg]:size-4">{icon}</span>}

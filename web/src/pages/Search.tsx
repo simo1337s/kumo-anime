@@ -1,8 +1,8 @@
 import { Search as SearchIcon, SlidersHorizontal, X } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
-import { Button, EmptyState, Input, Select } from "@/components/ui"
+import { Button, EmptyState, ErrorState, Input, Select } from "@/components/ui"
 import { useSearch } from "@/lib/queries"
 import type { Media } from "@/lib/types"
 import { cn, GENRES, SEASONS } from "@/lib/utils"
@@ -18,33 +18,59 @@ const SORTS = [
 ]
 const FORMATS = ["TV", "MOVIE", "OVA", "ONA", "SPECIAL", "TV_SHORT"]
 const MANGA_FORMATS = ["MANGA", "NOVEL", "ONE_SHOT"]
+const FILTERS = ["genre", "season", "year", "format", "status"]
+const formatsFor = (type: string) => (type === "MANGA" ? MANGA_FORMATS : FORMATS)
 
 export default function SearchPage() {
     const [params, setParams] = useSearchParams()
-    const [text, setText] = useState(params.get("q") ?? "")
+    const q = params.get("q") ?? ""
+    const [text, setText] = useState(q)
     const type = (params.get("type") as "ANIME" | "MANGA") || "ANIME"
     const genres = params.getAll("genre")
     const season = params.get("season") ?? ""
     const year = params.get("year") ?? ""
-    const format = params.get("format") ?? ""
+    // A format of the other type (e.g. from an old link) isn't sent, as the select shows.
+    const format = formatsFor(type).find(f => f === params.get("format")) ?? ""
     const status = params.get("status") ?? ""
     const sort = params.get("sort") ?? ""
     const [page, setPage] = useState(1)
     const [acc, setAcc] = useState<Media[]>([])
 
-    const set = (k: string, v: string | string[] | null) =>
+    // setParams hands its updater the params of the render it came from, which
+    // are out of date in the debounced update below (or after two quick
+    // clicks): always build on the URL as it is now.
+    const update = (change: (p: URLSearchParams) => void) =>
         setParams(
-            p => {
-                p.delete(k)
-                if (Array.isArray(v)) v.forEach(x => p.append(k, x))
-                else if (v) p.set(k, v)
+            () => {
+                const p = new URLSearchParams(window.location.search)
+                change(p)
                 return p
             },
             { replace: true },
         )
+    const set = (k: string, v: string | string[] | null) =>
+        update(p => {
+            p.delete(k)
+            if (Array.isArray(v)) v.forEach(x => p.append(k, x))
+            else if (v) p.set(k, v)
+        })
 
+    // The box writes q to the URL after a pause in typing and follows q when
+    // it changes from outside (Back/Forward, quick search). synced is the
+    // last q written or seen, so our own writes don't reset what is typed.
+    const synced = useRef(q)
     useEffect(() => {
-        const t = setTimeout(() => set("q", text.trim() || null), 350)
+        if (q === synced.current) return
+        synced.current = q
+        setText(q)
+    }, [q])
+    useEffect(() => {
+        const t = setTimeout(() => {
+            const next = text.trim()
+            if (next === synced.current) return
+            synced.current = next
+            set("q", next || null)
+        }, 350)
         return () => clearTimeout(t)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [text])
@@ -68,7 +94,7 @@ export default function SearchPage() {
         setPage(1)
         setAcc([])
     }, [query])
-    const { data, isFetching } = useSearch({ ...query, page })
+    const { data, isFetching, error, refetch } = useSearch({ ...query, page })
     useEffect(() => {
         if (!data?.media) return
         setAcc(prev => (page === 1 ? data.media! : [...prev, ...data.media!.filter(m => !prev.some(p => p.id === m.id))]))
@@ -84,7 +110,18 @@ export default function SearchPage() {
                     <h1 className="text-4xl font-extrabold tracking-tight">Search</h1>
                     <div className="flex rounded-xl border border-line bg-surface-1 p-1">
                         {(["ANIME", "MANGA"] as const).map(t => (
-                            <button key={t} onClick={() => set("type", t === "ANIME" ? null : t)} className={cn("h-8 rounded-lg px-4 text-sm font-semibold transition", type === t ? "bg-white/10 text-fg" : "text-muted hover:text-fg")}>
+                            <button
+                                key={t}
+                                onClick={() =>
+                                    update(p => {
+                                        if (t === "ANIME") p.delete("type")
+                                        else p.set("type", t)
+                                        // Anime and manga have different formats.
+                                        if (!formatsFor(t).includes(p.get("format") ?? "")) p.delete("format")
+                                    })
+                                }
+                                className={cn("h-8 rounded-lg px-4 text-sm font-semibold transition", type === t ? "bg-white/10 text-fg" : "text-muted hover:text-fg")}
+                            >
                                 {t === "ANIME" ? "Anime" : "Manga"}
                             </button>
                         ))}
@@ -95,7 +132,7 @@ export default function SearchPage() {
                     <SlidersHorizontal className="size-4 text-subtle" />
                     <Select className="w-44" value={season} onChange={v => set("season", v)} options={[{ value: "", label: "Any season" }, ...SEASONS.map(s => ({ value: s, label: s.charAt(0) + s.slice(1).toLowerCase() }))]} />
                     <Select className="w-32" value={year} onChange={v => set("year", v)} options={[{ value: "", label: "Any year" }, ...years.map(y => ({ value: y, label: y }))]} />
-                    <Select className="w-40" value={format} onChange={v => set("format", v)} options={[{ value: "", label: "Any format" }, ...(type === "MANGA" ? MANGA_FORMATS : FORMATS).map(f => ({ value: f, label: f.replace("_", " ") }))]} />
+                    <Select className="w-40" value={format} onChange={v => set("format", v)} options={[{ value: "", label: "Any format" }, ...formatsFor(type).map(f => ({ value: f, label: f.replace("_", " ") }))]} />
                     <Select
                         className="w-40"
                         value={status}
@@ -109,7 +146,7 @@ export default function SearchPage() {
                     />
                     <Select className="w-52" value={sort} onChange={v => set("sort", v)} options={SORTS} />
                     {active > 0 && (
-                        <Button variant="ghost" size="sm" icon={<X className="size-4" />} onClick={() => setParams(params.get("q") ? { q: params.get("q")! } : {}, { replace: true })}>
+                        <Button variant="ghost" size="sm" icon={<X className="size-4" />} onClick={() => update(p => FILTERS.forEach(k => p.delete(k)))}>
                             Clear filters
                         </Button>
                     )}
@@ -120,7 +157,13 @@ export default function SearchPage() {
                         return (
                             <button
                                 key={g}
-                                onClick={() => set("genre", on ? genres.filter(x => x !== g) : [...genres, g])}
+                                onClick={() =>
+                                    update(p => {
+                                        const cur = p.getAll("genre")
+                                        p.delete("genre")
+                                        for (const v of cur.includes(g) ? cur.filter(c => c !== g) : [...cur, g]) p.append("genre", v)
+                                    })
+                                }
                                 className={cn("rounded-full border px-3.5 py-1.5 text-sm font-medium transition", on ? "border-brand bg-brand text-white" : "border-line text-muted hover:border-line-strong hover:text-fg")}
                             >
                                 {g}
@@ -136,6 +179,8 @@ export default function SearchPage() {
                         <MediaCardSkeleton key={i} />
                     ))}
                 </MediaGrid>
+            ) : acc.length === 0 && error ? (
+                <ErrorState title="Couldn't search AniList" error={error} onRetry={() => refetch()} />
             ) : acc.length === 0 ? (
                 <EmptyState icon={<SearchIcon className="size-6" />} title="Nothing found">
                     Try a different title or fewer filters.
@@ -147,12 +192,16 @@ export default function SearchPage() {
                             <MediaCard key={m.id} media={m} listEntry={m.mediaListEntry} />
                         ))}
                     </MediaGrid>
-                    {data?.pageInfo?.hasNextPage && (
-                        <div className="mt-10 flex justify-center">
-                            <Button loading={isFetching} onClick={() => setPage(p => p + 1)}>
-                                Load more
-                            </Button>
-                        </div>
+                    {error && page > 1 ? (
+                        <ErrorState compact className="mt-6" title="Couldn't load more results" error={error} retrying={isFetching} onRetry={() => refetch()} />
+                    ) : (
+                        data?.pageInfo?.hasNextPage && (
+                            <div className="mt-10 flex justify-center">
+                                <Button loading={isFetching} onClick={() => setPage(p => p + 1)}>
+                                    Load more
+                                </Button>
+                            </div>
+                        )
                     )}
                 </>
             )}

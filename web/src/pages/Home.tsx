@@ -1,4 +1,4 @@
-import { ArrowDownUp, ChevronLeft, ChevronRight, Download, FolderOpen, FolderSearch, FolderSync, HardDrive, LibraryBig, ListFilter, LogIn, MoreVertical, Puzzle, RefreshCw, Settings2, Sparkles } from "lucide-react"
+import { ArrowDownUp, ChevronLeft, ChevronRight, Download, FolderOpen, FolderSearch, FolderSync, HardDrive, LibraryBig, ListFilter, LogIn, MoreVertical, Puzzle, RefreshCw, Settings2, Sparkles, X } from "lucide-react"
 import { useMemo, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { EpisodeCard } from "@/components/EpisodeCard"
@@ -69,12 +69,27 @@ export default function HomePage() {
     }, [data, genre, onlyLocal, sort])
 
     const refreshAnilist = async () => {
-        await api.get("/api/anime/collection?refresh=1")
-        qc.invalidateQueries({ queryKey: ["collection"] })
-        toast.success("Synced with AniList")
+        // Logged out, the list is the local one: there is nothing to sync.
+        if (!status?.loggedIn) {
+            toast.error("Log in to AniList to sync your lists", { action: { label: "Log in", onClick: () => setLoginOpen(true) } })
+            return
+        }
+        const id = toast.loading("Syncing with AniList…")
+        try {
+            await api.get("/api/anime/collection?refresh=1")
+            qc.invalidateQueries({ queryKey: ["collection"] })
+            toast.success("Synced with AniList", { id })
+        } catch (e: any) {
+            toast.error(e.message, { id })
+        }
     }
 
     const isEmpty = !isLoading && !error && (data?.lists?.length ?? 0) === 0 && (data?.localOnly?.length ?? 0) === 0
+    const filtered = !!genre || onlyLocal
+    const clearFilters = () => {
+        setGenre(null)
+        setOnlyLocal(false)
+    }
 
     return (
         <div className="relative min-h-full pb-24">
@@ -191,6 +206,20 @@ export default function HomePage() {
                             <MediaCardSkeleton key={i} />
                         ))}
                     </MediaGrid>
+                )}
+
+                {!isLoading && !error && !isEmpty && filtered && lists.length === 0 && (
+                    <EmptyState
+                        icon={<ListFilter className="size-6" />}
+                        title="Nothing matches these filters"
+                        action={
+                            <Button icon={<X className="size-4" />} onClick={clearFilters}>
+                                Clear filters
+                            </Button>
+                        }
+                    >
+                        {genre ? `${onlyLocal ? "None of your downloaded anime" : "Nothing in your lists"} is tagged ${genre}.` : "None of the anime in your lists are downloaded yet."}
+                    </EmptyState>
                 )}
 
                 {lists.map(l => (

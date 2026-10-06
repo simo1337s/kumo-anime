@@ -219,10 +219,14 @@ function ManualMatchDialog({ open, onOpenChange, provider, mediaId, dub, default
         }
     }
     const pick = async (r: (typeof results)[number]) => {
-        await api.post("/api/onlinestream/mapping", { provider, mediaId, dub, id: r.id, title: r.title, query: r.query, index: r.index })
-        toast.success(`Now using “${r.title}”`)
-        qc.invalidateQueries({ queryKey: ["os-episodes", provider, mediaId, dub] })
-        onOpenChange(false)
+        try {
+            await api.post("/api/onlinestream/mapping", { provider, mediaId, dub, id: r.id, title: r.title, query: r.query, index: r.index })
+            toast.success(`Now using “${r.title}”`)
+            qc.invalidateQueries({ queryKey: ["os-episodes", provider, mediaId, dub] })
+            onOpenChange(false)
+        } catch (e: any) {
+            toast.error(e.message)
+        }
     }
     return (
         <Dialog open={open} onOpenChange={onOpenChange} title="Pick the right anime" description="Search the provider and choose the matching entry. Kumo remembers your choice.">

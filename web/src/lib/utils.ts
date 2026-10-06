@@ -165,6 +165,39 @@ export function hexToRgb(hex: string) {
     return m ? `${parseInt(m[1], 16)} ${parseInt(m[2], 16)} ${parseInt(m[3], 16)}` : "124 108 242"
 }
 
+// Copies text to the clipboard. The Clipboard API only exists on secure pages
+// (https, localhost), so plain-http LAN addresses fall back to a hidden
+// textarea. Resolves false when nothing worked.
+export async function copyText(text: string) {
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text)
+            return true
+        }
+    } catch {
+        /* blocked: try the fallback */
+    }
+    const prev = document.activeElement as HTMLElement | null
+    const ta = document.createElement("textarea")
+    ta.value = text
+    ta.setAttribute("readonly", "")
+    ta.style.position = "fixed"
+    ta.style.top = "0"
+    ta.style.opacity = "0"
+    document.body.appendChild(ta)
+    ta.focus({ preventScroll: true })
+    ta.select()
+    ta.setSelectionRange(0, text.length) // iOS ignores select()
+    try {
+        return document.execCommand("copy")
+    } catch {
+        return false
+    } finally {
+        ta.remove()
+        prev?.focus({ preventScroll: true })
+    }
+}
+
 export function entryUrl(m: { id: number; type?: string }) {
     return m.type === "MANGA" ? `/manga/entry?id=${m.id}` : `/entry?id=${m.id}`
 }

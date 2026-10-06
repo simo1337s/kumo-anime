@@ -5,8 +5,8 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { useStatus, useTorrentSearch } from "@/lib/queries"
 import type { EntryView, TorrentResult } from "@/lib/types"
-import { cn, relativeTime } from "@/lib/utils"
-import { Badge, Button, EmptyState, Input, Select, Switch } from "../ui"
+import { cn, copyText, relativeTime } from "@/lib/utils"
+import { Badge, Button, EmptyState, ErrorState, Input, Select, Switch } from "../ui"
 
 export function TorrentPanel({ entry }: { entry: EntryView }) {
     const { data: status } = useStatus()
@@ -103,6 +103,7 @@ export function TorrentPanel({ entry }: { entry: EntryView }) {
             )}
 
             {search.isPending && <div className="card h-40 shimmer" />}
+            {search.isError && <ErrorState title="Couldn't search for torrents" error={search.error} onRetry={run} />}
             {!search.isPending && results.length === 0 && search.isSuccess && (
                 <EmptyState icon={<Magnet className="size-6" />} title="No torrents found">
                     Try another provider, a different resolution, or a custom query.
@@ -166,9 +167,9 @@ export function TorrentPanel({ entry }: { entry: EntryView }) {
                                         <button
                                             className="grid size-9 place-items-center rounded-lg text-muted hover:bg-white/[0.06] hover:text-fg"
                                             title="Copy magnet"
-                                            onClick={() => {
-                                                navigator.clipboard.writeText(r.magnetLink)
-                                                toast.success("Magnet link copied")
+                                            onClick={async () => {
+                                                if (await copyText(r.magnetLink)) toast.success("Magnet link copied")
+                                                else toast.error("Couldn't copy the magnet link: the browser blocked the clipboard")
                                             }}
                                         >
                                             <Copy className="size-4" />

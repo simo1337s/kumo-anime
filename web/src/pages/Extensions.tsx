@@ -39,7 +39,7 @@ const TYPES: Record<string, { label: string; icon: React.ReactNode }> = {
 
 export default function ExtensionsPage() {
     const [params, setParams] = useSearchParams()
-    const tab = (params.get("tab") as "installed" | "marketplace") || "installed"
+    const tab = params.get("tab") === "marketplace" ? "marketplace" : "installed"
     const { data: installed } = useExtensions()
     const [manualOpen, setManualOpen] = useState(false)
     return (
@@ -255,7 +255,7 @@ function ConfigDialog({ open, onOpenChange, ext, onSaved }: { open: boolean; onO
 function LogsDialog({ open, onOpenChange, id }: { open: boolean; onOpenChange: (v: boolean) => void; id: string }) {
     const [lines, setLines] = useState<LogLineT[]>([])
     useEffect(() => {
-        if (open) api.get<LogLineT[] | null>(`/api/extensions/${id}/logs`).then(l => setLines(l ?? []))
+        if (open) api.get<LogLineT[] | null>(`/api/extensions/${id}/logs`).then(l => setLines(l ?? [])).catch(e => toast.error(e.message))
     }, [open, id])
     return (
         <Dialog open={open} onOpenChange={onOpenChange} title="Extension logs" className="w-[min(94vw,820px)]">
@@ -348,7 +348,19 @@ function Marketplace() {
     const [q, setQ] = useState("")
     const [sort, setSort] = useState("stars")
     const [hideBroken, setHideBroken] = useState(true)
+    const [reloading, setReloading] = useState(false)
     const qc = useQueryClient()
+    const reload = async () => {
+        setReloading(true)
+        try {
+            await api.get(`/api/extensions/marketplace?refresh=1&url=${encodeURIComponent(effectiveUrl)}`)
+            qc.invalidateQueries({ queryKey: ["marketplace"] })
+        } catch (e: any) {
+            toast.error(e.message)
+        } finally {
+            setReloading(false)
+        }
+    }
 
     const entries = useMemo(() => {
         let list = (data ?? []).filter(e => (type === "all" || e.type === type) && (!hideBroken || (!e.brokenTag && !e.deprecatedTag)))
@@ -370,7 +382,7 @@ function Marketplace() {
             <div className="card flex flex-col gap-3 p-4">
                 <div className="flex gap-2">
                     <Input defaultValue={effectiveUrl} onKeyDown={e => e.key === "Enter" && setUrl((e.target as HTMLInputElement).value)} onBlur={e => setUrl(e.target.value)} icon={<Globe className="size-4" />} />
-                    <Button icon={<RefreshCw className={cn("size-4", isFetching && "animate-spin")} />} onClick={() => api.get(`/api/extensions/marketplace?refresh=1&url=${encodeURIComponent(effectiveUrl)}`).then(() => qc.invalidateQueries({ queryKey: ["marketplace"] }))}>
+                    <Button icon={<RefreshCw className={cn("size-4", (reloading || isFetching) && "animate-spin")} />} disabled={reloading} onClick={reload}>
                         Reload
                     </Button>
                 </div>

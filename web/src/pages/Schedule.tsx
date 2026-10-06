@@ -2,13 +2,13 @@ import { CalendarDays, Clock } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { PluginSlot } from "@/components/plugins/PluginSlot"
-import { Badge, EmptyState, Skeleton, Tabs } from "@/components/ui"
+import { Badge, EmptyState, ErrorState, Skeleton, Tabs } from "@/components/ui"
 import { useSchedule } from "@/lib/queries"
 import type { ScheduleItem } from "@/lib/types"
 import { cn, cover, formatLabel, LIST_STATUS, timeUntil, title } from "@/lib/utils"
 
 export default function SchedulePage() {
-    const { data, isLoading, error } = useSchedule(8)
+    const { data, isLoading, error, refetch, isFetching } = useSchedule(8)
     const [filter, setFilter] = useState<"mine" | "all">(() => (localStorage.getItem("kumo-schedule-filter") as "mine" | "all") || "mine")
 
     const days = useMemo(() => {
@@ -53,8 +53,8 @@ export default function SchedulePage() {
                     ))}
                 </div>
             )}
-            {error && <EmptyState title="Couldn't load the schedule">{(error as Error).message}</EmptyState>}
-            {!isLoading && days.length === 0 && (
+            {error && !data && <ErrorState title="Couldn't load the schedule" error={error} retrying={isFetching} onRetry={() => refetch()} />}
+            {data && days.length === 0 && (
                 <EmptyState icon={<CalendarDays className="size-6" />} title="Nothing scheduled">
                     {filter === "mine" ? "None of the anime in your list air this week." : "No episodes found."}
                 </EmptyState>

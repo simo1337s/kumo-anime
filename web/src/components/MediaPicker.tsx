@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import { useCollection, useSearch } from "@/lib/queries"
 import type { Media } from "@/lib/types"
 import { cn, cover, formatLabel, title } from "@/lib/utils"
-import { Dialog, Input, Spinner } from "./ui"
+import { Dialog, ErrorState, Input, Spinner } from "./ui"
 
 // Search AniList (and the user's list) to pick an anime.
 export function MediaPicker({
@@ -33,7 +33,7 @@ export function MediaPicker({
         const t = setTimeout(() => setDq(q), 300)
         return () => clearTimeout(t)
     }, [q])
-    const { data, isFetching } = useSearch({ search: dq, type: "ANIME", perPage: 20 }, open && dq.trim().length > 1)
+    const { data, isFetching, error, refetch } = useSearch({ search: dq, type: "ANIME", perPage: 20 }, open && dq.trim().length > 1)
     const { data: coll } = useCollection()
     const fromList = (coll?.lists ?? [])
         .flatMap(l => l.items)
@@ -71,7 +71,8 @@ export function MediaPicker({
                         {i < fromList.length && <span className={cn("rounded-md bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand-strong")}>In your list</span>}
                     </button>
                 ))}
-                {!isFetching && dq.trim().length > 1 && results.length === 0 && <p className="py-10 text-center text-sm text-muted">No results</p>}
+                {!isFetching && dq.trim().length > 1 && error && <ErrorState compact title="Couldn't search AniList" error={error} onRetry={() => refetch()} />}
+                {!isFetching && dq.trim().length > 1 && !error && results.length === 0 && <p className="py-10 text-center text-sm text-muted">No results</p>}
             </div>
         </Dialog>
     )

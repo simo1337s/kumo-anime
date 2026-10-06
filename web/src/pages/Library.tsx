@@ -13,10 +13,13 @@ import type { LocalFile } from "@/lib/types"
 import { cn, formatBytes, title } from "@/lib/utils"
 
 type Tab = "folders" | "unmatched" | "files" | "ignored"
+const TABS: string[] = ["folders", "unmatched", "files", "ignored"]
 
 export default function LibraryPage() {
     const [params, setParams] = useSearchParams()
-    const tab = (params.get("tab") as Tab) || "folders"
+    const raw = params.get("tab") ?? ""
+    // Unknown tabs (old links, typos) open the first one instead of nothing.
+    const tab = (TABS.includes(raw) ? raw : "folders") as Tab
     const { data: coll } = useCollection()
     const scan = useScan()
     const scanning = useStore(scanStore, s => s.running)
@@ -65,15 +68,23 @@ function Unmatched() {
         qc.invalidateQueries({ queryKey: ["collection"] })
     }
     const ignore = async (paths: string[]) => {
-        await api.post("/api/library/ignore", { paths, ignored: true })
-        toast.success(`Ignored ${paths.length} file(s)`)
-        refresh()
+        try {
+            await api.post("/api/library/ignore", { paths, ignored: true })
+            toast.success(`Ignored ${paths.length} file(s)`)
+            refresh()
+        } catch (e: any) {
+            toast.error(e.message)
+        }
     }
     const match = async (mediaId: number, paths: string[]) => {
-        await api.post("/api/library/match", { paths, mediaId })
-        toast.success(`Matched ${paths.length} file(s)`)
-        setSelected(new Set())
-        refresh()
+        try {
+            await api.post("/api/library/match", { paths, mediaId })
+            toast.success(`Matched ${paths.length} file(s)`)
+            setSelected(new Set())
+            refresh()
+        } catch (e: any) {
+            toast.error(e.message)
+        }
     }
     if (isLoading) return <div className="card h-40 shimmer" />
     if (!data?.length)
@@ -165,9 +176,13 @@ function AllFiles() {
         }
     }
     const unmatch = async (f: LocalFile) => {
-        await api.post("/api/library/unmatch", { paths: [f.path] })
-        qc.invalidateQueries({ queryKey: ["library"] })
-        qc.invalidateQueries({ queryKey: ["collection"] })
+        try {
+            await api.post("/api/library/unmatch", { paths: [f.path] })
+            qc.invalidateQueries({ queryKey: ["library"] })
+            qc.invalidateQueries({ queryKey: ["collection"] })
+        } catch (e: any) {
+            toast.error(e.message)
+        }
     }
     if (isLoading) return <div className="card h-40 shimmer" />
     return (
@@ -238,10 +253,14 @@ function Ignored() {
     const qc = useQueryClient()
     const files = (data ?? []).filter(f => f.ignored)
     const restore = async (paths: string[]) => {
-        await api.post("/api/library/ignore", { paths, ignored: false })
-        toast.success("Restored — run a scan to match them")
-        qc.invalidateQueries({ queryKey: ["library"] })
-        qc.invalidateQueries({ queryKey: ["collection"] })
+        try {
+            await api.post("/api/library/ignore", { paths, ignored: false })
+            toast.success("Restored — run a scan to match them")
+            qc.invalidateQueries({ queryKey: ["library"] })
+            qc.invalidateQueries({ queryKey: ["collection"] })
+        } catch (e: any) {
+            toast.error(e.message)
+        }
     }
     if (isLoading) return <div className="card h-40 shimmer" />
     if (!files.length)

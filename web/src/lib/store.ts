@@ -52,3 +52,6 @@ export const playerStore = createStore<PlayerRequest | null>(null)
 export const passwordStore = createStore<boolean>(false)
 
 export const searchOpenStore = createStore<boolean>(false)
+
+// Accent color picked in Settings but not saved yet (null: use the saved one).
+export const accentPreviewStore = createStore<string | null>(null)

@@ -135,11 +135,14 @@ export default function LocalLibraryPage() {
         for (const g of groups) c[statusOf(g)] = (c[statusOf(g)] ?? 0) + 1
         return c
     }, [groups])
+    // Tabs without anime are hidden, so a remembered filter may have no tab
+    // any more: fall back to All.
+    const activeFilter: StatusFilter = filter !== "ALL" && STATUS_TABS.some(t => t.value === filter) && counts[filter] > 0 ? filter : "ALL"
 
     const shown = useMemo(() => {
         const needle = q.trim().toLowerCase()
         const out = groups.filter(g => {
-            if (filter !== "ALL" && statusOf(g) !== filter) return false
+            if (activeFilter !== "ALL" && statusOf(g) !== activeFilter) return false
             if (!needle) return true
             const m = g.item.media
             return [m.title.userPreferred, m.title.romaji, m.title.english, m.title.native, ...(m.synonyms ?? [])].some(t => t?.toLowerCase().includes(needle))
@@ -159,7 +162,7 @@ export default function LocalLibraryPage() {
             }
         })
         return out
-    }, [groups, filter, sort, q])
+    }, [groups, activeFilter, sort, q])
 
     // Newest files on disk, one card per anime and day (a batch of 12
     // episodes shows up as "Episodes 1–12", not twelve cards).
@@ -312,7 +315,7 @@ export default function LocalLibraryPage() {
                 {(loading || groups.length > 0) && (
                     <section>
                         <div className="mb-6 flex flex-wrap items-center gap-3">
-                            <Tabs value={filter} onChange={setFilter} tabs={STATUS_TABS.filter(t => t.value === "ALL" || counts[t.value]).map(t => ({ ...t, count: counts[t.value] ?? 0 }))} />
+                            <Tabs value={activeFilter} onChange={setFilter} tabs={STATUS_TABS.filter(t => t.value === "ALL" || counts[t.value]).map(t => ({ ...t, count: counts[t.value] ?? 0 }))} />
                             <div className="ml-auto flex flex-wrap items-center gap-3 lg:flex-nowrap">
                                 <div className="w-60 shrink-0">
                                     <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter by title…" icon={<Search className="size-4" />} />

@@ -98,12 +98,20 @@ function RuleCard({ rule, onEdit }: { rule: AutoRule; onEdit: () => void }) {
     const qc = useQueryClient()
     const { data: media } = useQuery({ queryKey: ["entry-lite", rule.mediaId], queryFn: () => api.get<{ media: Media }>(`/api/anime/${rule.mediaId}`), staleTime: 3600_000 })
     const toggle = async (enabled: boolean) => {
-        await api.post("/api/autodownloader/rules", { ...rule, enabled })
-        qc.invalidateQueries({ queryKey: ["auto-rules"] })
+        try {
+            await api.post("/api/autodownloader/rules", { ...rule, enabled })
+            qc.invalidateQueries({ queryKey: ["auto-rules"] })
+        } catch (e: any) {
+            toast.error(e.message)
+        }
     }
     const del = async () => {
-        await api.del(`/api/autodownloader/rules/${rule.id}`)
-        qc.invalidateQueries({ queryKey: ["auto-rules"] })
+        try {
+            await api.del(`/api/autodownloader/rules/${rule.id}`)
+            qc.invalidateQueries({ queryKey: ["auto-rules"] })
+        } catch (e: any) {
+            toast.error(e.message)
+        }
     }
     return (
         <div className="card flex items-center gap-4 p-3 pr-4">

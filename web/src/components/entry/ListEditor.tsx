@@ -95,19 +95,20 @@ export function ScoreEditor({ media, entry }: { media: Media; entry: Entry }) {
                     {score ? (score / 10).toFixed(score % 10 ? 1 : 0) : "Rate"}
                 </button>
             </DropdownTrigger>
+            {/* Menu items, not plain buttons: arrow keys move between them and picking one closes the menu. */}
             <DropdownContent align="start" className="grid grid-cols-5 gap-1 p-2">
                 {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map(s => (
-                    <button
+                    <DropdownItem
                         key={s}
-                        onClick={() => update.mutate({ score: s * 10 })}
-                        className={cn("h-9 rounded-lg text-sm font-semibold hover:bg-white/10", score === s * 10 && "bg-brand text-white")}
+                        onSelect={() => update.mutate({ score: s * 10 })}
+                        className={cn("justify-center px-0 font-semibold", score === s * 10 && "bg-brand text-white data-[highlighted]:bg-brand/80")}
                     >
                         {s}
-                    </button>
+                    </DropdownItem>
                 ))}
-                <button onClick={() => update.mutate({ score: 0 })} className="col-span-5 mt-1 h-8 rounded-lg text-xs text-muted hover:bg-white/10">
+                <DropdownItem onSelect={() => update.mutate({ score: 0 })} className="col-span-5 mt-1 h-8 justify-center text-xs text-muted">
                     Clear score
-                </button>
+                </DropdownItem>
             </DropdownContent>
         </Dropdown>
     )

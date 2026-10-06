@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom"
 import { useSearch } from "@/lib/queries"
 import { searchOpenStore, useStore } from "@/lib/store"
 import { cn, cover, entryUrl, formatLabel, title } from "@/lib/utils"
-import { Spinner } from "./ui"
+import { ErrorState, Spinner } from "./ui"
 
 function useDebounced<T>(v: T, ms = 300) {
     const [d, setD] = useState(v)
@@ -23,13 +23,17 @@ export function QuickSearch() {
     const [sel, setSel] = useState(0)
     const dq = useDebounced(q)
     const navigate = useNavigate()
-    const { data, isFetching } = useSearch({ search: dq, type, perPage: 8 }, open && dq.trim().length > 1)
-    const results = dq.trim().length > 1 ? data?.media ?? [] : []
+    const searching = dq.trim().length > 1
+    const { data, isFetching, error, refetch } = useSearch({ search: dq, type, perPage: 8 }, open && searching)
+    const results = searching ? data?.media ?? [] : []
 
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
                 e.preventDefault()
+                // The shortcut is ours: the in-app player would otherwise
+                // take it as "k" (play/pause).
+                e.stopImmediatePropagation()
                 searchOpenStore.set(!searchOpenStore.get())
             }
         }
@@ -47,10 +51,11 @@ export function QuickSearch() {
     return (
         <DialogPrimitive.Root open={open} onOpenChange={v => searchOpenStore.set(v)}>
             <DialogPrimitive.Portal>
-                <DialogPrimitive.Overlay className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm fade-in" />
+                {/* Above the in-app player (z-80) so it works while watching. */}
+                <DialogPrimitive.Overlay className="fixed inset-0 z-[85] bg-black/60 backdrop-blur-sm fade-in" />
                 <DialogPrimitive.Content
                     aria-describedby={undefined}
-                    className="fixed top-[12vh] left-1/2 z-[70] w-[min(94vw,640px)] -translate-x-1/2 overflow-hidden rounded-2xl border border-line-strong bg-surface-1 shadow-2xl rise-in outline-none"
+                    className="fixed top-[12vh] left-1/2 z-[85] w-[min(94vw,640px)] -translate-x-1/2 overflow-hidden rounded-2xl border border-line-strong bg-surface-1 shadow-2xl rise-in outline-none"
                 >
                     <DialogPrimitive.Title className="sr-only">Search</DialogPrimitive.Title>
                     <div className="flex items-center gap-3 border-b border-line px-5">
@@ -101,8 +106,9 @@ export function QuickSearch() {
                                 {sel === i && <ArrowRight className="size-4 text-muted" />}
                             </button>
                         ))}
-                        {dq.trim().length > 1 && !isFetching && results.length === 0 && <p className="p-6 text-center text-sm text-muted">No results</p>}
-                        {dq.trim().length <= 1 && (
+                        {searching && !isFetching && error && <ErrorState compact title="Couldn't search AniList" error={error} onRetry={() => refetch()} />}
+                        {searching && !isFetching && !error && results.length === 0 && <p className="p-6 text-center text-sm text-muted">No results</p>}
+                        {!searching && (
                             <p className="p-6 text-center text-sm text-subtle">
                                 Type to search AniList · <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-xs">Ctrl K</kbd> to toggle
                             </p>

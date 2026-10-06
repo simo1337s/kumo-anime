@@ -33,6 +33,7 @@ import { LoginDialog } from "@/components/LoginDialog"
 import { Badge, Button, Dialog, Input, Select, Switch, Textarea } from "@/components/ui"
 import { api } from "@/lib/api"
 import { useOnlineProviders, useSaveSettings, useStatus } from "@/lib/queries"
+import { accentPreviewStore } from "@/lib/store"
 import type { Settings } from "@/lib/types"
 import { cn, formatBytes, img } from "@/lib/utils"
 
@@ -82,18 +83,65 @@ const NAV: { items: { id: SectionId; label: string; icon: React.ReactNode }[] }[
 ]
 
 const ALIASES: Record<string, SectionId> = { "anicli": "streaming", "online-streaming": "streaming" }
+const SECTION_IDS: string[] = NAV.flatMap(g => g.items.map(i => i.id))
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+// Puts the fields edited in draft (compared with base, the server copy the
+// draft was made from) on top of a newer server copy.
+function rebase(draft: Settings, base: Settings, server: Settings): Settings {
+    const out: Record<string, any> = structuredClone(server)
+    const old: Record<string, any> = base
+    for (const [key, value] of Object.entries(draft) as [string, any][]) {
+        if (same(value, old[key])) continue
+        if (value && typeof value === "object" && !Array.isArray(value) && old[key] && typeof old[key] === "object") {
+            for (const field of Object.keys(value)) if (!same(value[field], old[key][field])) out[key] = { ...out[key], [field]: value[field] }
+        } else out[key] = value
+    }
+    return out as Settings
+}
 
 export default function SettingsPage() {
     const { data: status } = useStatus()
     const [params, setParams] = useSearchParams()
     const raw = params.get("tab") ?? "app"
-    const section = (ALIASES[raw] ?? raw) as SectionId
+    const tab = ALIASES[raw] ?? raw
+    // Unknown tabs (old links, typos) open the first one instead of nothing.
+    const section = (SECTION_IDS.includes(tab) ? tab : "app") as SectionId
     const save = useSaveSettings()
+    const server = status?.settings
+    // draft is what the form edits, base the server copy it was made from.
     const [draft, setDraft] = useState<Settings | null>(null)
+    const [base, setBase] = useState<Settings | null>(null)
+    const reset = (s: Settings) => {
+        setDraft(structuredClone(s))
+        setBase(s)
+    }
     useEffect(() => {
-        if (status?.settings && !draft) setDraft(structuredClone(status.settings))
-    }, [status?.settings, draft])
-    const dirty = useMemo(() => !!draft && !!status && JSON.stringify(draft) !== JSON.stringify(status.settings), [draft, status])
+        if (!server) return
+        if (!draft || !base) {
+            reset(server)
+            return
+        }
+        if (same(server, base)) return
+        // Saved somewhere else meanwhile (another tab or device, the auto
+        // downloader switch…): follow it, keeping what was edited here so a
+        // save doesn't put the old values back.
+        const next = rebase(draft, base, server)
+        if (!same(draft, base) && !same(next, draft)) toast.info("Settings were changed somewhere else. Your unsaved changes here were kept.")
+        setDraft(next)
+        setBase(server)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [server])
+    const dirty = useMemo(() => !!draft && !!server && !same(draft, server), [draft, server])
+
+    // Preview the accent color being edited; App shows the saved one again
+    // once the preview ends (Discard, leaving the page).
+    const accent = draft?.ui.accentColor
+    useEffect(() => {
+        accentPreviewStore.set(accent || null)
+    }, [accent])
+    useEffect(() => () => accentPreviewStore.set(null), [])
 
     if (!draft || !status) return null
     const set = <K extends keyof Settings>(k: K, v: Partial<Settings[K]>) => setDraft(d => (d ? { ...d, [k]: { ...d[k], ...v } } : d))
@@ -103,7 +151,7 @@ export default function SettingsPage() {
         const oldPort = status.settings.server.port
         save.mutate(draft, {
             onSuccess: s => {
-                setDraft(structuredClone(s))
+                reset(s)
                 // The server moves to the new port; follow it.
                 if (s.server.port !== oldPort && ["127.0.0.1", "localhost"].includes(location.hostname)) {
                     setTimeout(() => {
@@ -172,7 +220,7 @@ export default function SettingsPage() {
                         {dirty && (
                             <>
                                 <span className="glass rounded-full px-3 py-1.5 text-sm text-muted">Unsaved changes</span>
-                                <Button variant="ghost" size="sm" onClick={() => setDraft(structuredClone(status.settings))}>
+                                <Button variant="ghost" size="sm" onClick={() => reset(status.settings)}>
                                     Discard
                                 </Button>
                             </>
@@ -215,14 +263,16 @@ function Group({ title, children, description }: { title?: string; description?:
     )
 }
 
-function Row({ label, help, children }: { label: React.ReactNode; help?: React.ReactNode; children: React.ReactNode }) {
+// wide: the value (e.g. a long path) takes the remaining space and wraps
+// instead of pushing out of the card.
+function Row({ label, help, children, wide }: { label: React.ReactNode; help?: React.ReactNode; children: React.ReactNode; wide?: boolean }) {
     return (
         <div className="flex items-center justify-between gap-6 px-4 py-3.5">
             <div className="min-w-0">
                 <p className="text-sm font-medium">{label}</p>
                 {help && <p className="mt-0.5 text-xs text-subtle">{help}</p>}
             </div>
-            <div className="shrink-0">{children}</div>
+            <div className={wide ? "flex min-w-0 flex-1 justify-end" : "shrink-0"}>{children}</div>
         </div>
     )
 }
@@ -323,6 +373,28 @@ function PathInput({ value, onChange, placeholder }: { value: string; onChange: 
     )
 }
 
+const toLines = (text: string) => text.split("\n").map(s => s.trim()).filter(Boolean)
+
+// One entry per line. The box keeps the text as typed (blank lines, spaces)
+// and only the cleaned-up list goes into the draft, so typing is never
+// rewritten under the cursor; leaving the box tidies it.
+function LinesInput({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+    const joined = value.join("\n")
+    const [text, setText] = useState(joined)
+    // The list was replaced from outside (Discard, a save, a change made elsewhere).
+    useEffect(() => setText(t => (toLines(t).join("\n") === joined ? t : joined)), [joined])
+    return (
+        <Textarea
+            value={text}
+            onChange={e => {
+                setText(e.target.value)
+                onChange(toLines(e.target.value))
+            }}
+            onBlur={() => setText(joined)}
+        />
+    )
+}
+
 function Detect({ ok, label }: { ok?: boolean; label: string }) {
     return ok ? <Badge tone="green">{label} found</Badge> : <Badge tone="red">{label} not found</Badge>
 }
@@ -359,8 +431,12 @@ function AppSection({ draft, set }: SectionProps) {
                             variant="danger"
                             size="sm"
                             onClick={async () => {
-                                await api.post("/api/auth/logout")
-                                qc.invalidateQueries()
+                                try {
+                                    await api.post("/api/auth/logout")
+                                    qc.invalidateQueries()
+                                } catch (e: any) {
+                                    toast.error(e.message)
+                                }
                             }}
                         >
                             Log out
@@ -408,8 +484,10 @@ function AppSection({ draft, set }: SectionProps) {
             </Group>
 
             <Group title="Data">
-                <Row label="Data folder" help="Database, cache and extension storage">
-                    <code className="rounded-lg bg-black/30 px-2 py-1 text-xs">{status?.dataDir}</code>
+                <Row label="Data folder" help="Database, cache and extension storage" wide>
+                    <code title={status?.dataDir} className="min-w-0 rounded-lg bg-black/30 px-2 py-1 text-xs break-all">
+                        {status?.dataDir}
+                    </code>
                 </Row>
             </Group>
             <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
@@ -428,10 +506,7 @@ function UISection({ draft, set }: SectionProps) {
                         {ACCENTS.map(c => (
                             <button
                                 key={c}
-                                onClick={() => {
-                                    set("ui", { accentColor: c })
-                                    document.documentElement.style.setProperty("--brand", c)
-                                }}
+                                onClick={() => set("ui", { accentColor: c })}
                                 className={cn("size-9 rounded-full ring-2 ring-offset-2 ring-offset-[var(--surface-1)] transition", draft.ui.accentColor === c ? "ring-white" : "ring-transparent hover:ring-white/30")}
                                 style={{ background: c }}
                                 aria-label={c}
@@ -440,10 +515,7 @@ function UISection({ draft, set }: SectionProps) {
                         <input
                             type="color"
                             value={draft.ui.accentColor}
-                            onChange={e => {
-                                set("ui", { accentColor: e.target.value })
-                                document.documentElement.style.setProperty("--brand", e.target.value)
-                            }}
+                            onChange={e => set("ui", { accentColor: e.target.value })}
                             className="size-9 cursor-pointer rounded-full border border-line bg-transparent"
                         />
                     </div>
@@ -518,7 +590,7 @@ function LibrarySection({ draft, set }: SectionProps) {
                     <Switch checked={draft.library.matchOutsideList} onChange={v => set("library", { matchOutsideList: v })} />
                 </Row>
                 <Stack label="Ignore patterns" help="One glob per line, matched against file and folder names (e.g. *sample*).">
-                    <Textarea value={(draft.library.ignorePatterns ?? []).join("\n")} onChange={e => set("library", { ignorePatterns: e.target.value.split("\n").map(s => s.trim()).filter(Boolean) })} />
+                    <LinesInput value={draft.library.ignorePatterns ?? []} onChange={v => set("library", { ignorePatterns: v })} />
                 </Stack>
             </Collapsible>
         </>
@@ -934,14 +1006,22 @@ function LogsSection() {
     const { data: cache, refetch: refetchCache } = useQuery({ queryKey: ["cache-size"], queryFn: () => api.get<{ entries: number }>("/api/cache/size") })
     const { data: imgs, refetch: refetchImgs } = useQuery({ queryKey: ["image-cache"], queryFn: () => api.get<{ files: number; bytes: number }>("/api/images/stats") })
     const clear = async () => {
-        await api.post("/api/cache/clear")
-        toast.success("Cache cleared")
-        refetchCache()
+        try {
+            await api.post("/api/cache/clear")
+            toast.success("Cache cleared")
+            refetchCache()
+        } catch (e: any) {
+            toast.error(e.message)
+        }
     }
     const clearImages = async () => {
-        await api.post("/api/images/clear")
-        toast.success("Artwork cache cleared — covers will be downloaded again")
-        refetchImgs()
+        try {
+            await api.post("/api/images/clear")
+            toast.success("Artwork cache cleared — covers will be downloaded again")
+            refetchImgs()
+        } catch (e: any) {
+            toast.error(e.message)
+        }
     }
     return (
         <>

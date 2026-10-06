@@ -3,13 +3,13 @@ import { BookOpen, Puzzle } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
-import { Button, EmptyState, Tabs } from "@/components/ui"
+import { Button, EmptyState, ErrorState, Tabs } from "@/components/ui"
 import { api } from "@/lib/api"
 import type { ListEntry } from "@/lib/types"
 import { LIST_STATUS_MANGA } from "@/lib/utils"
 
 export default function MangaPage() {
-    const { data, isLoading } = useQuery({
+    const { data, isLoading, error, refetch, isFetching } = useQuery({
         queryKey: ["manga", "collection"],
         queryFn: () => api.get<{ lists: { status: string; isCustomList: boolean; entries: ListEntry[] }[] | null }>("/api/manga/collection"),
     })
@@ -53,6 +53,8 @@ export default function MangaPage() {
                         <MediaCardSkeleton key={i} />
                     ))}
                 </MediaGrid>
+            ) : error && !data ? (
+                <ErrorState title="Couldn't load your manga list" error={error} retrying={isFetching} onRetry={() => refetch()} />
             ) : entries.length === 0 ? (
                 <EmptyState icon={<BookOpen className="size-6" />} title="Nothing here">
                     Add manga to your list from search.
