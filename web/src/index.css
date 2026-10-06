@@ -1,0 +1,215 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/plus-jakarta-sans";
+
+/* Runtime tokens (the accent can be changed from Settings › User Interface) */
+:root {
+    --brand: #7c6cf2;
+    --bg: #09090d;
+    --surface-1: #0f0f15;
+    --surface-2: #14141c;
+    --surface-3: #1b1b26;
+    --surface-4: #232331;
+    --line: rgb(255 255 255 / 0.065);
+    --line-strong: rgb(255 255 255 / 0.11);
+    --text: #ececf3;
+    --muted: #a0a0b6;
+    --subtle: #6d6d84;
+    color-scheme: dark;
+}
+
+@theme inline {
+    --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+    --font-display: "Plus Jakarta Sans Variable", "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+
+    --color-brand: var(--brand);
+    --color-brand-soft: color-mix(in oklab, var(--brand) 18%, transparent);
+    --color-brand-strong: color-mix(in oklab, var(--brand) 82%, white);
+    --color-bg: var(--bg);
+    --color-surface-1: var(--surface-1);
+    --color-surface-2: var(--surface-2);
+    --color-surface-3: var(--surface-3);
+    --color-surface-4: var(--surface-4);
+    --color-line: var(--line);
+    --color-line-strong: var(--line-strong);
+    --color-fg: var(--text);
+    --color-muted: var(--muted);
+    --color-subtle: var(--subtle);
+}
+
+@layer base {
+    html,
+    body,
+    #root {
+        height: 100%;
+    }
+    body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font-sans);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        overflow: hidden;
+    }
+    h1, h2, h3, h4 {
+        font-family: var(--font-display);
+        letter-spacing: -0.015em;
+    }
+    ::selection {
+        background: color-mix(in oklab, var(--brand) 45%, transparent);
+    }
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+    }
+    *::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+    *::-webkit-scrollbar-thumb {
+        background: rgb(255 255 255 / 0.12);
+        border-radius: 999px;
+        border: 3px solid transparent;
+        background-clip: padding-box;
+    }
+    *::-webkit-scrollbar-thumb:hover {
+        background-color: rgb(255 255 255 / 0.22);
+    }
+    button {
+        cursor: pointer;
+    }
+    button:disabled {
+        cursor: not-allowed;
+    }
+    input[type="number"]::-webkit-inner-spin-button {
+        opacity: 0.4;
+    }
+}
+
+@layer components {
+    .card {
+        background: var(--surface-1);
+        border: 1px solid var(--line);
+        border-radius: 1rem;
+    }
+    .glass {
+        background: color-mix(in oklab, var(--surface-1) 72%, transparent);
+        backdrop-filter: blur(18px) saturate(140%);
+        -webkit-backdrop-filter: blur(18px) saturate(140%);
+        border: 1px solid var(--line);
+    }
+    .no-scrollbar {
+        scrollbar-width: none;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+    .text-gradient {
+        background: linear-gradient(120deg, #fff 10%, color-mix(in oklab, var(--brand) 60%, white) 90%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+    }
+    .focus-ring {
+        outline: none;
+    }
+    .focus-ring:focus-visible {
+        box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in oklab, var(--brand) 70%, transparent);
+    }
+    .shimmer {
+        background: linear-gradient(100deg, var(--surface-2) 30%, var(--surface-3) 50%, var(--surface-2) 70%);
+        background-size: 200% 100%;
+        animation: shimmer 1.4s ease-in-out infinite;
+    }
+    .fade-in {
+        animation: fade-in 0.35s ease both;
+    }
+    .rise-in {
+        animation: rise-in 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+    .prose-desc p + p {
+        margin-top: 0.6rem;
+    }
+    .prose-desc a {
+        color: var(--brand);
+    }
+}
+
+@keyframes shimmer {
+    from {
+        background-position: 200% 0;
+    }
+    to {
+        background-position: -200% 0;
+    }
+}
+@keyframes fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+@keyframes rise-in {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes slow-zoom {
+    from {
+        transform: scale(1.04);
+    }
+    to {
+        transform: scale(1.12);
+    }
+}
+.animate-slow-zoom {
+    animation: slow-zoom 24s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        transition-duration: 0.001ms !important;
+    }
+}
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+}
+
+/* In-app player subtitles */
+video::cue {
+    background: rgb(0 0 0 / 0.55);
+    color: #fff;
+    font-family: var(--font-sans);
+    font-size: clamp(16px, 2.4vw, 34px);
+    font-weight: 600;
+    line-height: 1.35;
+    text-shadow: 0 2px 4px rgb(0 0 0 / 0.8);
+}
+
+/* Plugins (Seanime marketplace) style their tray UIs with Tailwind classes;
+   generate the common utilities so they render properly. */
+@source inline("{flex,inline-flex,grid,block,inline-block,hidden,contents,relative,absolute,sticky,truncate,italic,underline,uppercase,capitalize,shrink-0,grow,flex-1,flex-wrap,flex-row,flex-col,flex-row-reverse,flex-col-reverse,w-full,h-full,w-auto,h-auto,min-w-0,max-w-full,overflow-hidden,overflow-auto,overflow-y-auto,overflow-x-auto,whitespace-nowrap,break-all,break-words,object-cover,object-contain,cursor-pointer,select-none,pointer-events-none,transition,border,border-0,border-t,border-b,shadow,shadow-md,shadow-lg,opacity-50,opacity-60,opacity-70,opacity-80,line-clamp-1,line-clamp-2,line-clamp-3,aspect-video,aspect-square}");
+@source inline("{items,self}-{start,center,end,stretch,baseline}");
+@source inline("justify-{start,center,end,between,around,evenly}");
+@source inline("text-{left,center,right,xs,sm,base,lg,xl,2xl,3xl,white,black}");
+@source inline("font-{light,normal,medium,semibold,bold,extrabold}");
+@source inline("{gap,gap-x,gap-y,p,px,py,pt,pb,pl,pr,m,mx,my,mt,mb,ml,mr,space-y,space-x}-{0,0.5,1,1.5,2,2.5,3,4,5,6,8,10,12}");
+@source inline("{w,h,size,min-h,max-h,max-w}-{4,5,6,8,10,12,16,20,24,32,40,48,64,80,96}");
+@source inline("rounded{,-sm,-md,-lg,-xl,-2xl,-full}");
+@source inline("grid-cols-{1,2,3,4,5,6}");
+@source inline("{text,bg,border}-{gray,zinc,neutral,slate,red,green,blue,yellow,orange,purple,indigo,pink,emerald,sky,amber,rose,violet}-{100,200,300,400,500,600,700,800,900,950}");
+@source inline("{bg,border}-{white,black,transparent}{,/5,/10,/20,/30,/50}");
+@source inline("hover:{bg-white/10,bg-gray-800,text-white,underline,opacity-80}");

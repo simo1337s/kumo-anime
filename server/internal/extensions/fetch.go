@@ -11,11 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/dop251/goja"
 	"github.com/imroc/req/v3"
+
+	"github.com/simo1337s/animetest/server/internal/util"
 )
 
 // Fetcher performs HTTP requests for extensions. It impersonates Chrome's
@@ -30,29 +31,9 @@ type Fetcher struct {
 	AllowedDomains []string
 }
 
-var errPrivateAddress = errors.New("extensions are not allowed to connect to local/private network addresses")
+var errPrivateAddress = util.ErrPrivateAddress
 
-func isPrivateIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsUnspecified() || ip.IsMulticast() || ip.Equal(net.IPv4bcast) ||
-		(ip.To4() != nil && ip.To4()[0] == 100 && ip.To4()[1]&0xc0 == 64) // CGNAT 100.64/10
-}
-
-func guardedDialer() *net.Dialer {
-	return &net.Dialer{
-		Timeout: 15 * time.Second,
-		Control: func(network, address string, _ syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return err
-			}
-			if ip := net.ParseIP(host); ip != nil && isPrivateIP(ip) {
-				return errPrivateAddress
-			}
-			return nil
-		},
-	}
-}
+func isPrivateIP(ip net.IP) bool { return util.IsPrivateIP(ip) }
 
 func NewFetcher() *Fetcher {
 	mk := func(impersonate bool, redirects bool) *req.Client {
@@ -62,8 +43,7 @@ func NewFetcher() *Fetcher {
 		} else {
 			c = c.SetUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
 		}
-		d := guardedDialer()
-		c.SetDial(d.DialContext)
+		c.SetDial(util.PublicDialContext(15 * time.Second))
 		if !redirects {
 			c.SetRedirectPolicy(req.NoRedirectPolicy())
 		}

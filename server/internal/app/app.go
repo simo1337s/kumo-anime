@@ -24,6 +24,7 @@ import (
 	"github.com/simo1337s/animetest/server/internal/events"
 	"github.com/simo1337s/animetest/server/internal/extensions"
 	"github.com/simo1337s/animetest/server/internal/history"
+	"github.com/simo1337s/animetest/server/internal/images"
 	"github.com/simo1337s/animetest/server/internal/library"
 	"github.com/simo1337s/animetest/server/internal/manga"
 	"github.com/simo1337s/animetest/server/internal/metadata"
@@ -52,6 +53,7 @@ type App struct {
 	Local      *stream.Local
 	Manga      *manga.Service
 	Discord    *discord.Client
+	Images     *images.Cache
 	Logs       *LogBuffer
 
 	// ShellToken authenticates the desktop window (see api middleware).
@@ -120,7 +122,8 @@ func New(dataDir string) (*App, error) {
 		AutoDL:     torrent.NewAutoDownloader(d, torrents, platform, files, hub),
 		Extensions: exts, Stream: stream.NewService(d, exts, ani, platform), Local: stream.NewLocal(settings, files, d),
 		Manga: manga.NewService(d, exts, platform), Discord: &discord.Client{}, Logs: logs,
-		ctx: ctx, cancel: cancel, DataDir: dataDir,
+		Images: images.New(filepath.Join(dataDir, "images")),
+		ctx:    ctx, cancel: cancel, DataDir: dataDir,
 	}
 	a.ShellToken = randomToken()
 	a.wire()
@@ -272,6 +275,9 @@ func (a *App) Start() {
 		ctx, cancel := context.WithTimeout(a.ctx, time.Minute)
 		defer cancel()
 		a.Platform.RefreshViewer(ctx)
+		if view, err := a.Library.Collection(ctx, false); err == nil {
+			a.PrefetchCollectionArt(view)
+		}
 		if a.Settings.Get().Library.RefreshOnStartup {
 			if _, err := a.Scanner.Scan(a.ctx, library.ScanOptions{}); err != nil && !errors.Is(err, library.ErrScanRunning) {
 				log.Printf("startup scan: %v", err)
@@ -290,3 +296,40 @@ func (a *App) Shutdown() {
 }
 
 func (a *App) Context() context.Context { return a.ctx }
+
+// PrefetchCollectionArt downloads covers and banners of everything in the
+// list and library so they are available offline.
+func (a *App) PrefetchCollectionArt(view *library.CollectionView) {
+	if view == nil {
+		return
+	}
+	var urls []string
+	add := func(items []*library.CollectionItem) {
+		for _, it := range items {
+			if it.Media == nil {
+				continue
+			}
+			urls = append(urls, it.Media.CoverImage.ExtraLarge, it.Media.CoverImage.Large, it.Media.BannerImage)
+		}
+	}
+	for _, l := range view.Lists {
+		add(l.Items)
+	}
+	add(view.LocalOnly)
+	for _, c := range view.ContinueWatching {
+		urls = append(urls, c.Image)
+	}
+	a.Images.Prefetch(urls...)
+}
+
+// PrefetchEntryArt downloads an anime's artwork and episode thumbnails.
+func (a *App) PrefetchEntryArt(e *library.EntryView) {
+	if e == nil || e.Media == nil {
+		return
+	}
+	urls := []string{e.Media.CoverImage.ExtraLarge, e.Media.CoverImage.Large, e.Media.BannerImage, e.Images.Fanart, e.Images.Banner, e.Images.Poster, e.Images.Clearlogo}
+	for _, ep := range e.Episodes {
+		urls = append(urls, ep.Image)
+	}
+	a.Images.Prefetch(urls...)
+}

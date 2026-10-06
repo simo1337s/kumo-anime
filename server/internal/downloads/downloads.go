@@ -471,7 +471,12 @@ func (m *Manager) ffmpeg(ctx context.Context, it *Item, res *Resolved, out, ffmp
 		cancel()
 	}
 
-	args := []string{"-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-extension_picky", "0"}
+	args := []string{"-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1"}
+	// ffmpeg >= 7.1 refuses HLS segments with unusual extensions unless told
+	// otherwise (ani-cli passes the same flag); older versions don't know it.
+	if hlsExtensionPicky(ffmpegPath) {
+		args = append(args, "-extension_picky", "0")
+	}
 	args = append(args, headerArgs()...)
 	args = append(args, "-i", res.URL, "-map", "0:v?", "-map", "0:a?", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", out)
 	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
@@ -517,6 +522,19 @@ func (m *Manager) ffmpeg(ctx context.Context, it *Item, res *Resolved, out, ffmp
 		return fmt.Errorf("ffmpeg: %s", lastLine(msg))
 	}
 	return nil
+}
+
+var (
+	pickyOnce sync.Once
+	pickyOK   bool
+)
+
+func hlsExtensionPicky(ffmpegPath string) bool {
+	pickyOnce.Do(func() {
+		out, _ := exec.Command(ffmpegPath, "-hide_banner", "-h", "demuxer=hls").CombinedOutput()
+		pickyOK = strings.Contains(string(out), "extension_picky")
+	})
+	return pickyOK
 }
 
 func lastLine(s string) string {

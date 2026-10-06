@@ -198,9 +198,13 @@ func LookPath(p string) (string, bool) {
 
 // SanitizeFilename replaces characters that are invalid in file names.
 func SanitizeFilename(s string) string {
+	// Characters that are invalid on Linux or on NTFS/exFAT media drives.
+	// Colons become a look-alike so titles like "Re:Zero" stay readable.
 	s = strings.Map(func(r rune) rune {
 		switch r {
-		case '/', '\\', ':', '*', '?', '"', '<', '>', '|', 0:
+		case ':':
+			return '：'
+		case '/', '\\', '*', '?', '"', '<', '>', '|', 0:
 			return '_'
 		}
 		return r

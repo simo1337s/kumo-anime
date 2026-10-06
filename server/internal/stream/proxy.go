@@ -8,12 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/simo1337s/animetest/server/internal/util"
@@ -24,27 +22,11 @@ import (
 // segment/key/sub-playlist also goes through the proxy. It refuses to
 // connect to private addresses so it can't be used to reach the LAN.
 
-func isPrivate(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast()
-}
-
 var proxyClient = &http.Client{
 	Timeout: 0, // streams can be long
 	Transport: &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout: 15 * time.Second,
-			Control: func(network, address string, _ syscall.RawConn) error {
-				host, _, err := net.SplitHostPort(address)
-				if err != nil {
-					return err
-				}
-				if ip := net.ParseIP(host); ip != nil && isPrivate(ip) {
-					return errors.New("refusing to proxy a private address")
-				}
-				return nil
-			},
-		}).DialContext,
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           util.PublicDialContext(15 * time.Second),
 		ResponseHeaderTimeout: 30 * time.Second,
 		MaxIdleConnsPerHost:   16,
 	},

@@ -1,0 +1,39 @@
+# Kumo build
+#   make            build web UI + server binary (./dist/kumo)
+#   make desktop    also install the Electron shell's deps
+#   make test       run the Go tests
+
+PREFIX ?= /usr
+GO ?= go
+NPM ?= npm
+GOFLAGS ?= -trimpath
+LDFLAGS ?= -s -w
+
+.PHONY: all web embed server desktop test clean run
+
+all: server
+
+web:
+	cd web && $(NPM) ci --no-audit --no-fund && $(NPM) run build
+
+embed: web
+	rm -rf server/internal/webui/dist
+	mkdir -p server/internal/webui/dist
+	cp -r web/dist/. server/internal/webui/dist/
+	touch server/internal/webui/dist/.keep
+
+server: embed
+	mkdir -p dist
+	cd server && CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o ../dist/kumo ./cmd/kumo
+
+desktop:
+	cd desktop && $(NPM) ci --no-audit --no-fund
+
+test:
+	cd server && $(GO) test ./...
+
+run: server
+	./dist/kumo --web-ui
+
+clean:
+	rm -rf dist web/dist server/internal/webui/dist/* desktop/node_modules

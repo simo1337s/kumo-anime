@@ -91,6 +91,9 @@ func (s *Server) routes() {
 		s.app.Local.ServeSubtitle(w, r, q.Get("path"), idx, q.Get("external"))
 	})
 	m.HandleFunc("GET /api/proxy", stream.ServeProxy)
+	m.Handle("GET /api/img", s.app.Images)
+	m.HandleFunc("GET /api/images/stats", h(func(r *http.Request) (any, error) { return s.app.Images.Stats(), nil }))
+	m.HandleFunc("POST /api/images/clear", h(func(r *http.Request) (any, error) { return nil, s.app.Images.Clear() }))
 
 	// --- online streaming & ani-cli
 	m.HandleFunc("GET /api/onlinestream/providers", h(func(r *http.Request) (any, error) { return s.app.Stream.Providers(r.Context()), nil }))
@@ -391,7 +394,11 @@ func (s *Server) openPath(r *http.Request) (any, error) {
 // Anime
 
 func (s *Server) animeCollection(r *http.Request) (any, error) {
-	return s.app.Library.Collection(r.Context(), r.URL.Query().Get("refresh") == "1")
+	view, err := s.app.Library.Collection(r.Context(), r.URL.Query().Get("refresh") == "1")
+	if err == nil {
+		go s.app.PrefetchCollectionArt(view)
+	}
+	return view, err
 }
 
 func (s *Server) animeEntry(r *http.Request) (any, error) {
@@ -399,7 +406,11 @@ func (s *Server) animeEntry(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.app.Library.Entry(r.Context(), id, r.URL.Query().Get("refresh") == "1")
+	e, err := s.app.Library.Entry(r.Context(), id, r.URL.Query().Get("refresh") == "1")
+	if err == nil {
+		go s.app.PrefetchEntryArt(e)
+	}
+	return e, err
 }
 
 func (s *Server) updateEntry(r *http.Request) (any, error) {

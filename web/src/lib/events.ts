@@ -1,0 +1,149 @@
+import type { QueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { playbackStore, pluginStore, scanStore, torrentCountStore, trayOpenStore } from "./store"
+import type { DownloadItem, PluginState } from "./types"
+
+type ServerEvent = { type: string; payload: any }
+
+let navigateFn: ((to: string) => void) | null = null
+export function setNavigate(fn: (to: string) => void) {
+    navigateFn = fn
+}
+
+// Connects to /api/events and keeps caches & stores in sync.
+export function connectEvents(qc: QueryClient) {
+    let es: EventSource | null = null
+    let closed = false
+    let retry: ReturnType<typeof setTimeout> | null = null
+
+    const handle = (ev: ServerEvent) => {
+        const p = ev.payload
+        switch (ev.type) {
+            case "toast": {
+                const fn = { success: toast.success, error: toast.error, warning: toast.warning, info: toast.info }[p.level as string] ?? toast
+                fn(p.message)
+                break
+            }
+            case "scan-progress":
+                scanStore.set({ running: true, stage: p.stage, done: p.done, total: p.total, message: p.message })
+                break
+            case "scan-done":
+                scanStore.set({ running: false, stage: "", done: 0, total: 0, message: "" })
+                qc.invalidateQueries({ queryKey: ["collection"] })
+                qc.invalidateQueries({ queryKey: ["library"] })
+                qc.invalidateQueries({ queryKey: ["entry"] })
+                break
+            case "library-updated":
+                qc.invalidateQueries({ queryKey: ["collection"] })
+                qc.invalidateQueries({ queryKey: ["library"] })
+                qc.invalidateQueries({ queryKey: ["entry"] })
+                break
+            case "collection-updated":
+                qc.invalidateQueries({ queryKey: ["collection"] })
+                qc.invalidateQueries({ queryKey: ["entry"] })
+                qc.invalidateQueries({ queryKey: ["list"] })
+                qc.invalidateQueries({ queryKey: ["manga"] })
+                break
+            case "settings-updated":
+                qc.invalidateQueries({ queryKey: ["status"] })
+                break
+            case "playback-status":
+                playbackStore.set(p)
+                break
+            case "playback-ended":
+                playbackStore.set(null)
+                qc.invalidateQueries({ queryKey: ["collection"] })
+                qc.invalidateQueries({ queryKey: ["entry", p?.mediaId] })
+                break
+            case "download-progress": {
+                qc.setQueryData<DownloadItem[]>(["downloads"], old => {
+                    if (!old) return old
+                    if (p.removed) return old.filter(d => d.id !== p.id)
+                    if (p.cleared) return old.filter(d => !["completed", "failed", "canceled"].includes(d.status))
+                    const idx = old.findIndex(d => d.id === p.id)
+                    if (idx === -1) return [p, ...old]
+                    const next = old.slice()
+                    next[idx] = p
+                    return next
+                })
+                break
+            }
+            case "torrent-count":
+                torrentCountStore.set(p)
+                break
+            case "extensions-updated":
+                qc.invalidateQueries({ queryKey: ["extensions"] })
+                qc.invalidateQueries({ queryKey: ["marketplace"] })
+                qc.invalidateQueries({ queryKey: ["plugins-ui"] })
+                qc.invalidateQueries({ queryKey: ["os-providers"] })
+                break
+            case "plugin-ui":
+                handlePluginEvent(p)
+                break
+        }
+    }
+
+    const connect = () => {
+        if (closed) return
+        es = new EventSource("/api/events")
+        es.onmessage = msg => {
+            try {
+                handle(JSON.parse(msg.data))
+            } catch {
+                /* ignore */
+            }
+        }
+        es.onerror = () => {
+            es?.close()
+            if (!closed) retry = setTimeout(connect, 3000)
+        }
+    }
+    connect()
+    return () => {
+        closed = true
+        if (retry) clearTimeout(retry)
+        es?.close()
+    }
+}
+
+function handlePluginEvent(p: { pluginId: string; type: string; payload: any }) {
+    switch (p.type) {
+        case "state":
+            pluginStore.set(prev => ({
+                ...prev,
+                [p.pluginId]: { ...(prev[p.pluginId] ?? { id: p.pluginId, name: p.pluginId, icon: "" }), state: p.payload } as PluginState,
+            }))
+            break
+        case "removed":
+            pluginStore.set(prev => {
+                const next = { ...prev }
+                delete next[p.pluginId]
+                return next
+            })
+            break
+        case "navigate": {
+            const path = String(p.payload?.path || "/")
+            const params = new URLSearchParams(p.payload?.searchParams || {}).toString()
+            navigateFn?.(params ? `${path}?${params}` : path)
+            break
+        }
+        case "reload":
+            window.location.reload()
+            break
+        case "tray-open":
+            trayOpenStore.set({ pluginId: p.pluginId, trayId: p.payload?.trayId })
+            break
+        case "tray-close":
+            trayOpenStore.set(null)
+            break
+        case "open-url":
+            if (p.payload?.url) window.open(p.payload.url, "_blank", "noopener")
+            break
+        case "clipboard":
+            navigator.clipboard?.writeText(p.payload?.text ?? "").catch(() => {})
+            break
+        case "webview-message":
+            window.dispatchEvent(new CustomEvent("kumo-webview-message", { detail: { pluginId: p.pluginId, ...p.payload } }))
+            break
+    }
+}
