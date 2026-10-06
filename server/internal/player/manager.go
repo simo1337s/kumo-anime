@@ -56,6 +56,7 @@ type Session struct {
 
 	finished bool // mpv reached the end of the file
 	stopping bool // we asked mpv to quit (Stop, or something else is starting)
+	watching bool // playback got going, the list status was checked (startWatching)
 	lastSave time.Time
 	lastEmit time.Time
 	skipped  map[string]bool
@@ -88,6 +89,9 @@ const (
 	defaultTrackSettle = time.Second
 	// How long stopping waits for the old session to save its state.
 	stopWait = 10 * time.Second
+	// Playback this far into an episode (in seconds) counts as watching the
+	// anime: it goes on the "watching" list (see startWatching).
+	watchingFrom = 10
 )
 
 type Manager struct {
@@ -100,9 +104,15 @@ type Manager struct {
 
 	NextResolver NextResolver
 	OnProgress   []ProgressHook
+	// OnWatching hooks are called after an anime was put on the "watching"
+	// list because one of its episodes started playing.
+	OnWatching []func(mediaID int)
 	// viewed observes every viewing that crossed the completion threshold,
 	// whether or not the list was updated (tests).
 	viewed func(mediaID, episode int)
+	// started observes every viewing that got going (see watchingFrom),
+	// whether or not the list was updated (tests).
+	started func(mediaID, episode int)
 	// OnStatus hooks run one at a time, in order, on a background goroutine.
 	// Statuses that arrive while a hook is busy collapse into the newest one.
 	OnStatus []func(s *Session)
@@ -118,8 +128,14 @@ type Manager struct {
 	mpv *Mpv
 	gen uint64 // bumped whenever mpv is stopped; a pending auto play next checks it
 
-	builtinMu   sync.Mutex
-	builtinSent map[episodeKey]bool // in-app player: progress already sent this viewing
+	builtinMu      sync.Mutex
+	builtinStarted map[episodeKey]bool // in-app player: list status already checked this viewing
+	builtinSent    map[episodeKey]bool // in-app player: progress already sent this viewing
+
+	// listMu serializes the list updates playback makes, so that the status
+	// set when an episode starts can't land after (and undo) the update made
+	// when it is finished.
+	listMu sync.Mutex
 
 	statusMu   sync.Mutex
 	statusNext *Session
@@ -136,8 +152,8 @@ type episodeKey struct{ mediaID, episode int }
 func NewManager(s *config.Store, h *history.Store, d *db.DB, p *anilist.Platform, hub *events.Hub) *Manager {
 	return &Manager{
 		settings: s, history: h, Tracks: NewTrackStore(d), platform: p, hub: hub, db: d,
-		builtinSent: map[episodeKey]bool{},
-		launch:      LaunchMpv, trackGuard: defaultTrackGuard, trackSettle: defaultTrackSettle,
+		builtinStarted: map[episodeKey]bool{}, builtinSent: map[episodeKey]bool{},
+		launch: LaunchMpv, trackGuard: defaultTrackGuard, trackSettle: defaultTrackSettle,
 	}
 }
 
@@ -351,11 +367,14 @@ func (m *Manager) onProperty(s *Session, mpv *Mpv, w *trackWatch, ev MpvEvent) {
 	case "track-list":
 		s.Tracks = tracks
 	}
-	save, fire := m.tick(s)
+	save, start, fire := m.tick(s)
 	m.mu.Unlock()
 
 	if save != nil {
 		_ = m.history.Save(*save)
+	}
+	if start {
+		m.startWatching(s.MediaID, s.Episode)
 	}
 	if fire {
 		m.fireProgress(s.MediaID, s.Episode)
@@ -465,14 +484,21 @@ func (m *Manager) maybeSkip(s *Session, mpv *Mpv) {
 	}
 }
 
-// tick decides whether to save the position and whether the episode just
-// crossed the completion threshold, and publishes the status. It must be
-// called with m.mu held; the caller does the returned work after unlocking.
-func (m *Manager) tick(s *Session) (save *history.Entry, fire bool) {
+// tick decides whether to save the position, whether playback just got far
+// enough to count as watching the anime and whether the episode just crossed
+// the completion threshold, and publishes the status. It must be called with
+// m.mu held; the caller does the returned work after unlocking.
+func (m *Manager) tick(s *Session) (save *history.Entry, start, fire bool) {
 	cfg := m.settings.Get()
 	if s.MediaID > 0 && time.Since(s.lastSave) > 5*time.Second && s.Position > 0 {
 		s.lastSave = time.Now()
 		save = &history.Entry{MediaID: s.MediaID, Episode: s.Episode, Position: s.Position, Duration: s.Duration, Source: s.Source}
+	}
+	// Until mpv knows the duration the file isn't loaded, and Position is
+	// only where we asked it to start.
+	if !s.watching && s.MediaID > 0 && s.Episode > 0 && s.Duration > 0 && s.Position >= watchingFrom {
+		s.watching = true
+		start = true
 	}
 	if !s.ProgressUpdated && s.MediaID > 0 && s.Episode > 0 && s.Duration > 0 &&
 		s.Position/s.Duration >= cfg.Playback.CompletionThreshold {
@@ -480,7 +506,7 @@ func (m *Manager) tick(s *Session) (save *history.Entry, fire bool) {
 		fire = true
 	}
 	m.emit(s, false)
-	return save, fire
+	return save, start, fire
 }
 
 func (m *Manager) fireProgress(mediaID, episode int) {
@@ -491,7 +517,9 @@ func (m *Manager) fireProgress(mediaID, episode int) {
 		return
 	}
 	go func() {
+		m.listMu.Lock()
 		ok, err := m.platform.UpdateProgress(context.Background(), mediaID, episode)
+		m.listMu.Unlock()
 		if err != nil {
 			m.hub.Error("Could not update progress: " + err.Error())
 			return
@@ -500,6 +528,34 @@ func (m *Manager) fireProgress(mediaID, episode int) {
 			m.hub.Success(fmt.Sprintf("Progress updated — episode %d", episode))
 			for _, h := range m.OnProgress {
 				go h(mediaID, episode)
+			}
+		}
+	}()
+}
+
+// startWatching puts an anime the user started an episode of on the
+// "watching" list, unless the list already has it there, as rewatching or as
+// completed (see Platform.StartWatching). The update runs in the background
+// and a failure is only logged: it never holds up playback.
+func (m *Manager) startWatching(mediaID, episode int) {
+	if m.started != nil {
+		m.started(mediaID, episode)
+	}
+	if !m.settings.Get().Playback.AutoUpdateProgress {
+		return
+	}
+	go func() {
+		m.listMu.Lock()
+		changed, err := m.platform.StartWatching(context.Background(), mediaID)
+		m.listMu.Unlock()
+		if err != nil {
+			log.Printf("player: could not put media %d on the watching list: %v", mediaID, err)
+			return
+		}
+		if changed {
+			m.hub.Success("Added to Currently watching")
+			for _, h := range m.OnWatching {
+				go h(mediaID)
 			}
 		}
 	}()
@@ -671,32 +727,38 @@ func (m *Manager) ReportProgress(r ProgressReport) {
 	} else {
 		_ = m.history.Save(history.Entry{MediaID: r.MediaID, Episode: r.Episode, Position: r.Position, Duration: r.Duration, Source: r.Source})
 	}
+	if r.Episode > 0 && r.Position >= watchingFrom && m.claimBuiltin(m.builtinStarted, r.MediaID, r.Episode) {
+		m.startWatching(r.MediaID, r.Episode)
+	}
 	if r.Episode > 0 && r.Duration > 0 && (r.Ended || r.Position/r.Duration >= cfg.Playback.CompletionThreshold) &&
-		m.claimBuiltinProgress(r.MediaID, r.Episode) {
+		m.claimBuiltin(m.builtinSent, r.MediaID, r.Episode) {
 		m.fireProgress(r.MediaID, r.Episode)
 	}
 	m.notifyStatus(&Session{MediaID: r.MediaID, Episode: r.Episode, Title: r.Title, Source: r.Source, Player: "builtin",
 		Position: r.Position, Duration: r.Duration, Paused: r.Paused, Active: !r.Ended})
 }
 
-// claimBuiltinProgress reports whether the in-app player's current viewing of
-// the episode has yet to send its progress update, and marks it sent.
-func (m *Manager) claimBuiltinProgress(mediaID, episode int) bool {
+// claimBuiltin reports whether the in-app player's current viewing of the
+// episode has yet to do what claims records (builtinStarted, builtinSent),
+// and marks it done.
+func (m *Manager) claimBuiltin(claims map[episodeKey]bool, mediaID, episode int) bool {
 	m.builtinMu.Lock()
 	defer m.builtinMu.Unlock()
 	k := episodeKey{mediaID, episode}
-	if m.builtinSent[k] {
+	if claims[k] {
 		return false
 	}
-	m.builtinSent[k] = true
+	claims[k] = true
 	return true
 }
 
 // ResetBuiltinProgress starts a new viewing of an episode in the in-app
-// player, so a rewatch updates progress again. Call it when the player opens
+// player, so a rewatch updates the list again. Call it when the player opens
 // the episode.
 func (m *Manager) ResetBuiltinProgress(mediaID, episode int) {
+	k := episodeKey{mediaID, episode}
 	m.builtinMu.Lock()
-	delete(m.builtinSent, episodeKey{mediaID, episode})
+	delete(m.builtinStarted, k)
+	delete(m.builtinSent, k)
 	m.builtinMu.Unlock()
 }

@@ -348,6 +348,124 @@ func TestBuiltinRewatchUpdatesProgressAgain(t *testing.T) {
 	}
 }
 
+// The in-app player reports every few seconds from 3 s in: the anime goes
+// on the watching list once per viewing, from 10 s in.
+func TestBuiltinStartsWatchingOncePerViewing(t *testing.T) {
+	m, _ := newTestManager(t, nil)
+	var (
+		mu     sync.Mutex
+		starts = map[episodeKey]int{}
+	)
+	m.started = func(mediaID, episode int) {
+		mu.Lock()
+		starts[episodeKey{mediaID, episode}]++
+		mu.Unlock()
+	}
+	count := func(mediaID, episode int) int {
+		mu.Lock()
+		defer mu.Unlock()
+		return starts[episodeKey{mediaID, episode}]
+	}
+	report := func(mediaID, episode int, positions ...float64) {
+		for _, pos := range positions {
+			m.ReportProgress(ProgressReport{MediaID: mediaID, Episode: episode, Position: pos, Duration: 1400, Source: "stream"})
+		}
+	}
+
+	m.ResetBuiltinProgress(3, 1) // the in-app player opens the episode
+	report(3, 1, 3, 8)
+	if n := count(3, 1); n != 0 {
+		t.Fatalf("%d starts 8 s in; want none before 10 s", n)
+	}
+	report(3, 1, 13, 18, 600, 1250, 1300)
+	m.ReportProgress(ProgressReport{MediaID: 3, Episode: 1, Position: 1400, Duration: 1400, Source: "stream", Ended: true})
+	if n := count(3, 1); n != 1 {
+		t.Fatalf("%d starts; want one per viewing", n)
+	}
+
+	m.ResetBuiltinProgress(3, 1) // watched again
+	report(3, 1, 4, 9, 14, 19)
+	if n := count(3, 1); n != 2 {
+		t.Fatalf("%d starts after watching it again; want 2", n)
+	}
+
+	m.ResetBuiltinProgress(3, 2) // resumed halfway
+	report(3, 2, 700, 705)
+	if n := count(3, 2); n != 1 {
+		t.Fatalf("%d starts of a resumed episode; want 1", n)
+	}
+
+	report(3, 0, 30, 60) // no episode (creditless opening, extra)
+	report(0, 1, 30, 60) // not matched to an anime
+	if n := count(3, 0) + count(0, 1); n != 0 {
+		t.Fatalf("%d starts without an anime episode", n)
+	}
+}
+
+// mpv reports the position all the time: the anime goes on the watching
+// list once per viewing (mpv session), from 10 s in. A resumed session
+// starts out at its resume position, which counts once mpv has loaded the
+// file (it knows the duration), not before.
+func TestMpvStartsWatchingOncePerViewing(t *testing.T) {
+	m, l := newTestManager(t, nil)
+	var (
+		mu     sync.Mutex
+		starts []string
+	)
+	m.started = func(mediaID, episode int) {
+		st := m.Status()
+		mu.Lock()
+		defer mu.Unlock()
+		starts = append(starts, fmt.Sprintf("%d/%d at %v of %v", mediaID, episode, st.Position, st.Duration))
+	}
+	got := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(starts)
+	}
+	at := func(pos float64) func() bool {
+		return func() bool {
+			st := m.Status()
+			return st != nil && st.Position == pos
+		}
+	}
+
+	if _, err := m.PlayMpv(PlayRequest{MediaID: 5, Episode: 1, Source: "anicli", Target: "https://cdn.example/1.m3u8"}); err != nil {
+		t.Fatal(err)
+	}
+	f := l.last()
+	f.prop("duration", 1420.0)
+	for _, pos := range []float64{0.5, 4, 9.5} {
+		f.prop("time-pos", pos)
+	}
+	waitFor(t, "the position to reach 9.5", at(9.5))
+	if s := got(); len(s) != 0 {
+		t.Fatalf("started before 10 s: %v", s)
+	}
+	for _, pos := range []float64{10, 15, 600, 1300, 1419} {
+		f.prop("time-pos", pos)
+	}
+	waitFor(t, "the position to reach 1419", at(1419))
+	if s := got(); !slices.Equal(s, []string{"5/1 at 10 of 1420"}) {
+		t.Fatalf("starts %v; want one, at 10 s", s)
+	}
+
+	resume := 142.0
+	if _, err := m.PlayMpv(PlayRequest{MediaID: 5, Episode: 1, Source: "anicli", Target: "https://cdn.example/1.m3u8", Start: &resume}); err != nil {
+		t.Fatal(err)
+	}
+	f = l.last()
+	f.prop("pause", false) // mpv reports observed properties before loading the file
+	f.prop("time-pos", nil)
+	f.prop("duration", 1420.0)
+	f.prop("time-pos", 142.0)
+	f.prop("time-pos", 150.0)
+	waitFor(t, "the position to reach 150", at(150))
+	if s := got(); !slices.Equal(s, []string{"5/1 at 10 of 1420", "5/1 at 142 of 1420"}) {
+		t.Fatalf("starts %v; want the resumed viewing to start once, after the file loaded", s)
+	}
+}
+
 func TestStatusHooksRunOneAtATime(t *testing.T) {
 	m, _ := newTestManager(t, nil)
 	var running, overlaps atomic.Int32

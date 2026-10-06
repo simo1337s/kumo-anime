@@ -422,20 +422,29 @@ func typeOr(t string) string {
 	return t
 }
 
+// cachedEntry returns the media's entry in the cached AniList lists, even
+// one due for a refresh, without asking AniList. It is nil when they don't
+// have it, or there are none (when logged out).
+func (p *Platform) cachedEntry(mediaID int) *ListEntry {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, c := range p.collections {
+		if e := c.Find(mediaID); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
 // MediaLite returns the lightweight media object, looking in the collection
 // and cache before hitting the network.
 func (p *Platform) MediaLite(ctx context.Context, id int) (*Media, error) {
 	if id <= 0 {
 		return nil, errors.New("invalid media id")
 	}
-	p.mu.RLock()
-	for _, c := range p.collections {
-		if e := c.Find(id); e != nil {
-			p.mu.RUnlock()
-			return e.Media, nil
-		}
+	if e := p.cachedEntry(id); e != nil {
+		return e.Media, nil
 	}
-	p.mu.RUnlock()
 	var m Media
 	if p.db.GetCache(liteKey(id), &m) {
 		return &m, nil
@@ -715,10 +724,8 @@ func progressUpdate(entry *ListEntry, mediaID, episode, total int, now time.Time
 			}
 		}
 	}
-	y, m, d := now.Date()
-	month := int(m)
-	today := &FuzzyDate{Year: &y, Month: &month, Day: &d}
-	if entry == nil || (entry.StartedAt.Year == nil && (entry.Status == "PLANNING" || entry.Progress == 0)) {
+	today := fuzzyDate(now)
+	if needsStartDate(entry) {
 		u.StartedAt = today
 	}
 	if total > 0 && progress >= total {
@@ -734,4 +741,72 @@ func progressUpdate(entry *ListEntry, mediaID, episode, total int, now time.Time
 	}
 	u.Status, u.Progress = &status, &progress
 	return u, true
+}
+
+// StartWatching records that the user started playing a media; see
+// watchingUpdate for the rules. It reports whether the list was changed.
+// AniList isn't asked when the cached list already has the media as
+// watching, rewatching or completed.
+func (p *Platform) StartWatching(ctx context.Context, mediaID int) (bool, error) {
+	if e := p.cachedEntry(mediaID); e != nil {
+		if _, ok := watchingUpdate(e, mediaID, time.Now()); !ok {
+			return false, nil
+		}
+	}
+	media, err := p.MediaLite(ctx, mediaID)
+	if err != nil {
+		return false, err
+	}
+	c, err := p.Collection(ctx, typeOr(media.Type), false)
+	if err != nil {
+		return false, err
+	}
+	u, ok := watchingUpdate(c.Find(mediaID), mediaID, time.Now())
+	if !ok {
+		return false, nil
+	}
+	if err := p.UpdateEntry(ctx, u); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// watchingUpdate works out the list update for having started to play a
+// media, given its list entry (nil when it isn't in the list). ok is false
+// when nothing needs to change. Only the status (and start date) changes,
+// the progress is kept:
+//
+//	not in list, PLANNING, PAUSED, DROPPED -> CURRENT
+//	CURRENT, REPEATING, COMPLETED          -> unchanged
+//
+// A completed show is left as it is: finishing one of its episodes starts
+// a rewatch (see progressUpdate). The start date is filled in like there.
+func watchingUpdate(entry *ListEntry, mediaID int, now time.Time) (u EntryUpdate, ok bool) {
+	u.MediaID = mediaID
+	if entry != nil {
+		switch entry.Status {
+		case "CURRENT", "REPEATING", "COMPLETED":
+			return u, false
+		}
+	}
+	status := "CURRENT"
+	u.Status = &status
+	if needsStartDate(entry) {
+		u.StartedAt = fuzzyDate(now)
+	}
+	return u, true
+}
+
+// needsStartDate reports whether a media the user starts watching now gets
+// today as its start date: it has none, and wasn't being watched already
+// (progress without a start date means it started on an unknown day).
+func needsStartDate(entry *ListEntry) bool {
+	return entry == nil || (entry.StartedAt.Year == nil && (entry.Status == "PLANNING" || entry.Progress == 0))
+}
+
+// fuzzyDate returns the day of t.
+func fuzzyDate(t time.Time) *FuzzyDate {
+	y, m, d := t.Date()
+	month := int(m)
+	return &FuzzyDate{Year: &y, Month: &month, Day: &d}
 }

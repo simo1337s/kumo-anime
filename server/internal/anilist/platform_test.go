@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -702,6 +703,243 @@ func TestUpdateProgressLocalList(t *testing.T) {
 	}
 	if r := readLocal(t, p, 1); r.Status != "COMPLETED" || r.Progress != 12 {
 		t.Fatalf("after the last episode: %+v, want COMPLETED at 12", r)
+	}
+}
+
+func TestWatchingUpdate(t *testing.T) {
+	now := time.Date(2026, time.October, 6, 20, 30, 0, 0, time.Local)
+	year := 2025
+	someDate := FuzzyDate{Year: &year}
+	e := func(status string, progress int) *ListEntry {
+		return &ListEntry{MediaID: 1, Status: status, Progress: progress}
+	}
+	cases := []struct {
+		name    string
+		entry   *ListEntry
+		ok      bool // moved to CURRENT
+		started bool // start date set
+	}{
+		{"not in list", nil, true, true},
+		{"planned show", e("PLANNING", 0), true, true},
+		{"planned show with progress", e("PLANNING", 5), true, true},
+		{"paused show", e("PAUSED", 3), true, false},
+		{"paused before the first episode", e("PAUSED", 0), true, true},
+		{"dropped show", e("DROPPED", 4), true, false},
+		{"start date kept", &ListEntry{MediaID: 1, Status: "PLANNING", StartedAt: someDate}, true, false},
+		{"watching", e("CURRENT", 2), false, false},
+		{"watching, nothing watched yet", e("CURRENT", 0), false, false},
+		{"rewatching", e("REPEATING", 3), false, false},
+		{"completed", e("COMPLETED", 12), false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			u, ok := watchingUpdate(tc.entry, 1, now)
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v", ok, tc.ok)
+			}
+			if !ok {
+				return
+			}
+			if u.MediaID != 1 || u.Status == nil || *u.Status != "CURRENT" {
+				t.Fatalf("update %+v, want status CURRENT", u)
+			}
+			if u.Progress != nil || u.Score != nil || u.Repeat != nil || u.CompletedAt != nil {
+				t.Errorf("update %+v changes more than the status and start date", u)
+			}
+			if (u.StartedAt != nil) != tc.started {
+				t.Errorf("start date set = %v, want %v", u.StartedAt != nil, tc.started)
+			}
+			if d := u.StartedAt; d != nil && (*d.Year != 2026 || *d.Month != 10 || *d.Day != 6) {
+				t.Errorf("start date = %d-%d-%d, want today", *d.Year, *d.Month, *d.Day)
+			}
+		})
+	}
+}
+
+// End to end on the local list: starting a show puts it on the watching
+// list keeping its progress, and tells the UI; a completed one stays so.
+func TestStartWatchingLocalList(t *testing.T) {
+	p := newTestPlatform(t, nil)
+	ctx := context.Background()
+	for id := 1; id <= 3; id++ {
+		p.db.SetCache(liteKey(id), testMedia(id, 12), time.Hour)
+	}
+	addLocal(t, p, testMedia(1, 12), "PLANNING", 5)
+	addLocal(t, p, testMedia(3, 12), "COMPLETED", 12)
+	updates, unsubscribe := p.hub.Subscribe()
+	defer unsubscribe()
+
+	if ok, err := p.StartWatching(ctx, 1); err != nil || !ok {
+		t.Fatalf("StartWatching(planned) = %v, %v", ok, err)
+	}
+	if r := readLocal(t, p, 1); r.Status != "CURRENT" || r.Progress != 5 {
+		t.Fatalf("planned show after starting it: %+v, want CURRENT at 5", r)
+	}
+	select {
+	case raw := <-updates:
+		var ev struct {
+			Type    string `json:"type"`
+			Payload struct {
+				MediaID int `json:"mediaId"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(raw, &ev); err != nil || ev.Type != events.CollectionUpdate || ev.Payload.MediaID != 1 {
+			t.Errorf("event %s, want %s for media 1", raw, events.CollectionUpdate)
+		}
+	default:
+		t.Error("no event: the UI wouldn't show the change")
+	}
+	if ok, err := p.StartWatching(ctx, 1); err != nil || ok {
+		t.Fatalf("starting it again changed the list: %v, %v", ok, err)
+	}
+
+	if ok, err := p.StartWatching(ctx, 2); err != nil || !ok {
+		t.Fatalf("StartWatching(not in list) = %v, %v", ok, err)
+	}
+	if r := readLocal(t, p, 2); r.Status != "CURRENT" || r.Progress != 0 {
+		t.Fatalf("new entry: %+v, want CURRENT at 0", r)
+	}
+
+	if ok, err := p.StartWatching(ctx, 3); err != nil || ok {
+		t.Fatalf("StartWatching(completed) = %v, %v; want no change", ok, err)
+	}
+	if r := readLocal(t, p, 3); r.Status != "COMPLETED" || r.Progress != 12 {
+		t.Fatalf("completed show after starting it again: %+v", r)
+	}
+}
+
+// Starting and finishing the last episode of a planned show, one after the
+// other in either order (the player serializes them), completes it.
+func TestStartWatchingAndFinishing(t *testing.T) {
+	for _, startFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("start first %v", startFirst), func(t *testing.T) {
+			p := newTestPlatform(t, nil)
+			ctx := context.Background()
+			movie := testMedia(1, 1)
+			p.db.SetCache(liteKey(1), movie, time.Hour)
+			addLocal(t, p, movie, "PLANNING", 0)
+
+			steps := []func() error{
+				func() error { _, err := p.StartWatching(ctx, 1); return err },
+				func() error { _, err := p.UpdateProgress(ctx, 1, 1); return err },
+			}
+			if !startFirst {
+				steps[0], steps[1] = steps[1], steps[0]
+			}
+			for _, step := range steps {
+				if err := step(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if r := readLocal(t, p, 1); r.Status != "COMPLETED" || r.Progress != 1 {
+				t.Fatalf("got %+v, want COMPLETED at 1", r)
+			}
+		})
+	}
+}
+
+// Logged in: a show the cached list has as watching, rewatching or completed
+// costs no AniList request, even when the cache is due for a refresh. One
+// that isn't watched yet is saved as watching with only its status and
+// start date, and the cached list shows it.
+func TestStartWatchingAniList(t *testing.T) {
+	var (
+		mu sync.Mutex
+		// The list as AniList has it: media id -> status, progress.
+		statuses = map[int]string{1: "CURRENT", 2: "REPEATING", 3: "COMPLETED", 4: "PLANNING"}
+		progress = map[int]int{1: 3, 2: 4, 3: 12, 4: 2}
+		ops      []string
+		saves    []map[string]any
+	)
+	// list returns the list as AniList has it; mu must be held.
+	list := func() *Collection {
+		var entries []*ListEntry
+		for id := 1; id <= 5; id++ {
+			if s, ok := statuses[id]; ok {
+				entries = append(entries, listEntry(100+id, id, s, progress[id]))
+			}
+		}
+		return testCollection(entries...)
+	}
+	p := newTestPlatform(t, func(w http.ResponseWriter, req gqlRequest) {
+		mu.Lock()
+		defer mu.Unlock()
+		ops = append(ops, op(req.Query))
+		switch op(req.Query) {
+		case "collection":
+			reply(w, http.StatusOK, data(map[string]any{"MediaListCollection": list()}))
+		case "save":
+			saves = append(saves, req.Variables)
+			id := int(req.Variables["mediaId"].(float64))
+			statuses[id] = req.Variables["status"].(string)
+			reply(w, http.StatusOK, data(map[string]any{"SaveMediaListEntry": map[string]any{
+				"id": 100 + id, "mediaId": id, "status": statuses[id], "progress": progress[id]}}))
+		default:
+			t.Errorf("unexpected request: %s", op(req.Query))
+		}
+	})
+	requests := func() ([]string, []map[string]any) {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(ops), slices.Clone(saves)
+	}
+	setLoggedIn(p, 7)
+	mu.Lock()
+	seed(p, "ANIME", list())
+	mu.Unlock()
+	p.mu.Lock()
+	p.fetchedAt["ANIME"] = time.Now().Add(-time.Hour) // due for a refresh
+	p.mu.Unlock()
+	p.db.SetCache(liteKey(5), testMedia(5, 24), time.Hour)
+	ctx := context.Background()
+
+	for id := 1; id <= 3; id++ {
+		if ok, err := p.StartWatching(ctx, id); err != nil || ok {
+			t.Fatalf("StartWatching(%d) = %v, %v; want no change", id, ok, err)
+		}
+	}
+	if got, _ := requests(); len(got) != 0 {
+		t.Fatalf("AniList was asked %v about shows already on the list as watched", got)
+	}
+
+	// Planned (4) and not in the list (5): the list is refetched (it's due),
+	// then the entry saved.
+	for _, id := range []int{4, 5} {
+		if ok, err := p.StartWatching(ctx, id); err != nil || !ok {
+			t.Fatalf("StartWatching(%d) = %v, %v", id, ok, err)
+		}
+	}
+	gotOps, saved := requests()
+	if want := []string{"collection", "save", "collection", "save"}; !reflect.DeepEqual(gotOps, want) {
+		t.Fatalf("requests %v, want %v", gotOps, want)
+	}
+	for _, vars := range saved {
+		if vars["status"] != "CURRENT" {
+			t.Errorf("saved %v, want status CURRENT", vars)
+		}
+		if _, ok := vars["progress"]; ok {
+			t.Errorf("saved %v: the progress must be kept as is", vars)
+		}
+		if d, _ := vars["startedAt"].(map[string]any); d == nil || d["year"] == nil {
+			t.Errorf("saved %v, want a start date", vars)
+		}
+	}
+	c := cached(p, "ANIME")
+	if e := c.Find(4); e == nil || e.Status != "CURRENT" || e.Progress != 2 {
+		t.Errorf("cached entry of the planned show = %+v, want CURRENT at 2", e)
+	}
+	if e := c.Find(5); e == nil || e.Status != "CURRENT" || e.Progress != 0 {
+		t.Errorf("cached entry of the new show = %+v, want CURRENT at 0", e)
+	}
+
+	// Watching them again: the cached list has them as watching now.
+	for _, id := range []int{4, 5} {
+		if ok, err := p.StartWatching(ctx, id); err != nil || ok {
+			t.Fatalf("StartWatching(%d) again = %v, %v; want no change", id, ok, err)
+		}
+	}
+	if got, _ := requests(); len(got) != len(gotOps) {
+		t.Errorf("AniList was asked %v after the shows were on the list as watching", got[len(gotOps):])
 	}
 }
 

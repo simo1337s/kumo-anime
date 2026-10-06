@@ -222,6 +222,10 @@ func (a *App) wire() {
 	a.Player.OnProgress = append(a.Player.OnProgress, func(mediaID, episode int) {
 		a.Extensions.FireHook("onPostUpdateEntryProgress", map[string]any{"mediaId": mediaID, "progress": episode})
 	})
+	// And after playback put an anime on the watching list (a status change).
+	a.Player.OnWatching = append(a.Player.OnWatching, func(mediaID int) {
+		a.Extensions.FireHook("onPostUpdateEntry", map[string]any{"mediaId": mediaID})
+	})
 
 	// Discord rich presence.
 	var (
