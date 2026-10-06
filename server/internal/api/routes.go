@@ -272,9 +272,16 @@ func (s *Server) saveSettings(r *http.Request) (any, error) {
 	if err := decode(r, &next); err != nil {
 		return nil, err
 	}
-	// LAN clients may not change network/security settings.
+	// Devices on the LAN may not change network/security settings or
+	// anything that decides which programs run or which folders are read
+	// on this computer.
 	if !isTrusted(r) {
 		next.Server = cur.Server
+		next.Mpv.Path, next.Mpv.ExtraArgs, next.Mpv.Socket = cur.Mpv.Path, cur.Mpv.ExtraArgs, cur.Mpv.Socket
+		next.Transcode.FfmpegPath, next.Transcode.FfprobePath, next.Transcode.VaapiNode = cur.Transcode.FfmpegPath, cur.Transcode.FfprobePath, cur.Transcode.VaapiNode
+		next.AniCli.Path, next.AniCli.DownloadDir = cur.AniCli.Path, cur.AniCli.DownloadDir
+		next.Qbittorrent.Executable, next.Transmission.Executable = cur.Qbittorrent.Executable, cur.Transmission.Executable
+		next.Library.Dir, next.Library.ExtraDirs = cur.Library.Dir, cur.Library.ExtraDirs
 	}
 	// Turning off the web UI from a browser would lock the browser out.
 	if kindOf(r) != clientShell && !next.Server.WebUI && cur.Server.WebUI && !s.ForceWebUI {
@@ -339,6 +346,9 @@ func startDetached(name string, args ...string) error {
 }
 
 func (s *Server) listDirs(r *http.Request) (any, error) {
+	if !isTrusted(r) {
+		return nil, forbidden("browsing folders is only available on this computer")
+	}
 	p := r.URL.Query().Get("path")
 	if p == "" {
 		p, _ = os.UserHomeDir()

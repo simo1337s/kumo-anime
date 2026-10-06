@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Kumo
+GenericName=Anime Library
+Comment=Watch, stream and organise your anime
+Exec=kumo %U
+Icon=kumo
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=anime;anilist;seanime;ani-cli;torrent;manga;
+StartupWMClass=Kumo
+StartupNotify=true

@@ -3,11 +3,13 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/simo1337s/animetest/server/internal/api"
@@ -53,6 +55,14 @@ func main() {
 	}
 	a.Start()
 	cfg := a.Settings.Get()
+	// Lets the desktop app find an already running server.
+	infoPath := filepath.Join(config.RuntimeDir(), "server.json")
+	writeInfo := func() {
+		raw, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "port": a.Settings.Get().Server.Port, "addr": srv.Addr(), "tokenFile": tokenPath})
+		_ = os.WriteFile(infoPath, raw, 0o600)
+	}
+	writeInfo()
+	a.Settings.OnChange(func(_, _ config.Settings) { writeInfo() })
 	log.Printf("%s %s ready — data: %s — shell token: %s", config.AppName, config.AppVersion, *dataDir, tokenPath)
 	if srv.ForceWebUI || cfg.Server.WebUI {
 		log.Printf("Web UI: http://127.0.0.1:%d", cfg.Server.Port)
@@ -65,4 +75,5 @@ func main() {
 	srv.Shutdown()
 	a.Shutdown()
 	_ = os.Remove(tokenPath)
+	_ = os.Remove(infoPath)
 }

@@ -1,0 +1,61 @@
+# Kumo — Seanime-style anime app for Arch Linux.
+#
+# Build & install from a checkout of this repository:
+#     cd packaging/arch && makepkg -si
+#
+# The package is built straight from the checkout two levels up, so local
+# changes are picked up without committing them.
+
+pkgname=kumo
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Seanime-style anime library: AniList sync, auto matching, mpv & in-app player, ani-cli sub/dub streaming, torrents, extensions"
+arch=('x86_64' 'aarch64')
+url="https://github.com/simo1337s/animetest"
+license=('GPL-3.0-or-later')
+depends=('electron' 'mpv' 'ffmpeg' 'hicolor-icon-theme' 'xdg-utils')
+makedepends=('go' 'nodejs' 'npm')
+optdepends=(
+    'ani-cli: sub/dub online streaming and downloads (AUR)'
+    'yt-dlp: faster, more reliable stream downloads'
+    'qbittorrent: torrent client (enable Tools › Options › Web UI)'
+    'transmission-gtk: alternative torrent client'
+    'discord: rich presence'
+)
+options=('!lto' '!debug' '!strip')
+install=kumo.install
+
+_root="$(realpath "${startdir}/../..")"
+
+build() {
+    cd "${_root}"
+    export GOFLAGS="-trimpath -mod=readonly -modcacherw"
+    export CGO_ENABLED=0
+    make server
+}
+
+check() {
+    cd "${_root}/server"
+    go test ./internal/library/ ./internal/anicli/ ./internal/extensions/
+}
+
+package() {
+    cd "${_root}"
+    install -Dm755 dist/kumo "${pkgdir}/usr/lib/kumo/kumo"
+    install -Dm644 desktop/main.js "${pkgdir}/usr/lib/kumo/app/main.js"
+    install -Dm644 desktop/preload.js "${pkgdir}/usr/lib/kumo/app/preload.js"
+    install -Dm644 desktop/package.json "${pkgdir}/usr/lib/kumo/app/package.json"
+    install -Dm644 packaging/icons/kumo-512.png "${pkgdir}/usr/lib/kumo/app/icon.png"
+
+    install -Dm755 packaging/kumo.sh "${pkgdir}/usr/bin/kumo"
+    install -d "${pkgdir}/usr/bin"
+    ln -s /usr/lib/kumo/kumo "${pkgdir}/usr/bin/kumo-server"
+
+    install -Dm644 packaging/kumo.desktop "${pkgdir}/usr/share/applications/kumo.desktop"
+    for s in 64 128 256 512; do
+        install -Dm644 "packaging/icons/kumo-${s}.png" "${pkgdir}/usr/share/icons/hicolor/${s}x${s}/apps/kumo.png"
+    done
+    install -Dm644 packaging/icons/kumo.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/kumo.svg"
+    install -Dm644 packaging/kumo-server.service "${pkgdir}/usr/lib/systemd/user/kumo-server.service"
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

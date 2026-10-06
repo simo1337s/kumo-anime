@@ -52,9 +52,12 @@ func ListenAddr(cfg config.Settings) string {
 
 // Start begins serving and rebinds when the network settings change.
 func (s *Server) Start() error {
-	if err := s.listen(ListenAddr(s.app.Settings.Get())); err != nil {
+	addr := ListenAddr(s.app.Settings.Get())
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
 		return err
 	}
+	s.serve(ln, addr)
 	s.app.Settings.OnChange(func(old, cur config.Settings) {
 		next := ListenAddr(cur)
 		if next == ListenAddr(old) {
@@ -62,7 +65,7 @@ func (s *Server) Start() error {
 		}
 		log.Printf("network settings changed, rebinding to %s", next)
 		time.Sleep(500 * time.Millisecond) // let the settings response reach the client
-		if err := s.listen(next); err != nil {
+		if err := s.rebind(next); err != nil {
 			log.Printf("rebind failed: %v", err)
 			s.app.Hub.Error("Could not listen on " + next + ": " + err.Error())
 		}
@@ -70,28 +73,59 @@ func (s *Server) Start() error {
 	return nil
 }
 
-func (s *Server) listen(addr string) error {
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
+func (s *Server) serve(ln net.Listener, addr string) {
 	srv := &http.Server{Handler: s.middleware(s.mux), ReadHeaderTimeout: 15 * time.Second}
 	s.mu.Lock()
-	old := s.srv
 	s.srv, s.addr = srv, addr
 	s.mu.Unlock()
-	if old != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = old.Shutdown(ctx)
-		cancel()
-	}
 	log.Printf("Kumo listening on http://%s", addr)
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("http: %v", err)
 		}
 	}()
+}
+
+func stopServer(srv *http.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
+	_ = srv.Close() // event streams never go idle
+}
+
+// rebind moves the server to a new address. Switching between 127.0.0.1
+// and 0.0.0.0 on the same port requires closing the old listener first;
+// if the new address can't be bound the old one is restored.
+func (s *Server) rebind(next string) error {
+	s.mu.Lock()
+	old, prev := s.srv, s.addr
+	s.mu.Unlock()
+	if ln, err := net.Listen("tcp", next); err == nil {
+		s.serve(ln, next)
+		if old != nil {
+			stopServer(old)
+		}
+		return nil
+	}
+	if old != nil {
+		stopServer(old)
+	}
+	ln, err := net.Listen("tcp", next)
+	if err != nil {
+		if back, err2 := net.Listen("tcp", prev); err2 == nil {
+			s.serve(back, prev)
+		}
+		return err
+	}
+	s.serve(ln, next)
 	return nil
+}
+
+// Addr returns the current listen address.
+func (s *Server) Addr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.addr
 }
 
 func (s *Server) Shutdown() {

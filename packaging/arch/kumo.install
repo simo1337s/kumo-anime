@@ -1,0 +1,10 @@
+post_install() {
+    echo ">> Kumo installed. Start it from your app menu or run: kumo"
+    echo ">> For sub/dub streaming install ani-cli:   yay -S ani-cli"
+    echo ">> Optional:                                sudo pacman -S yt-dlp qbittorrent"
+    echo ">> Headless/LAN server (no window):         systemctl --user enable --now kumo-server"
+}
+
+post_upgrade() {
+    post_install
+}

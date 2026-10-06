@@ -99,10 +99,20 @@ export default function SettingsPage() {
     const set = <K extends keyof Settings>(k: K, v: Partial<Settings[K]>) => setDraft(d => (d ? { ...d, [k]: { ...d[k], ...v } } : d))
     const current = NAV.flatMap(g => g.items).find(i => i.id === section) ?? NAV[0].items[0]
 
-    const onSave = () =>
+    const onSave = () => {
+        const oldPort = status.settings.server.port
         save.mutate(draft, {
-            onSuccess: s => setDraft(structuredClone(s)),
+            onSuccess: s => {
+                setDraft(structuredClone(s))
+                // The server moves to the new port; follow it.
+                if (s.server.port !== oldPort && ["127.0.0.1", "localhost"].includes(location.hostname)) {
+                    setTimeout(() => {
+                        location.href = `${location.protocol}//${location.hostname}:${s.server.port}${location.pathname}${location.search}`
+                    }, 1500)
+                }
+            },
         })
+    }
 
     return (
         <div className="flex min-h-full flex-col gap-8 px-6 pt-10 pb-24 md:px-10 lg:flex-row xl:px-14">

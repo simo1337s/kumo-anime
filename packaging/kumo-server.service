@@ -1,0 +1,13 @@
+[Unit]
+Description=Kumo anime server (headless, web UI on 127.0.0.1:43211)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/kumo/kumo --web-ui
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
