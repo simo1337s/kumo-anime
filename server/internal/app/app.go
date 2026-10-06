@@ -51,6 +51,7 @@ type App struct {
 	Extensions *extensions.Manager
 	Stream     *stream.Service
 	Local      *stream.Local
+	HLS        *stream.HLS
 	Manga      *manga.Service
 	Discord    *discord.Client
 	Images     *images.Cache
@@ -125,9 +126,19 @@ func New(dataDir string) (*App, error) {
 		Images: images.New(filepath.Join(dataDir, "images")),
 		ctx:    ctx, cancel: cancel, DataDir: dataDir,
 	}
+	a.HLS = stream.NewHLS(a.Local, hlsDir(dataDir))
 	a.ShellToken = randomToken()
 	a.wire()
 	return a, nil
+}
+
+// hlsDir holds the in-app player's HLS segments: on disk, in the cache
+// folder, not in /tmp, which is in memory on most Linux systems.
+func hlsDir(dataDir string) string {
+	if dir, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(dir, "kumo", "hls")
+	}
+	return filepath.Join(dataDir, "hls")
 }
 
 func randomToken() string {
@@ -309,6 +320,7 @@ func (a *App) Start() {
 
 func (a *App) Shutdown() {
 	a.cancel()
+	a.HLS.Close()
 	a.Scanner.StopWatcher()
 	a.Player.Stop()
 	a.Discord.Clear()

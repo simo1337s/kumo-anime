@@ -21,6 +21,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { api, qs } from "@/lib/api"
+import { prefersHls, randomId, videoCaps } from "@/lib/playback"
 import { useSettings } from "@/lib/queries"
 import { playerStore, type PlayerRequest } from "@/lib/store"
 import type { EntryView, Probe, StreamSource, TrackPrefs } from "@/lib/types"
@@ -66,8 +67,12 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
     // local
     const [probe, setProbe] = useState<Probe | null>(null)
     const [method, setMethod] = useState<"direct" | "remux" | "transcode">("direct")
-    const [offset, setOffset] = useState(0)
+    const [offset, setOffset] = useState(0) // where the converted stream was asked to start
     const [audioIndex, setAudioIndex] = useState(0)
+    // The converted stream: base is where it really starts (copied video can
+    // only start at a keyframe), so subtitles and times stay in sync.
+    const [stream, setStream] = useState<{ url: string; base: number; hls: boolean; id?: string } | null>(null)
+    const [restart, setRestart] = useState(0)
     // stream
     const [sources, setSources] = useState<StreamSource[]>([])
     const [sourceIdx, setSourceIdx] = useState(0)
@@ -98,7 +103,12 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
     const mediaId = req.mediaId
     const episode = req.episode
     const source = req.kind === "local" ? "local" : req.provider === "ani-cli" ? "anicli" : "stream"
-    const absTime = (v: HTMLVideoElement) => v.currentTime + offset
+    // Safari and iPhone/iPad get converted files as HLS (see lib/playback).
+    const hlsMode = useMemo(() => prefersHls(), [])
+    const caps = useMemo(() => videoCaps(hlsMode && Hls.isSupported() ? "mse" : "element"), [hlsMode])
+    const clientId = useMemo(() => randomId(), [])
+    const base = req.kind === "local" && method !== "direct" && stream ? stream.base : offset
+    const absTime = (v: HTMLVideoElement) => v.currentTime + base
 
     // ------------------------------------------------------------------ load
     useEffect(() => {
@@ -113,6 +123,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                         episode: req.episode,
                         player: "builtin",
                         start: req.start,
+                        caps,
                     })
                     if (cancelled) return
                     prefsRef.current = res.tracks
@@ -231,14 +242,64 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
     }
 
     // ------------------------------------------------------------ video src
+    // A converted local file: ask the server where the stream will start
+    // (or start an HLS session), then load it.
+    useEffect(() => {
+        if (req.kind !== "local" || !probe || method === "direct") {
+            setStream(null)
+            return
+        }
+        let cancelled = false
+        ;(async () => {
+            try {
+                if (hlsMode) {
+                    const s = await api.post<{ id: string; url: string; start: number }>("/api/local/hls", {
+                        path: req.path,
+                        start: offset,
+                        audio: audioIndex,
+                        method,
+                        caps,
+                        client: clientId,
+                    })
+                    if (!cancelled) setStream({ url: s.url, base: s.start, hls: true, id: s.id })
+                } else {
+                    const c = caps.join(",")
+                    const sp = await api
+                        .get<{ start: number }>(`/api/local/seekpoint${qs({ path: req.path, t: offset.toFixed(3), audio: audioIndex, method, caps: c })}`)
+                        .catch(() => ({ start: offset }))
+                    if (!cancelled)
+                        setStream({ url: `/api/local/transcode${qs({ path: req.path, start: sp.start.toFixed(3), audio: audioIndex, method, caps: c })}`, base: sp.start, hls: false })
+                }
+            } catch (e: any) {
+                if (!cancelled) setError(e.message || String(e))
+            }
+        })()
+        return () => {
+            cancelled = true
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [req, probe, method, offset, audioIndex, restart])
+
+    // End the HLS session when the player closes.
+    const sessionRef = useRef<string | undefined>(undefined)
+    useEffect(() => {
+        sessionRef.current = stream?.id
+    }, [stream])
+    useEffect(
+        () => () => {
+            if (sessionRef.current) api.del(`/api/local/hls/${sessionRef.current}`).catch(() => {})
+        },
+        [],
+    )
+
     const videoSrc = useMemo(() => {
         if (req.kind === "local") {
             if (!probe) return ""
             if (method === "direct") return `/api/local/file${qs({ path: req.path })}`
-            return `/api/local/transcode${qs({ path: req.path, start: offset.toFixed(2), audio: audioIndex, method })}`
+            return stream?.url ?? ""
         }
         return sources[sourceIdx]?.url ?? ""
-    }, [req, probe, method, offset, audioIndex, sources, sourceIdx])
+    }, [req, probe, method, stream, sources, sourceIdx])
 
     useEffect(() => {
         const v = videoRef.current
@@ -246,19 +307,34 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         hlsRef.current?.destroy()
         hlsRef.current = null
         const src = sources[sourceIdx]
-        const resume = req.kind === "local" ? (method === "direct" ? startAt.current : 0) : startAt.current
-        const isHls = req.kind === "stream" && (src?.type === "m3u8" || /m3u8/i.test(src?.originalUrl ?? ""))
+        const localHls = req.kind === "local" && method !== "direct" && !!stream?.hls
+        // HLS can start right where asked; the progressive stream starts at
+        // its keyframe (stream.base).
+        const resume = localHls ? Math.max(0, offset - stream!.base) : req.kind === "local" ? (method === "direct" ? startAt.current : 0) : startAt.current
+        const isHls = localHls || (req.kind === "stream" && (src?.type === "m3u8" || /m3u8/i.test(src?.originalUrl ?? "")))
         if (isHls && Hls.isSupported()) {
-            const hls = new Hls({ startPosition: resume > 0 ? resume : -1, maxBufferLength: 60 })
+            // A local session's playlist grows while it's converted: give a
+            // start, or players begin at its end like a live stream.
+            const hls = new Hls({ startPosition: localHls ? resume : resume > 0 ? resume : -1, maxBufferLength: 60 })
             hls.loadSource(videoSrc)
             hls.attachMedia(v)
             hls.on(Hls.Events.ERROR, (_, data) => {
-                if (data.fatal) {
-                    if (sourceIdx + 1 < sources.length) {
-                        toast.warning(`Source failed, trying ${sources[sourceIdx + 1].quality || "the next one"}…`)
-                        setSourceIdx(i => i + 1)
-                    } else setError("The stream could not be played (" + data.details + ")")
+                if (!data.fatal) return
+                if (localHls) {
+                    // The session ended (e.g. paused for a long time): start
+                    // a new one here. Anything else: convert everything.
+                    const at = v.currentTime + (stream?.base ?? 0)
+                    startAt.current = 0
+                    setOffset(at)
+                    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) setRestart(n => n + 1)
+                    else if (method === "remux") setMethod("transcode")
+                    else setError("This video could not be played (" + data.details + ")")
+                    return
                 }
+                if (sourceIdx + 1 < sources.length) {
+                    toast.warning(`Source failed, trying ${sources[sourceIdx + 1].quality || "the next one"}…`)
+                    setSourceIdx(i => i + 1)
+                } else setError("The stream could not be played (" + data.details + ")")
             })
             hlsRef.current = hls
         } else {
@@ -278,8 +354,10 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
             hlsRef.current?.destroy()
             hlsRef.current = null
         }
+        // A seek within one keyframe interval sets up the same stream again:
+        // it still has to reload.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [videoSrc])
+    }, [videoSrc, stream])
 
     // ------------------------------------------------------------- subtitles
     useEffect(() => {
@@ -321,8 +399,8 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         tr.mode = "showing"
         while (tr.cues && tr.cues.length) tr.removeCue(tr.cues[0])
         for (const c of cues) {
-            const s = c.start - offset
-            const e = c.end - offset
+            const s = c.start - base
+            const e = c.end - base
             if (e <= 0) continue
             try {
                 const cue = new VTTCue(Math.max(0, s), e, c.text.replace(/<[^>]+>/g, m => (/^<\/?(i|b|u)>$/i.test(m) ? m : "")))
@@ -332,7 +410,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                 /* ignore bad cue */
             }
         }
-    }, [cues, offset])
+    }, [cues, base])
 
     // -------------------------------------------------------------- progress
     const report = useCallback(
@@ -348,7 +426,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
             api.post("/api/playback/progress", { mediaId, episode, position, duration: dur, source, ended: didEnd, title, paused: v.paused }).catch(() => {})
         },
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [mediaId, episode, source, duration, offset, title],
+        [mediaId, episode, source, duration, base, title],
     )
 
     const saveTrackPrefs = (next: { audio?: number; sub?: string }) => {
@@ -378,8 +456,19 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         const total = duration || v.duration || 0
         t = Math.max(0, Math.min(total > 0 ? total - 0.5 : t, t))
         if (req.kind === "local" && method !== "direct") {
+            // HLS can seek within what's converted so far.
+            if (stream?.hls && v.seekable.length) {
+                const rel = t - stream.base
+                if (rel >= 0 && rel < v.seekable.end(v.seekable.length - 1) - 1) {
+                    v.currentTime = rel
+                    return
+                }
+            }
+            // Otherwise the stream starts over from there.
+            v.pause()
             startAt.current = 0
             setOffset(t)
+            setRestart(n => n + 1)
             setTime(t)
         } else {
             v.currentTime = t
@@ -586,7 +675,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                 onTimeUpdate={e => {
                     const v = e.currentTarget
                     setTime(absTime(v))
-                    if (v.buffered.length) setBuffered(v.buffered.end(v.buffered.length - 1) + offset)
+                    if (v.buffered.length) setBuffered(v.buffered.end(v.buffered.length - 1) + base)
                     report()
                 }}
                 onLoadedMetadata={e => {

@@ -366,6 +366,7 @@ type playLocalBody struct {
 	Episode int      `json:"episode"`
 	Player  string   `json:"player"` // mpv | builtin ("" = settings)
 	Start   *float64 `json:"start"`
+	Caps    []string `json:"caps"` // video formats the in-app player decodes
 }
 
 func (s *Server) episodeTitle(ctx context.Context, mediaID, episode int, fallback string) string {
@@ -413,6 +414,7 @@ func (s *Server) playLocal(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.app.Local.Decide(probe, stream.CapsOf(body.Caps))
 	// The in-app player opens the episode: a new viewing, which may update
 	// progress again (rewatch).
 	s.app.Player.ResetBuiltinProgress(body.MediaID, body.Episode)

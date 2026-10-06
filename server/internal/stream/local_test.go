@@ -44,7 +44,7 @@ func newTestLocal(t *testing.T, ffmpeg string) (*Local, string) {
 	if err := files.Save(&library.LocalFile{Path: video, Dir: dir, Name: filepath.Base(video), Kind: "main"}); err != nil {
 		t.Fatal(err)
 	}
-	d.SetCache("probe:"+video, Probe{
+	d.SetCache(probeKey(video), Probe{
 		Path: video, Container: "matroska,webm", Duration: 60, Size: int64(len("not really a video")),
 		Video: []ProbeStream{{Index: 0, Type: "video", Codec: "h264"}},
 		Audio: []ProbeStream{{Index: 1, Type: "audio", Codec: "aac", Channels: 2}},
@@ -70,7 +70,7 @@ func serve(t *testing.T, l *Local, w http.ResponseWriter, video string) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		l.ServeTranscode(w, r, video, 0, 0, "remux")
+		l.ServeTranscode(w, r, video, 0, 0, "remux", nil)
 	}()
 	select {
 	case <-done:
@@ -119,7 +119,7 @@ func TestDecideOutOfRangeAudioTrack(t *testing.T) {
 		Audio:     []ProbeStream{{Codec: "aac", Channels: 2}, {Codec: "ac3", Channels: 6}},
 	}
 	for _, idx := range []int{-1, 0, 1, 5} {
-		if method, _ := decide(p, "auto", idx); method == "" || method == "direct" {
+		if method, _ := decide(p, "auto", idx, nil); method == "" || method == "direct" {
 			t.Errorf("decide(audio %d) = %q, want remux or transcode", idx, method)
 		}
 	}

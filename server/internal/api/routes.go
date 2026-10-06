@@ -87,8 +87,33 @@ func (s *Server) routes() {
 		q := r.URL.Query()
 		start, _ := strconv.ParseFloat(q.Get("start"), 64)
 		audio, _ := strconv.Atoi(q.Get("audio"))
-		s.app.Local.ServeTranscode(w, r, q.Get("path"), start, audio, q.Get("method"))
+		s.app.Local.ServeTranscode(w, r, q.Get("path"), start, audio, q.Get("method"), stream.ParseCaps(q.Get("caps")))
 	})
+	m.HandleFunc("GET /api/local/seekpoint", h(func(r *http.Request) (any, error) {
+		q := r.URL.Query()
+		t, _ := strconv.ParseFloat(q.Get("t"), 64)
+		audio, _ := strconv.Atoi(q.Get("audio"))
+		start, err := s.app.Local.SeekPoint(r.Context(), q.Get("path"), t, audio, q.Get("method"), stream.ParseCaps(q.Get("caps")), q.Get("hls") == "1")
+		if err != nil {
+			return nil, err
+		}
+		return map[string]float64{"start": start}, nil
+	}))
+	// HLS, for Safari and iPhone/iPad (see stream.HLS).
+	m.HandleFunc("POST /api/local/hls", h(func(r *http.Request) (any, error) {
+		var req stream.HLSRequest
+		if err := decode(r, &req); err != nil {
+			return nil, err
+		}
+		return s.app.HLS.Start(r.Context(), req)
+	}))
+	m.HandleFunc("GET /api/local/hls/{id}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		s.app.HLS.Serve(w, r, r.PathValue("id"), r.PathValue("name"))
+	})
+	m.HandleFunc("DELETE /api/local/hls/{id}", h(func(r *http.Request) (any, error) {
+		s.app.HLS.Stop(r.PathValue("id"))
+		return nil, nil
+	}))
 	m.HandleFunc("GET /api/local/subtitle", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		idx, _ := strconv.Atoi(q.Get("index"))

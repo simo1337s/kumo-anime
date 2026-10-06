@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,8 @@ type ProbeStream struct {
 	Channels  int    `json:"channels,omitempty"`
 	Width     int    `json:"width,omitempty"`
 	Height    int    `json:"height,omitempty"`
+	Profile   string `json:"profile,omitempty"`
+	PixFmt    string `json:"pixFmt,omitempty"`
 	Bitmap    bool   `json:"bitmap,omitempty"`
 }
 
@@ -90,14 +93,14 @@ func (l *Local) Probe(ctx context.Context, path string) (*Probe, error) {
 		return nil, err
 	}
 	cfg := l.settings.Get()
-	key := "probe:" + path
+	key := probeKey(path)
 	st, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
 	var p Probe
 	if l.db.GetCache(key, &p) && p.Size == st.Size() {
-		p.Method, p.Reason = decide(&p, cfg.Transcode.Mode, 0)
+		p.Method, p.Reason = decide(&p, cfg.Transcode.Mode, 0, nil)
 		return &p, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -133,6 +136,8 @@ func (l *Local) Probe(ctx context.Context, path string) (*Probe, error) {
 			Channels    int               `json:"channels"`
 			Width       int               `json:"width"`
 			Height      int               `json:"height"`
+			Profile     string            `json:"profile"`
+			PixFmt      string            `json:"pix_fmt"`
 			Tags        map[string]string `json:"tags"`
 			Disposition map[string]int    `json:"disposition"`
 		} `json:"streams"`
@@ -145,7 +150,7 @@ func (l *Local) Probe(ctx context.Context, path string) (*Probe, error) {
 	counts := map[string]int{}
 	for _, s := range raw.Streams {
 		ps := ProbeStream{
-			Index: s.Index, Type: s.CodecType, Codec: s.CodecName, Channels: s.Channels, Width: s.Width, Height: s.Height,
+			Index: s.Index, Type: s.CodecType, Codec: s.CodecName, Channels: s.Channels, Width: s.Width, Height: s.Height, Profile: s.Profile, PixFmt: s.PixFmt,
 			Language: s.Tags["language"], Title: s.Tags["title"], Default: s.Disposition["default"] == 1, Forced: s.Disposition["forced"] == 1,
 		}
 		if ps.Type == "video" && s.Disposition["attached_pic"] == 1 {
@@ -165,7 +170,7 @@ func (l *Local) Probe(ctx context.Context, path string) (*Probe, error) {
 	}
 	p.ExternalSubs = externalSubs(path)
 	l.db.SetCache(key, p, 30*24*time.Hour)
-	p.Method, p.Reason = decide(&p, cfg.Transcode.Mode, 0)
+	p.Method, p.Reason = decide(&p, cfg.Transcode.Mode, 0, nil)
 	return &p, nil
 }
 
@@ -188,13 +193,67 @@ func externalSubs(path string) []ExternalSub {
 	return out
 }
 
-var (
-	browserVideo = map[string]bool{"h264": true, "vp8": true, "vp9": true, "av1": true}
-	browserAudio = map[string]bool{"aac": true, "mp3": true, "opus": true, "vorbis": true, "flac": true}
-)
+// probeKey caches probes; v2 added the profile and pixel format.
+func probeKey(path string) string { return "probe2:" + path }
 
-// decide picks direct play, remux (copy into fMP4) or transcode.
-func decide(p *Probe, mode string, audioIdx int) (string, string) {
+// Caps are the video formats a player can decode, like "h264", "hevc" or
+// "hevc-10" (10-bit), and "mkv" when it plays Matroska files as they are.
+// Videos in them are played or copied as they are; others are converted to
+// H.264.
+type Caps map[string]bool
+
+// DefaultCaps is what Chromium plays, the desktop app's browser.
+var DefaultCaps = Caps{"h264": true, "vp8": true, "vp9": true, "vp9-10": true, "av1": true, "av1-10": true, "mkv": true}
+
+// ParseCaps reads a comma-separated list of formats; none means DefaultCaps.
+func ParseCaps(list string) Caps {
+	return CapsOf(strings.Split(list, ","))
+}
+
+func CapsOf(list []string) Caps {
+	c := Caps{}
+	for _, f := range list {
+		if f = strings.TrimSpace(strings.ToLower(f)); f != "" {
+			c[f] = true
+		}
+	}
+	if len(c) == 0 {
+		return DefaultCaps
+	}
+	c["h264"] = true // every player decodes 8-bit H.264
+	return c
+}
+
+// videoFormat names a video stream's format the way Caps do: its codec,
+// with "-10" for 10-bit (or deeper) video, which many devices can't decode
+// (10-bit H.264 plays nowhere in a browser).
+func videoFormat(v ProbeStream) string {
+	if strings.Contains(v.PixFmt, "p10") || strings.Contains(v.PixFmt, "p12") || strings.Contains(v.Profile, "10") {
+		return v.Codec + "-10"
+	}
+	return v.Codec
+}
+
+func formatName(f string) string {
+	codec, deep := strings.CutSuffix(f, "-10")
+	name := map[string]string{"h264": "H.264", "hevc": "HEVC", "av1": "AV1", "vp9": "VP9", "vp8": "VP8"}[codec]
+	if name == "" {
+		name = strings.ToUpper(codec)
+	}
+	if deep {
+		return "10-bit " + name
+	}
+	return name
+}
+
+var browserAudio = map[string]bool{"aac": true, "mp3": true, "opus": true, "vorbis": true, "flac": true}
+
+// decide picks direct play, remux (copy into fMP4) or transcode for a
+// player that decodes caps (nil: DefaultCaps).
+func decide(p *Probe, mode string, audioIdx int, caps Caps) (string, string) {
+	if caps == nil {
+		caps = DefaultCaps
+	}
 	if mode == "transcode" {
 		return "transcode", "forced by settings"
 	}
@@ -202,18 +261,20 @@ func decide(p *Probe, mode string, audioIdx int) (string, string) {
 		return "transcode", "no video stream"
 	}
 	v := p.Video[0]
-	if !browserVideo[v.Codec] {
+	if f := videoFormat(v); !caps[f] {
 		if mode == "direct" {
 			return "direct", "forced by settings"
 		}
-		return "transcode", fmt.Sprintf("video codec %s isn't supported by the browser", v.Codec)
+		return "transcode", fmt.Sprintf("this device can't play %s video", formatName(f))
 	}
 	audioOK := true
 	if len(p.Audio) > 0 {
 		a := p.Audio[min(max(audioIdx, 0), len(p.Audio)-1)]
 		audioOK = browserAudio[a.Codec] && a.Channels <= 2 || a.Codec == "aac" || a.Codec == "opus"
 	}
-	containerOK := strings.Contains(p.Container, "mp4") || strings.Contains(p.Container, "webm") || strings.Contains(p.Container, "mov")
+	// ffprobe calls both Matroska and WebM "matroska,webm".
+	mkv := strings.Contains(p.Container, "matroska") && !strings.EqualFold(filepath.Ext(p.Path), ".webm")
+	containerOK := strings.Contains(p.Container, "mp4") || strings.Contains(p.Container, "mov") || strings.Contains(p.Container, "webm") && (!mkv || caps["mkv"])
 	if mode == "direct" || (containerOK && audioOK && audioIdx == 0 && len(p.Audio) <= 1) {
 		return "direct", "the browser can play this file as is"
 	}
@@ -221,6 +282,175 @@ func decide(p *Probe, mode string, audioIdx int) (string, string) {
 		return "remux", "repackaging into MP4 (no quality loss)"
 	}
 	return "transcode", "converting the audio track for the browser"
+}
+
+// Decide redoes the playback decision of a probe for a player.
+func (l *Local) Decide(p *Probe, caps Caps) {
+	p.Method, p.Reason = decide(p, l.settings.Get().Transcode.Mode, 0, caps)
+}
+
+// plan is how ffmpeg converts a file for one player.
+type plan struct {
+	method    string // remux | transcode
+	videoCopy bool
+	audioCopy bool
+	hevc      bool // copied HEVC: tagged so Apple devices play it
+	audio     int  // the audio track, among the file's audio tracks
+}
+
+// plan works out the conversion for method (direct or "" means decide),
+// audio track and player. HLS players only get AAC audio copied, the one
+// codec every HLS player takes.
+func (l *Local) plan(p *Probe, method string, audio int, caps Caps, hls bool) plan {
+	if caps == nil {
+		caps = DefaultCaps
+	}
+	if method == "" || method == "direct" {
+		method, _ = decide(p, l.settings.Get().Transcode.Mode, audio, caps)
+		if method == "direct" {
+			method = "remux"
+		}
+	}
+	pl := plan{method: method}
+	// Video the player decodes is copied, also when transcoding (that's for
+	// the audio, e.g. TrueHD next to HEVC a Mac plays as is).
+	if len(p.Video) > 0 {
+		v := p.Video[0]
+		pl.videoCopy = caps[videoFormat(v)]
+		pl.hevc = pl.videoCopy && v.Codec == "hevc"
+	}
+	if len(p.Audio) > 0 {
+		pl.audio = min(max(audio, 0), len(p.Audio)-1)
+		codec := p.Audio[pl.audio].Codec
+		pl.audioCopy = method == "remux" && (codec == "aac" || !hls && browserAudio[codec])
+	}
+	if !pl.videoCopy || len(p.Audio) > 0 && !pl.audioCopy {
+		pl.method = "transcode"
+	}
+	return pl
+}
+
+// args are ffmpeg's arguments for the plan, up to the output format.
+func (pl plan) args(cfg config.Settings, p *Probe, path string, start float64) []string {
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
+	hw := cfg.Transcode.HwAccel
+	if !pl.videoCopy && hw == "vaapi" {
+		args = append(args, "-vaapi_device", cfg.Transcode.VaapiNode)
+	}
+	if start > 0 {
+		if pl.videoCopy {
+			start += seekMargin // lands on the keyframe at start, see SeekPoint
+		}
+		args = append(args, "-ss", strconv.FormatFloat(start, 'f', 3, 64))
+	}
+	args = append(args, "-i", path, "-map", "0:v:0?")
+	if len(p.Audio) > 0 {
+		args = append(args, "-map", fmt.Sprintf("0:a:%d?", pl.audio))
+	}
+	if pl.videoCopy {
+		args = append(args, "-c:v", "copy")
+		if pl.hevc {
+			args = append(args, "-tag:v", "hvc1")
+		}
+	} else {
+		switch hw {
+		case "vaapi":
+			args = append(args, "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-qp", "23")
+		case "nvenc":
+			args = append(args, "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23")
+		case "qsv":
+			args = append(args, "-c:v", "h264_qsv", "-global_quality", "23")
+		default:
+			args = append(args, "-c:v", "libx264", "-preset", cfg.Transcode.Preset, "-crf", "21", "-pix_fmt", "yuv420p", "-profile:v", "high")
+		}
+	}
+	if pl.audioCopy {
+		args = append(args, "-c:a", "copy")
+	} else {
+		args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "192k")
+	}
+	return append(args, "-sn", "-dn")
+}
+
+// SeekPoint returns where a stream asked to start at t really starts, which
+// the player needs to keep subtitles and the position right after seeking.
+// Converted video starts at t exactly. Copied video can only start at a
+// keyframe: the last one at or before t.
+//
+// Starting there takes care, as ffmpeg's -ss lands on the last keyframe
+// some way before the time given: about 0.13s before with B-frames, plus
+// the audio's pre-roll (up to 0.08s for Opus). So copies start at
+// keyframe + seekMargin, and a keyframe followed that closely by another
+// one (a scene cut) is passed over for the next.
+func (l *Local) SeekPoint(ctx context.Context, path string, t float64, audio int, method string, caps Caps, hls bool) (float64, error) {
+	path, err := l.resolve(path)
+	if err != nil {
+		return 0, err
+	}
+	p, err := l.Probe(ctx, path)
+	if err != nil {
+		return 0, err
+	}
+	return l.startFor(ctx, path, l.plan(p, method, audio, caps, hls), t), nil
+}
+
+const seekMargin = 0.4
+
+func (l *Local) startFor(ctx context.Context, path string, pl plan, t float64) float64 {
+	if t <= 0 {
+		return 0
+	}
+	if !pl.videoCopy {
+		return t
+	}
+	if k, ok := l.seekKeyframe(ctx, path, t); ok {
+		return k
+	}
+	return t
+}
+
+// seekKeyframe finds the keyframe a copy asked to start at t starts at.
+func (l *Local) seekKeyframe(ctx context.Context, path string, t float64) (float64, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	ffprobe := l.settings.Get().Transcode.FfprobePath
+	for _, window := range []float64{20, 120} {
+		from := max(0, t-window)
+		out, err := exec.CommandContext(ctx, ffprobe, "-v", "error", "-select_streams", "v:0",
+			"-show_entries", "packet=pts_time,flags", "-of", "csv=p=0",
+			"-read_intervals", fmt.Sprintf("%.3f%%%.3f", from, t+1), path).Output()
+		if err != nil {
+			return 0, false
+		}
+		var keys []float64
+		for _, line := range strings.Split(string(out), "\n") {
+			ts, flags, ok := strings.Cut(strings.TrimSpace(line), ",")
+			if !ok || !strings.HasPrefix(flags, "K") {
+				continue
+			}
+			if v, err := strconv.ParseFloat(ts, 64); err == nil {
+				keys = append(keys, v)
+			}
+		}
+		sort.Float64s(keys)
+		i := -1
+		for j, k := range keys {
+			if k <= t+0.0005 {
+				i = j
+			}
+		}
+		if i < 0 {
+			if from == 0 {
+				return 0, true // no keyframe read before t: from the start
+			}
+			continue
+		}
+		for i+1 < len(keys) && keys[i+1]-keys[i] < seekMargin+0.05 {
+			i++
+		}
+		return keys[i], true
+	}
+	return 0, false
 }
 
 // ServeFile streams the raw file with range support (direct play).
@@ -249,8 +479,9 @@ func (l *Local) ServeFile(w http.ResponseWriter, r *http.Request, path string) {
 	http.ServeContent(w, r, filepath.Base(path), st.ModTime(), f)
 }
 
-// ServeTranscode pipes ffmpeg output as fragmented MP4 starting at `start`.
-func (l *Local) ServeTranscode(w http.ResponseWriter, r *http.Request, path string, start float64, audio int, method string) {
+// ServeTranscode pipes ffmpeg output as fragmented MP4 starting at `start`
+// (see SeekPoint), for players that decode caps.
+func (l *Local) ServeTranscode(w http.ResponseWriter, r *http.Request, path string, start float64, audio int, method string, caps Caps) {
 	path, err := l.resolve(path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -262,49 +493,9 @@ func (l *Local) ServeTranscode(w http.ResponseWriter, r *http.Request, path stri
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if method == "" || method == "direct" {
-		method, _ = decide(p, cfg.Transcode.Mode, audio)
-		if method == "direct" {
-			method = "remux"
-		}
-	}
-	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
-	videoCopy := method == "remux" && len(p.Video) > 0 && browserVideo[p.Video[0].Codec]
-	if method == "transcode" && len(p.Video) > 0 && browserVideo[p.Video[0].Codec] && p.Video[0].Codec == "h264" {
-		videoCopy = true // only audio needs converting
-	}
-	hw := cfg.Transcode.HwAccel
-	if !videoCopy && hw == "vaapi" {
-		args = append(args, "-vaapi_device", cfg.Transcode.VaapiNode)
-	}
-	if start > 0 {
-		args = append(args, "-ss", strconv.FormatFloat(start, 'f', 2, 64))
-	}
-	args = append(args, "-i", path, "-map", "0:v:0?")
-	if len(p.Audio) > 0 {
-		args = append(args, "-map", fmt.Sprintf("0:a:%d?", min(max(audio, 0), len(p.Audio)-1)))
-	}
-	if videoCopy {
-		args = append(args, "-c:v", "copy")
-	} else {
-		switch hw {
-		case "vaapi":
-			args = append(args, "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-qp", "23")
-		case "nvenc":
-			args = append(args, "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23")
-		case "qsv":
-			args = append(args, "-c:v", "h264_qsv", "-global_quality", "23")
-		default:
-			args = append(args, "-c:v", "libx264", "-preset", cfg.Transcode.Preset, "-crf", "21", "-pix_fmt", "yuv420p", "-profile:v", "high")
-		}
-	}
-	audioCopy := method == "remux" && len(p.Audio) > 0 && browserAudio[p.Audio[min(max(audio, 0), len(p.Audio)-1)].Codec]
-	if audioCopy {
-		args = append(args, "-c:a", "copy")
-	} else {
-		args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "192k")
-	}
-	args = append(args, "-sn", "-dn", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1")
+	pl := l.plan(p, method, audio, caps, false)
+	method = pl.method
+	args := append(pl.args(cfg, p, path, start), "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1")
 
 	// ffmpeg is stopped when the request ends, or as soon as the player stops
 	// reading (see below).
