@@ -21,7 +21,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/simo1337s/animetest/server/internal/config"
 	"github.com/simo1337s/animetest/server/internal/util"
@@ -37,7 +39,10 @@ while [ $# -gt 0 ]; do
 	esac
 	[ $# -gt 0 ] && shift
 done
+# "Playing episode 1 of <title>... " is the next/replay/quit menu ani-cli shows
+# after playing. It comes first: the title in it can contain anything.
 case "$prompt" in
+	*laying*) kind=control ;;
 	*nime*) kind=anime ;;
 	*pisode*) kind=episodes ;;
 	*uality*) kind=quality ;;
@@ -66,6 +71,7 @@ type Driver struct {
 	settings *config.Store
 	shimDir  string
 	histDir  string
+	timeout  time.Duration // for one ani-cli run
 	once     sync.Once
 	initErr  error
 }
@@ -75,6 +81,7 @@ func New(s *config.Store) *Driver {
 		settings: s,
 		shimDir:  filepath.Join(config.RuntimeDir(), "anicli-shims"),
 		histDir:  filepath.Join(config.DataDir(), "ani-cli"),
+		timeout:  90 * time.Second,
 	}
 }
 
@@ -151,9 +158,22 @@ func (d *Driver) exec(ctx context.Context, args ...string) (*run, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	runCtx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := exec.CommandContext(runCtx, bin, args...)
+	// ani-cli is a shell script: curl, sed & co. do its work, in subshells.
+	// It gets a process group of its own so that a timeout, or a request that
+	// went away, stops all of it. Killing only the shell would leave the rest
+	// running, holding its output open, with Run waiting for them.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	cmd.WaitDelay = 3 * time.Second
 	env := []string{
 		"PATH=" + d.shimDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"KUMO_DUMP_DIR=" + dir,
@@ -175,12 +195,20 @@ func (d *Driver) exec(ctx context.Context, args ...string) (*run, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	cmd.Stdin = strings.NewReader("")
-	_ = cmd.Run() // ani-cli "fails" on purpose when the shim selects nothing
-	if ctx.Err() == context.DeadlineExceeded {
-		os.RemoveAll(dir)
-		return nil, errors.New("ani-cli timed out")
+	err = cmd.Run() // ani-cli "fails" on purpose when the shim selects nothing
+	var exitErr *exec.ExitError
+	switch {
+	case ctx.Err() != nil: // the caller gave up, e.g. the client went away
+		err = ctx.Err()
+	case runCtx.Err() != nil:
+		err = fmt.Errorf("ani-cli timed out after %v", d.timeout)
+	case err == nil, errors.As(err, &exitErr), errors.Is(err, exec.ErrWaitDelay):
+		return &run{dir: dir, stdout: stdout.String(), stderr: stderr.String()}, nil
+	default: // e.g. it could not be started
+		err = fmt.Errorf("running ani-cli: %w", err)
 	}
-	return &run{dir: dir, stdout: stdout.String(), stderr: stderr.String()}, nil
+	_ = os.RemoveAll(dir)
+	return nil, err
 }
 
 var ansi = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]|\x1b[()][A-Z0-9]|\x1b[>=]|\r`)
@@ -206,6 +234,52 @@ func modeArgs(mode string) []string {
 	return nil
 }
 
+// cleanQuery turns a title, or what the user typed, into a query ani-cli can
+// search for. ani-cli 5 puts the query into its search URL as it is, with
+// curl's URL globbing on: [] and {} make curl fail ("Connection error"),
+// & # % ? break the URL's query string, and the other characters replaced
+// here are not valid in a URL either. It takes an argument that starts with
+// "-" for an option (-U updates the script, -D deletes the history), so the
+// query never starts with one.
+func cleanQuery(q string) string {
+	q = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || strings.ContainsRune("[]{}()&#%?\"\\<>|^`", r) {
+			return ' '
+		}
+		return r
+	}, q)
+	return strings.TrimLeft(strings.Join(strings.Fields(q), " "), "- ")
+}
+
+// queryArg returns the query argument for an ani-cli run (see cleanQuery).
+func queryArg(query string) (string, error) {
+	if q := cleanQuery(query); q != "" {
+		return q, nil
+	}
+	return "", errors.New("empty query")
+}
+
+var reMediaTitle = regexp.MustCompile(`^(.*)\s+Episode\s+(\S+)$`)
+
+// played returns the anime title and the episode ani-cli handed to the player,
+// which it names "<title> Episode <n>"; ok is false if it played nothing.
+func (r *run) played() (title, episode string, ok bool) {
+	args := splitLines(r.read("player.txt"))
+	if len(args) == 0 {
+		return "", "", false
+	}
+	for _, a := range args {
+		for _, flag := range []string{"--force-media-title=", "--mpv-force-media-title="} {
+			if v, found := strings.CutPrefix(a, flag); found {
+				if m := reMediaTitle.FindStringSubmatch(v); m != nil {
+					return strings.TrimSpace(m[1]), m[2], true
+				}
+			}
+		}
+	}
+	return "", "", true
+}
+
 // Result is one ani-cli search result.
 type Result struct {
 	Index    int    `json:"index"`
@@ -221,10 +295,11 @@ var (
 // Search returns the search results ani-cli shows for a query.
 func (d *Driver) Search(ctx context.Context, query, mode string) ([]Result, error) {
 	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil, errors.New("empty query")
+	q, err := queryArg(query)
+	if err != nil {
+		return nil, err
 	}
-	r, err := d.exec(ctx, append(modeArgs(mode), query)...)
+	r, err := d.exec(ctx, append(modeArgs(mode), "--exit-after-play", q)...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,9 +307,13 @@ func (d *Driver) Search(ctx context.Context, query, mode string) ([]Result, erro
 	list := r.read("anime.txt")
 	if strings.TrimSpace(list) == "" {
 		// Exactly one result: ani-cli skipped the menu and went on to the
-		// episode list.
-		if strings.TrimSpace(r.read("episodes.txt")) != "" {
-			return []Result{{Index: 1, Title: query, Episodes: len(splitLines(r.read("episodes.txt")))}}, nil
+		// episode list. Its title is unknown, so the query stands in for it...
+		if eps := splitLines(r.read("episodes.txt")); len(eps) > 0 {
+			return []Result{{Index: 1, Title: query, Episodes: len(eps)}}, nil
+		}
+		// ...unless it has a single episode, which ani-cli played right away.
+		if title, _, ok := r.played(); ok {
+			return []Result{{Index: 1, Title: util.FirstNonEmpty(title, query), Episodes: 1}}, nil
 		}
 		msg := r.lastError()
 		if strings.Contains(strings.ToLower(msg), "no results") {
@@ -262,17 +341,23 @@ func (d *Driver) Search(ctx context.Context, query, mode string) ([]Result, erro
 
 // Episodes returns the episode numbers available for a search result.
 func (d *Driver) Episodes(ctx context.Context, query string, index int, mode string) ([]string, error) {
-	args := append(modeArgs(mode), "-S", strconv.Itoa(index), query)
-	r, err := d.exec(ctx, args...)
+	q, err := queryArg(query)
+	if err != nil {
+		return nil, err
+	}
+	r, err := d.exec(ctx, append(modeArgs(mode), "--exit-after-play", "-S", strconv.Itoa(index), q)...)
 	if err != nil {
 		return nil, err
 	}
 	defer r.cleanup()
-	eps := splitLines(r.read("episodes.txt"))
-	if len(eps) == 0 {
-		return nil, fmt.Errorf("ani-cli: %s", r.lastError())
+	if eps := splitLines(r.read("episodes.txt")); len(eps) > 0 {
+		return eps, nil
 	}
-	return eps, nil
+	// A single episode (a movie, most OVAs) gets no menu: ani-cli played it.
+	if _, ep, ok := r.played(); ok {
+		return []string{util.FirstNonEmpty(ep, "1")}, nil
+	}
+	return nil, fmt.Errorf("ani-cli: %s", r.lastError())
 }
 
 // Stream is a resolved, directly playable episode.
@@ -287,6 +372,10 @@ type Stream struct {
 
 // Resolve asks ani-cli for the stream of one episode.
 func (d *Driver) Resolve(ctx context.Context, query string, index int, episode, mode, quality string) (*Stream, error) {
+	q, err := queryArg(query)
+	if err != nil {
+		return nil, err
+	}
 	if quality == "" {
 		quality = d.settings.Get().AniCli.Quality
 	}
@@ -294,7 +383,7 @@ func (d *Driver) Resolve(ctx context.Context, query string, index int, episode, 
 	if quality != "" && quality != "best" {
 		args = append(args, "-q", quality)
 	}
-	args = append(args, query)
+	args = append(args, q)
 	r, err := d.exec(ctx, args...)
 	if err != nil {
 		return nil, err
