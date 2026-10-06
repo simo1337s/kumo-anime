@@ -137,7 +137,8 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                     setAudioIndex(ai)
                     const m = ai === 0 && res.probe.method === "direct" ? "direct" : res.probe.method === "direct" ? "remux" : res.probe.method
                     setMethod(m)
-                    startAt.current = res.resumeAt || 0
+                    // Ignore saved positions past the end of this file.
+                    startAt.current = res.resumeAt && res.resumeAt < res.probe.duration - 10 ? res.resumeAt : 0
                     if (m !== "direct") setOffset(startAt.current)
 
                     const subOpts: SubOption[] = [

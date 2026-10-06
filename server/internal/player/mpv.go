@@ -63,7 +63,7 @@ type LaunchOptions struct {
 
 // LaunchMpv starts mpv and connects to its IPC socket.
 func LaunchMpv(mpvPath string, opts LaunchOptions) (*Mpv, error) {
-	socket := filepath.Join(config.RuntimeDir(), fmt.Sprintf("mpv-%d.sock", time.Now().UnixNano()))
+	socket := filepath.Join(config.RuntimeDir(), fmt.Sprintf("mpv-%d.sock", time.Now().UnixNano()%1e9))
 	args := []string{
 		"--input-ipc-server=" + socket,
 		"--force-window=immediate",
