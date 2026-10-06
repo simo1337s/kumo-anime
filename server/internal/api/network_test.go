@@ -24,4 +24,20 @@ func TestLanURLs(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
+
+	// Windows names its adapters differently.
+	windows := []netInterface{
+		{"vEthernet (WSL (Hyper-V firewall))", up, []net.IP{net.ParseIP("172.28.16.1")}},
+		{"VirtualBox Host-Only Network", up, []net.IP{net.ParseIP("192.168.56.1")}},
+		{"Ethernet", up, []net.IP{net.ParseIP("192.168.40.20")}},
+		{"Wi-Fi", up, []net.IP{net.ParseIP("10.0.0.12")}},
+		{"Local Area Connection* 2", up, []net.IP{net.ParseIP("192.168.137.1")}}, // Wi-Fi Direct
+		{"Local Area Connection", up, []net.IP{net.ParseIP("192.168.50.7")}},     // a real adapter, old naming
+		{"Loopback Pseudo-Interface 1", net.FlagUp | net.FlagLoopback, []net.IP{net.ParseIP("127.0.0.1")}},
+	}
+	got = lanURLsFrom(windows, 43211)
+	want = []string{"http://192.168.40.20:43211", "http://10.0.0.12:43211", "http://192.168.50.7:43211"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Windows: got %v, want %v", got, want)
+	}
 }

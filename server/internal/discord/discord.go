@@ -1,5 +1,5 @@
 // Package discord shows "Watching …" rich presence through the local Discord
-// client's IPC socket (no network access needed).
+// client's IPC socket or named pipe (no network access needed).
 package discord
 
 import (
@@ -7,36 +7,21 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/simo1337s/animetest/server/internal/util"
 )
 
 type Client struct {
 	mu       sync.Mutex
 	conn     net.Conn
 	clientID string
-}
-
-func socketPaths() []string {
-	var bases []string
-	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
-		bases = append(bases, d, filepath.Join(d, "app", "com.discordapp.Discord"), filepath.Join(d, ".flatpak", "dev.vencord.Vesktop", "xdg-run"), filepath.Join(d, "snap.discord"))
-	}
-	bases = append(bases, os.TempDir(), "/tmp")
-	var out []string
-	for _, b := range bases {
-		for i := 0; i < 10; i++ {
-			out = append(out, filepath.Join(b, fmt.Sprintf("discord-ipc-%d", i)))
-		}
-	}
-	return out
 }
 
 func (c *Client) send(op uint32, payload any) error {
@@ -66,7 +51,7 @@ func (c *Client) connect(clientID string) error {
 	}
 	c.closeLocked()
 	for _, p := range socketPaths() {
-		conn, err := net.DialTimeout("unix", p, time.Second)
+		conn, err := util.DialIPC(p, time.Second)
 		if err != nil {
 			continue
 		}

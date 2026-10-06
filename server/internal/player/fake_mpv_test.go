@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/simo1337s/animetest/server/internal/util"
 )
 
 // shortTempDir returns a test directory whose path leaves room for unix
@@ -44,15 +45,15 @@ type fakeMpv struct {
 	exited   chan struct{}
 }
 
-// startFakeMpv serves a fake mpv on a unix socket at path and returns an Mpv
-// connected to it. It may run on any goroutine.
+// startFakeMpv serves a fake mpv on an IPC socket (named pipe on Windows) at
+// path and returns an Mpv connected to it. It may run on any goroutine.
 func startFakeMpv(path string, tracks []Track, onExit func()) (*Mpv, *fakeMpv, error) {
-	ln, err := net.Listen("unix", path)
+	ln, err := listenIPC(path)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer ln.Close()
-	client, err := net.Dial("unix", path)
+	client, err := util.DialIPC(path, 5*time.Second)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -204,7 +205,7 @@ func (l *fakeLauncher) launch(_ string, opts LaunchOptions) (*Mpv, error) {
 	l.live++
 	l.maxLive = max(l.maxLive, l.live)
 	l.targets = append(l.targets, opts.Target)
-	path := filepath.Join(l.dir, fmt.Sprintf("%d.sock", len(l.targets)))
+	path := testIPCAddress(l.dir, fmt.Sprint(len(l.targets)))
 	l.mu.Unlock()
 	onExit := func() {
 		l.mu.Lock()

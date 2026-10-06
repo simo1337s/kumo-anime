@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -229,6 +230,9 @@ func TestHLSTranscodes(t *testing.T) {
 func TestHLSThrottle(t *testing.T) {
 	dir := t.TempDir()
 	cmd := exec.Command("sleep", "60")
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("ping", "-n", "60", "127.0.0.1")
+	}
 	if err := cmd.Start(); err != nil {
 		t.Skip(err)
 	}
@@ -244,8 +248,13 @@ func TestHLSThrottle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Linux shows whether a process is stopped; elsewhere only the calls'
+	// success is checked.
 	state := func() string {
-		b, _ := os.ReadFile("/proc/" + strconv.Itoa(cmd.Process.Pid) + "/stat")
+		b, err := os.ReadFile("/proc/" + strconv.Itoa(cmd.Process.Pid) + "/stat")
+		if err != nil {
+			return "-"
+		}
 		if f := strings.Fields(string(b)); len(f) > 2 {
 			return f[2]
 		}
@@ -261,13 +270,13 @@ func TestHLSThrottle(t *testing.T) {
 	if !s.paused {
 		t.Fatal("not paused far ahead of the player")
 	}
-	waitFor(t, func() bool { return state() == "T" })
+	waitFor(t, func() bool { return state() == "T" || state() == "-" })
 	s.requested = 30 // the player caught up
 	s.throttle()
 	if s.paused {
 		t.Fatal("not resumed when the player caught up")
 	}
-	waitFor(t, func() bool { return state() == "S" || state() == "R" })
+	waitFor(t, func() bool { return state() == "S" || state() == "R" || state() == "-" })
 }
 
 func TestSessionPlaylist(t *testing.T) {

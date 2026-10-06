@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { api, qs } from "@/lib/api"
 import { usePlay } from "@/lib/play"
+import { installHint, installSource } from "@/lib/platform"
 import { useEpisodeMarker, useLanguageMode, useOnlineProviders, useStatus, useStreamEpisodes } from "@/lib/queries"
 import type { EntryView } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -114,8 +115,9 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
                     <div className="text-sm">
                         <p className="font-semibold text-amber-200">ani-cli isn’t installed</p>
                         <p className="mt-1 text-muted">
-                            Install it from the AUR with <code className="rounded bg-black/40 px-1.5 py-0.5">yay -S ani-cli</code> (it also needs <code className="rounded bg-black/40 px-1.5 py-0.5">mpv</code>,{" "}
-                            <code className="rounded bg-black/40 px-1.5 py-0.5">yt-dlp</code> or <code className="rounded bg-black/40 px-1.5 py-0.5">ffmpeg</code>), or pick an extension provider from the marketplace.
+                            {installSource(status?.platform, "ani-cli")} <code className="rounded bg-black/40 px-1.5 py-0.5">{installHint(status?.platform, "ani-cli")}</code> (it also
+                            needs <code className="rounded bg-black/40 px-1.5 py-0.5">mpv</code>, <code className="rounded bg-black/40 px-1.5 py-0.5">yt-dlp</code> or{" "}
+                            <code className="rounded bg-black/40 px-1.5 py-0.5">ffmpeg</code>), or pick an extension provider from the marketplace.
                         </p>
                     </div>
                 </div>

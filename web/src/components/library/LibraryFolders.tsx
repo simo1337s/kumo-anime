@@ -27,7 +27,7 @@ const usable = (f: LibraryFolder) => f.files.length > 0 || f.notIndexed > 0
 
 // "[Group] Title [1080p]" → "Title"
 function titleFromFolder(label: string) {
-    const name = label.split("/").pop() ?? label
+    const name = label.split(/[\\/]/).pop() ?? label
     return (
         name
             .replace(/[[({][^\])}]*[\])}]/g, " ")
@@ -52,8 +52,9 @@ function buildFolders(files: LocalFile[], roots: string[], disk: FolderInfo[]): 
     for (const dir of new Set([...byDir.keys(), ...onDisk.keys()])) {
         const fs = byDir.get(dir) ?? []
         const d = onDisk.get(dir)
-        const root = roots.filter(r => dir === r || dir.startsWith(r + "/")).sort((a, b) => b.length - a.length)[0]
-        const label = d?.label ?? (root ? dir.slice(root.length).replace(/^\/+/, "") || dir.split("/").pop() || dir : dir)
+        // Windows paths use backslashes.
+        const root = roots.filter(r => dir === r || dir.startsWith(r + "/") || dir.startsWith(r + "\\")).sort((a, b) => b.length - a.length)[0]
+        const label = d?.label ?? (root ? dir.slice(root.length).replace(/^[\\/]+/, "") || dir.split(/[\\/]/).pop() || dir : dir)
         const counts = new Map<number, number>()
         let unmatched = 0
         for (const f of fs) {

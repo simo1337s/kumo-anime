@@ -14,6 +14,7 @@ import (
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("LOCALAPPDATA", t.TempDir()) // the runtime dir on Windows
 	a, err := app.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

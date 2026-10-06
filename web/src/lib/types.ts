@@ -246,6 +246,7 @@ export type Status = {
     features: { mpv: boolean; ffmpeg: boolean; ffprobe: boolean; aniCli: boolean; ytDlp: boolean; xdgOpen: boolean }
     client: "desktop" | "local" | "lan"
     hostname: string
+    platform?: string // "linux", "windows"…
     scanning: boolean
     dataDir: string
     listenAddr: string

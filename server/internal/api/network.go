@@ -47,8 +47,12 @@ func lanURLs(port int) []string {
 }
 
 // Interfaces other devices can't reach this computer through: VPNs,
-// containers, virtual machines.
-var virtualInterfaces = []string{"docker", "br-", "veth", "virbr", "vnet", "vmnet", "vboxnet", "lxc", "lxd", "podman", "cni", "flannel", "cali", "wg", "tun", "tap", "tailscale", "zt", "nordlynx", "proton", "mullvad"}
+// containers, virtual machines (Linux names, then Windows ones, lowercase).
+var virtualInterfaces = []string{"docker", "br-", "veth", "virbr", "vnet", "vmnet", "vboxnet", "lxc", "lxd", "podman", "cni", "flannel", "cali", "wg", "tun", "tap", "tailscale", "zt", "nordlynx", "proton", "mullvad",
+	"vethernet", "virtualbox", "vmware", "hyper-v", "npcap", "bluetooth", "loopback", "openvpn", "wireguard", "local area connection*"}
+
+// Wired and Wi-Fi interfaces: listed first.
+var physicalInterfaces = []string{"en", "eth", "wl", "wi-fi", "wifi", "wlan"}
 
 func lanURLsFrom(ifaces []netInterface, port int) []string {
 	var wired, other []string
@@ -56,9 +60,10 @@ func lanURLsFrom(ifaces []netInterface, port int) []string {
 		if ifc.flags&net.FlagUp == 0 || ifc.flags&(net.FlagLoopback|net.FlagPointToPoint) != 0 {
 			continue
 		}
+		name := strings.ToLower(ifc.name)
 		virtual := false
 		for _, p := range virtualInterfaces {
-			virtual = virtual || strings.HasPrefix(ifc.name, p)
+			virtual = virtual || strings.HasPrefix(name, p) // "*" is part of the name: Wi-Fi Direct's virtual adapters
 		}
 		if virtual {
 			continue
@@ -69,7 +74,11 @@ func lanURLsFrom(ifaces []netInterface, port int) []string {
 				continue
 			}
 			u := "http://" + net.JoinHostPort(ip4.String(), strconv.Itoa(port))
-			if strings.HasPrefix(ifc.name, "en") || strings.HasPrefix(ifc.name, "eth") || strings.HasPrefix(ifc.name, "wl") {
+			physical := false
+			for _, p := range physicalInterfaces {
+				physical = physical || strings.HasPrefix(name, p)
+			}
+			if physical {
 				wired = append(wired, u)
 			} else {
 				other = append(other, u)

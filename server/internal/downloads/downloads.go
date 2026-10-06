@@ -623,7 +623,7 @@ func (m *Manager) ytdlp(r *run, res *Resolved, out string) error {
 func (m *Manager) ffmpeg(r *run, res *Resolved, out, ffmpegPath, ffprobePath string) error {
 	ctx := r.ctx
 	if _, ok := util.LookPath(ffmpegPath); !ok {
-		return errors.New("neither yt-dlp nor ffmpeg is installed (sudo pacman -S yt-dlp ffmpeg)")
+		return fmt.Errorf("neither yt-dlp nor ffmpeg is installed (%s, or %s)", util.InstallHint("yt-dlp"), util.InstallHint("ffmpeg"))
 	}
 	headerArgs := func() []string {
 		var a []string

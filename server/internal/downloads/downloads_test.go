@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,6 +47,9 @@ func newTestManager(t *testing.T, mutate func(*config.Settings)) (*Manager, stri
 
 func writeScript(t *testing.T, dir, name, body string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in programs are shell scripts")
+	}
 	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
 		t.Fatal(err)

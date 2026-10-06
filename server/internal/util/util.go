@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 	"unicode"
 
@@ -200,12 +199,8 @@ func LookPath(p string) (string, bool) {
 	if p == "" {
 		return "", false
 	}
-	if strings.ContainsRune(p, os.PathSeparator) {
-		st, err := os.Stat(p)
-		if err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
-			return p, true
-		}
-		return "", false
+	if strings.ContainsRune(p, os.PathSeparator) || strings.ContainsRune(p, '/') {
+		return lookAbs(p)
 	}
 	found, err := exec.LookPath(p)
 	return found, err == nil
@@ -254,16 +249,28 @@ func FirstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// Detach starts a command that outlives the request that launched it. It
-// gets its own session so Ctrl+C on Kumo's terminal doesn't also close it.
+// Detach starts a command that outlives the request that launched it, on
+// its own: Ctrl+C on Kumo's terminal doesn't also close it.
 func Detach(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	return start(exec.Command(name, args...))
+}
+
+// Open opens a folder in the file manager, or a web address in the browser.
+func Open(target string) error {
+	return start(openCommand(target))
+}
+
+func start(cmd *exec.Cmd) error {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	detachAttrs(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	go func() { _ = cmd.Wait() }()
 	return nil
+}
+
+func isWebAddress(s string) bool {
+	return strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://")
 }

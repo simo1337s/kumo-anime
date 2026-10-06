@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,9 @@ func newTestLocal(t *testing.T, ffmpeg string) (*Local, string) {
 
 func writeScript(t *testing.T, body string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in ffmpeg is a shell script")
+	}
 	p := filepath.Join(t.TempDir(), "ffmpeg")
 	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
 		t.Fatal(err)

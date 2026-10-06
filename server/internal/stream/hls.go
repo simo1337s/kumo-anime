@@ -16,8 +16,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/simo1337s/animetest/server/internal/util"
 )
 
 // HLS serves converted (remuxed or transcoded) library files as HLS, a
@@ -27,7 +28,7 @@ import (
 //
 // A session is one file for one player from one position. ffmpeg writes its
 // segments into the session's folder while the player reads them. It's
-// paused when it gets far ahead of the player, and the session is removed
+// paused (suspended) when it gets far ahead of the player, and the session is removed
 // when the player stops it, starts another one, or goes away.
 type HLS struct {
 	local *Local
@@ -438,11 +439,11 @@ func (s *hlsSession) throttle() {
 	ahead := written - 1 - s.requested
 	switch {
 	case !s.paused && ahead > hlsAhead:
-		if s.cmd.Process.Signal(syscall.SIGSTOP) == nil {
+		if util.Suspend(s.cmd.Process) == nil {
 			s.paused = true
 		}
 	case s.paused && ahead < hlsAhead/2:
-		if s.cmd.Process.Signal(syscall.SIGCONT) == nil {
+		if util.Resume(s.cmd.Process) == nil {
 			s.paused = false
 		}
 	}

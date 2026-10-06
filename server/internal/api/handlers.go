@@ -354,7 +354,7 @@ func (s *Server) openFolder(r *http.Request) (any, error) {
 	if dir == "" {
 		return nil, badRequest("no folder")
 	}
-	return nil, startDetached("xdg-open", dir)
+	return nil, util.Open(dir)
 }
 
 // ---------------------------------------------------------------------------
@@ -880,7 +880,7 @@ func (s *Server) torrentAction(r *http.Request) (any, error) {
 				if st, err := os.Stat(target); err != nil || !st.IsDir() {
 					target = filepath.Dir(target)
 				}
-				return nil, startDetached("xdg-open", target)
+				return nil, util.Open(target)
 			}
 		}
 		return nil, notFound("torrent not found")

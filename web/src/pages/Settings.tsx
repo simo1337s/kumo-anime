@@ -34,6 +34,7 @@ import { LoginDialog } from "@/components/LoginDialog"
 import { Badge, Button, Dialog, Input, Select, Switch, Textarea } from "@/components/ui"
 import { api } from "@/lib/api"
 import { useOnlineProviders, useSaveSettings, useStatus } from "@/lib/queries"
+import { exampleMpvPath, installHint, installSource, platformName } from "@/lib/platform"
 import { accentPreviewStore } from "@/lib/store"
 import type { Settings, Status } from "@/lib/types"
 import { cn, copyText, formatBytes, img } from "@/lib/utils"
@@ -187,7 +188,8 @@ export default function SettingsPage() {
                     ))}
                 </div>
                 <p className="mt-5 text-center text-xs text-subtle">
-                    {status.version} <span className="font-semibold text-muted">Kumo</span> • Linux • {status.client === "desktop" ? "Desktop" : status.client === "lan" ? "LAN" : "Web UI"}
+                    {status.version} <span className="font-semibold text-muted">Kumo</span> • {platformName(status.platform)} •{" "}
+                    {status.client === "desktop" ? "Desktop" : status.client === "lan" ? "LAN" : "Web UI"}
                 </p>
             </aside>
 
@@ -315,7 +317,12 @@ function Collapsible({ title, children }: { title: string; children: React.React
 
 function DirPicker({ open, onOpenChange, onPick, start }: { open: boolean; onOpenChange: (v: boolean) => void; onPick: (p: string) => void; start?: string }) {
     const [path, setPath] = useState(start ?? "")
-    const { data, error } = useQuery({ queryKey: ["dirs", path], queryFn: () => api.get<{ path: string; parent: string; dirs: string[] }>(`/api/fs/dirs?path=${encodeURIComponent(path)}`), enabled: open })
+    const { data, error } = useQuery({
+        queryKey: ["dirs", path],
+        // roots: the drives on Windows.
+        queryFn: () => api.get<{ path: string; parent: string; dirs: string[]; sep?: string; roots?: string[] | null }>(`/api/fs/dirs?path=${encodeURIComponent(path)}`),
+        enabled: open,
+    })
     useEffect(() => {
         if (open) setPath(start ?? "")
     }, [open, start])
@@ -339,6 +346,15 @@ function DirPicker({ open, onOpenChange, onPick, start }: { open: boolean; onOpe
         >
             <Input value={data?.path ?? path} onChange={e => setPath(e.target.value)} onKeyDown={e => e.key === "Enter" && setPath((e.target as HTMLInputElement).value)} icon={<Folder className="size-4" />} />
             {error && <p className="mt-2 text-sm text-rose-300">{(error as Error).message}</p>}
+            {!!data?.roots?.length && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                    {data.roots.map(r => (
+                        <Button key={r} size="xs" variant={data.path.toLowerCase().startsWith(r.toLowerCase()) ? "primary" : "subtle"} icon={<HardDrive className="size-3.5" />} onClick={() => setPath(r)}>
+                            {r.replace(/\\$/, "")}
+                        </Button>
+                    ))}
+                </div>
+            )}
             <div className="mt-3 flex max-h-80 flex-col overflow-y-auto">
                 {data && data.parent !== data.path && (
                     <button onClick={() => setPath(data.parent)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted hover:bg-white/[0.05]">
@@ -346,7 +362,11 @@ function DirPicker({ open, onOpenChange, onPick, start }: { open: boolean; onOpe
                     </button>
                 )}
                 {data?.dirs.map(d => (
-                    <button key={d} onClick={() => setPath(`${data.path.replace(/\/$/, "")}/${d}`)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-white/[0.05]">
+                    <button
+                        key={d}
+                        onClick={() => setPath(`${data.path.replace(/[\\/]$/, "")}${data.sep ?? "/"}${d}`)}
+                        className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-white/[0.05]"
+                    >
                         <Folder className="size-4 text-brand-strong" /> {d}
                     </button>
                 ))}
@@ -702,7 +722,10 @@ function MpvSection({ draft, set }: SectionProps) {
             <Row label="Status">
                 <Detect ok={status?.features.mpv} label="mpv" />
             </Row>
-            <Stack label="Executable" help="Name or full path, e.g. mpv or /usr/bin/mpv (install with: sudo pacman -S mpv)">
+            <Stack
+                label="Executable"
+                help={`Name or full path, e.g. mpv or ${exampleMpvPath(status?.platform)} (install with: ${installHint(status?.platform, "mpv")})`}
+            >
                 <Input value={draft.mpv.path} onChange={e => set("mpv", { path: e.target.value })} icon={<Terminal className="size-4" />} />
             </Stack>
             <Stack label="Extra arguments" help="Passed to every mpv launch, e.g. --profile=gpu-hq --hwdec=auto">
@@ -941,7 +964,11 @@ function StreamingSection({ draft, set }: SectionProps) {
                         <Badge tone={ani?.ffmpeg ? "green" : "gray"}>ffmpeg {ani?.ffmpeg ? "✓" : "✗"}</Badge>
                     </div>
                 </Row>
-                {!ani?.installed && <p className="px-4 py-3 text-sm text-muted">Install it from the AUR: <code className="rounded bg-black/30 px-1.5 py-0.5">yay -S ani-cli</code></p>}
+                {!ani?.installed && (
+                    <p className="px-4 py-3 text-sm text-muted">
+                        {installSource(status?.platform, "ani-cli")}: <code className="rounded bg-black/30 px-1.5 py-0.5">{installHint(status?.platform, "ani-cli")}</code>
+                    </p>
+                )}
                 <Stack label="Executable">
                     <Input value={a.path} onChange={e => set("aniCli", { path: e.target.value })} icon={<Terminal className="size-4" />} />
                 </Stack>

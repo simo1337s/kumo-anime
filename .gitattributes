@@ -1,0 +1,5 @@
+# Shell scripts (ani-cli's test stand-ins, the Arch package's helpers) keep
+# LF line endings everywhere: on Windows checkouts with autocrlf, a CR at the
+# end of each line breaks them.
+*.sh text eol=lf
+server/internal/anicli/testdata/* text eol=lf

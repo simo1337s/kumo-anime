@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -277,6 +278,7 @@ func (s *Server) status(r *http.Request) (any, error) {
 	_, feat.AniCli = util.LookPath(cfg.AniCli.Path)
 	_, feat.YtDlp = util.LookPath("yt-dlp")
 	_, feat.XdgOpen = util.LookPath("xdg-open")
+	feat.XdgOpen = feat.XdgOpen || runtime.GOOS == "windows" // Explorer
 	kind := map[clientKind]string{clientShell: "desktop", clientLocal: "local", clientLAN: "lan"}[kindOf(r)]
 	host, _ := os.Hostname()
 	var lan []string
@@ -292,6 +294,7 @@ func (s *Server) status(r *http.Request) (any, error) {
 		"features":       feat,
 		"client":         kind,
 		"hostname":       host,
+		"platform":       runtime.GOOS,
 		"scanning":       s.app.Scanner.Running(),
 		"dataDir":        s.app.DataDir,
 		"listenAddr":     s.Addr(),
@@ -415,7 +418,7 @@ func (s *Server) listDirs(r *http.Request) (any, error) {
 		}
 	}
 	sort.Slice(dirs, func(i, j int) bool { return strings.ToLower(dirs[i]) < strings.ToLower(dirs[j]) })
-	return map[string]any{"path": p, "parent": filepath.Dir(p), "dirs": dirs}, nil
+	return map[string]any{"path": p, "parent": filepath.Dir(p), "dirs": dirs, "sep": string(filepath.Separator), "roots": fsRoots()}, nil
 }
 
 func (s *Server) openPath(r *http.Request) (any, error) {
@@ -440,13 +443,13 @@ func (s *Server) openPath(r *http.Request) (any, error) {
 		if err != nil {
 			return nil, badRequest(err.Error())
 		}
-		// Only ever open folders: xdg-open on a file could run it
-		// (.desktop files, scripts).
+		// Only ever open folders: opening a file could run it (.desktop
+		// files, scripts, .exe).
 		if !st.IsDir() {
 			target = filepath.Dir(target)
 		}
 	}
-	return nil, startDetached("xdg-open", target)
+	return nil, util.Open(target)
 }
 
 // ---------------------------------------------------------------------------

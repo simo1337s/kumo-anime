@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode"
 
@@ -129,15 +128,18 @@ func (d *Driver) Status(ctx context.Context) Status {
 	st := Status{}
 	_, st.YtDlp = util.LookPath("yt-dlp")
 	_, st.Ffmpeg = util.LookPath(cfg.Transcode.FfmpegPath)
-	path, ok := util.LookPath(cfg.AniCli.Path)
+	path, ok := findScript(cfg.AniCli.Path)
 	if !ok {
 		return st
 	}
 	st.Installed, st.Path = true, path
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, path, "-V").Output()
-	if err == nil {
+	cmd, err := scriptCommand(ctx, path, "-V")
+	if err != nil {
+		return st
+	}
+	if out, err := cmd.Output(); err == nil {
 		st.Version = strings.TrimSpace(string(out))
 	}
 	return st
@@ -156,14 +158,14 @@ func (r *run) read(name string) string {
 
 func (r *run) cleanup() { _ = os.RemoveAll(r.dir) }
 
-var ErrNotInstalled = errors.New("ani-cli is not installed (install it from the AUR: `yay -S ani-cli`) or set its path in Settings › Online Streaming")
+var ErrNotInstalled = errors.New("ani-cli is not installed (" + util.InstallHint("ani-cli") + ") or set its path in Settings › Online Streaming")
 
 func (d *Driver) exec(ctx context.Context, args ...string) (*run, error) {
 	if err := d.init(); err != nil {
 		return nil, err
 	}
 	cfg := d.settings.Get()
-	bin, ok := util.LookPath(cfg.AniCli.Path)
+	bin, ok := findScript(cfg.AniCli.Path)
 	if !ok {
 		return nil, ErrNotInstalled
 	}
@@ -173,32 +175,31 @@ func (d *Driver) exec(ctx context.Context, args ...string) (*run, error) {
 	}
 	runCtx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, bin, args...)
+	cmd, err := scriptCommand(runCtx, bin, args...)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
 	// ani-cli is a shell script: curl, sed & co. do its work, in subshells.
 	// It gets a process group of its own so that a timeout, or a request that
 	// went away, stops all of it. Killing only the shell would leave the rest
 	// running, holding its output open, with Run waiting for them.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
-	}
+	util.OwnProcessGroup(cmd)
+	cmd.Cancel = func() error { return util.KillGroup(cmd.Process) }
 	cmd.WaitDelay = 3 * time.Second
 	env := []string{
 		"PATH=" + d.shimDir + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"KUMO_DUMP_DIR=" + dir,
-		"ANI_CLI_PLAYER=" + filepath.Join(d.shimDir, "kumo-mpv-capture"),
-		"ANI_CLI_HIST_DIR=" + d.histDir,
+		"KUMO_DUMP_DIR=" + shellPath(dir),
+		"ANI_CLI_PLAYER=" + shellPath(filepath.Join(d.shimDir, "kumo-mpv-capture")),
+		"ANI_CLI_HIST_DIR=" + shellPath(d.histDir),
 		"ANI_CLI_LOG=0",
 		"ANI_CLI_MENU=fzf",
 		"TERM=dumb",
 	}
 	for _, kv := range os.Environ() {
 		k := kv[:max(strings.IndexByte(kv, '='), 0)]
-		if k == "PATH" || strings.HasPrefix(k, "ANI_CLI_") || k == "TERM" {
+		// Case-insensitive: Windows calls it "Path", and the last one wins.
+		if strings.EqualFold(k, "PATH") || strings.HasPrefix(strings.ToUpper(k), "ANI_CLI_") || strings.EqualFold(k, "TERM") {
 			continue
 		}
 		env = append(env, kv)

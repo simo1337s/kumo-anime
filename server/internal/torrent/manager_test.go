@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,11 @@ func TestSplitCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	exe := filepath.Join(dir, "qbittorrent")
+	shell, shellArgs := "sh", []string{"-c", "true"}
+	if runtime.GOOS == "windows" {
+		exe += ".exe"
+		shell, shellArgs = "cmd", []string{"/c", "exit"}
+	}
 	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +32,7 @@ func TestSplitCommand(t *testing.T) {
 	}{
 		{"  " + exe + "  ", exe, nil},
 		{exe + " --profile=kumo  -x", exe, []string{"--profile=kumo", "-x"}},
-		{"sh -c true", "sh", []string{"-c", "true"}},
+		{shell + " " + strings.Join(shellArgs, " "), shell, shellArgs},
 	} {
 		prog, args, err := splitCommand(tc.in)
 		if err != nil || prog != tc.prog || strings.Join(args, "|") != strings.Join(tc.args, "|") {

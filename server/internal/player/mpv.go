@@ -8,13 +8,12 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/simo1337s/animetest/server/internal/config"
+	"github.com/simo1337s/animetest/server/internal/util"
 )
 
 // Mpv controls one mpv process through its JSON IPC socket.
@@ -63,7 +62,7 @@ type LaunchOptions struct {
 
 // LaunchMpv starts mpv and connects to its IPC socket.
 func LaunchMpv(mpvPath string, opts LaunchOptions) (*Mpv, error) {
-	socket := filepath.Join(config.RuntimeDir(), fmt.Sprintf("mpv-%d.sock", time.Now().UnixNano()%1e9))
+	socket := ipcAddress(fmt.Sprintf("mpv-%d", time.Now().UnixNano()%1e9))
 	args := []string{
 		"--input-ipc-server=" + socket,
 		"--force-window=immediate",
@@ -123,7 +122,7 @@ func LaunchMpv(mpvPath string, opts LaunchOptions) (*Mpv, error) {
 	cmd := exec.Command(mpvPath, args...)
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("could not start mpv (%s): %w — install it with `sudo pacman -S mpv` or set the path in Settings", mpvPath, err)
+		return nil, fmt.Errorf("could not start mpv (%s): %w — install it (%s) or set its path in Settings", mpvPath, err, util.InstallHint("mpv"))
 	}
 
 	exited := make(chan error, 1)
@@ -133,7 +132,7 @@ func LaunchMpv(mpvPath string, opts LaunchOptions) (*Mpv, error) {
 	deadline := time.Now().Add(10 * time.Second)
 	var conn net.Conn
 	for {
-		c, err := net.Dial("unix", socket)
+		c, err := util.DialIPC(socket, time.Second)
 		if err == nil {
 			conn = c
 			break

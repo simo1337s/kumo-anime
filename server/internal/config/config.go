@@ -225,7 +225,7 @@ func Defaults() Settings {
 			AutoDownloadMinutes: 20,
 		},
 		Qbittorrent:  TorrentClientConfig{Host: "127.0.0.1", Port: 8081, Username: "admin", Executable: findQbittorrent(home)},
-		Transmission: TorrentClientConfig{Host: "127.0.0.1", Port: 9091, Executable: "/usr/bin/transmission-gtk"},
+		Transmission: TorrentClientConfig{Host: "127.0.0.1", Port: 9091, Executable: defaultTransmission()},
 		Manga:        MangaSettings{Enabled: true, ReadingMode: "long-strip", Direction: "ltr"},
 		Anilist:      AnilistSettings{ClientID: DefaultAnilistClient, HideAdult: true},
 		Server:       ServerSettings{Host: "127.0.0.1", Port: DefaultPort, WebUI: true},
@@ -402,21 +402,6 @@ func sanitize(s Settings) Settings {
 	return s
 }
 
-// findQbittorrent prefers a native qBittorrent and falls back to the
-// Flatpak export (system-wide or per-user install).
-func findQbittorrent(home string) string {
-	for _, p := range []string{
-		"/usr/bin/qbittorrent",
-		"/var/lib/flatpak/exports/bin/org.qbittorrent.qBittorrent",
-		filepath.Join(home, ".local/share/flatpak/exports/bin/org.qbittorrent.qBittorrent"),
-	} {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return "/usr/bin/qbittorrent"
-}
-
 // LibraryDirs returns the main library dir followed by the extra ones.
 func (s Settings) LibraryDirs() []string {
 	var out []string
@@ -433,7 +418,7 @@ func (s Settings) LibraryDirs() []string {
 }
 
 func expandHome(p string) string {
-	if p == "~" || len(p) > 1 && p[:2] == "~/" {
+	if p == "~" || len(p) > 1 && p[0] == '~' && (p[1] == '/' || p[1] == filepath.Separator) {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, p[1:])
 	}
@@ -445,25 +430,20 @@ func ExpandHome(p string) string { return expandHome(p) }
 
 // Paths -----------------------------------------------------------------
 
-// DataDir is ~/.local/share/kumo (or $KUMO_DATA_DIR).
+// DataDir is ~/.local/share/kumo on Linux and %APPDATA%\Kumo on Windows,
+// or $KUMO_DATA_DIR.
 func DataDir() string {
 	if d := os.Getenv("KUMO_DATA_DIR"); d != "" {
 		return d
 	}
-	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
-		return filepath.Join(d, "kumo")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "kumo")
+	return defaultDataDir()
 }
 
-// RuntimeDir holds sockets and temporary files.
+// RuntimeDir holds the server's address, the desktop window's token and
+// other temporary files: $XDG_RUNTIME_DIR/kumo on Linux,
+// %LOCALAPPDATA%\Kumo\run on Windows.
 func RuntimeDir() string {
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if base == "" {
-		base = os.TempDir()
-	}
-	dir := filepath.Join(base, "kumo")
+	dir := runtimeDir()
 	_ = os.MkdirAll(dir, 0o700)
 	return dir
 }

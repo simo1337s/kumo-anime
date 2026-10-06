@@ -4,9 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +32,7 @@ func fakeMpvProcess(mode string) int {
 			sock = v
 		}
 	}
-	ln, err := net.Listen("unix", sock)
+	ln, err := listenIPC(sock)
 	if err != nil {
 		return 2
 	}
@@ -95,6 +93,7 @@ func TestLaunchMpvProcess(t *testing.T) {
 	}
 	runtimeDir := shortTempDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	t.Setenv("LOCALAPPDATA", runtimeDir)
 	newManager := func(t *testing.T, mode string) *Manager {
 		t.Setenv(fakeMpvEnv, mode)
 		m, _ := newTestManager(t, func(c *config.Settings) { c.Mpv.Path = exe })
@@ -103,8 +102,7 @@ func TestLaunchMpvProcess(t *testing.T) {
 	}
 	noSockets := func(t *testing.T) {
 		t.Helper()
-		left, _ := filepath.Glob(filepath.Join(runtimeDir, "kumo", "mpv-*.sock"))
-		if len(left) > 0 {
+		if left := leftoverIPC(runtimeDir); len(left) > 0 {
 			t.Errorf("IPC sockets left behind: %v", left)
 		}
 	}

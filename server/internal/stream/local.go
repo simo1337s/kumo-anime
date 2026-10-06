@@ -20,6 +20,7 @@ import (
 	"github.com/simo1337s/animetest/server/internal/config"
 	"github.com/simo1337s/animetest/server/internal/db"
 	"github.com/simo1337s/animetest/server/internal/library"
+	"github.com/simo1337s/animetest/server/internal/util"
 )
 
 // Local serves library files to the in-app player: direct play when the
@@ -122,7 +123,7 @@ func (l *Local) Probe(ctx context.Context, path string) (*Probe, error) {
 			}
 			return nil, fmt.Errorf("ffprobe couldn't read the file: %s", msg)
 		}
-		return nil, fmt.Errorf("ffprobe failed (install ffmpeg: sudo pacman -S ffmpeg): %w", err)
+		return nil, fmt.Errorf("ffprobe failed (install ffmpeg: %s): %w", util.InstallHint("ffmpeg"), err)
 	}
 	var raw struct {
 		Format struct {
