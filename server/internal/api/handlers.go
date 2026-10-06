@@ -308,6 +308,9 @@ func (s *Server) playLocal(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The in-app player opens the episode: a new viewing, which may update
+	// progress again (rewatch).
+	s.app.Player.ResetBuiltinProgress(body.MediaID, body.Episode)
 	resume := s.app.History.ResumePosition(body.MediaID, body.Episode)
 	if body.Start != nil {
 		resume = *body.Start
@@ -488,6 +491,9 @@ func (s *Server) osSources(r *http.Request) (any, error) {
 		}
 		_ = s.setLanguageMode(media.ID, mode)
 	}
+	// Only the in-app player asks for sources, when it opens an episode: a
+	// new viewing, which may update progress again (rewatch).
+	s.app.Player.ResetBuiltinProgress(media.ID, int(ep))
 	out := make([]map[string]any, 0, len(res.Sources))
 	for _, src := range res.Sources {
 		out = append(out, proxied(src))

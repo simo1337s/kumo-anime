@@ -1,6 +1,9 @@
 package player
 
 import (
+	"encoding/json"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -190,4 +193,156 @@ func PrefsFromSelection(mediaID int, tracks []Track, aid, sid int, subOff bool) 
 		}
 	}
 	return p
+}
+
+// trackSel is an aid/sid value reported by mpv: a track id, or off.
+type trackSel struct {
+	id  int
+	off bool
+}
+
+// parseTrackSel decodes an aid/sid property value. ok is false for values
+// that say nothing about the selection: "auto" (what mpv reports when no file
+// is playing), a missing/null value (property unavailable) and anything else
+// unexpected. false and "no" mean off.
+func parseTrackSel(raw json.RawMessage) (sel trackSel, ok bool) {
+	var v any
+	if !decodeProp(raw, &v) {
+		return trackSel{}, false
+	}
+	switch x := v.(type) {
+	case float64:
+		if x >= 1 && x <= 1<<16 && x == math.Trunc(x) {
+			return trackSel{id: int(x)}, true
+		}
+	case bool:
+		if !x {
+			return trackSel{off: true}, true
+		}
+	case string:
+		if x == "no" {
+			return trackSel{off: true}, true
+		}
+		if n, err := strconv.Atoi(x); err == nil && n >= 1 {
+			return trackSel{id: n}, true
+		}
+	}
+	return trackSel{}, false
+}
+
+// trackByID returns the track of the given type with that id and its 1-based
+// position among the tracks of that type.
+func trackByID(tracks []Track, typ string, id int) (Track, int, bool) {
+	n := 0
+	for _, t := range tracks {
+		if t.Type != typ {
+			continue
+		}
+		n++
+		if t.ID == id {
+			return t, n, true
+		}
+	}
+	return Track{}, 0, false
+}
+
+// mergeSelection applies the selected audio/subtitle tracks to the saved
+// preferences (old may be nil). Each part only counts when it names a track
+// of that type in tracks, or for subtitles "off" while there are subtitle
+// tracks to turn off; the other parts keep their saved values. ok is false
+// when nothing applied.
+func mergeSelection(mediaID int, old *TrackPrefs, tracks []Track, aid, sid trackSel) (p TrackPrefs, ok bool) {
+	if old != nil {
+		p = *old
+	}
+	p.MediaID = mediaID
+	if !aid.off {
+		if t, i, found := trackByID(tracks, "audio", aid.id); found {
+			p.AudioLang, p.AudioTitle, p.AudioIndex = t.Lang, t.Title, i
+			ok = true
+		}
+	}
+	if sid.off {
+		for _, t := range tracks {
+			if t.Type == "sub" {
+				p.SubOff, p.SubLang, p.SubTitle, p.SubIndex = true, "", "", 0
+				ok = true
+				break
+			}
+		}
+	} else if t, i, found := trackByID(tracks, "sub", sid.id); found {
+		p.SubOff, p.SubLang, p.SubTitle, p.SubIndex = false, t.Lang, t.Title, i
+		ok = true
+	}
+	return p, ok
+}
+
+// trackWatch decides which aid/sid changes are the user's choice and worth
+// remembering. It runs on the session's event loop.
+//
+// mpv changes tracks by itself too: while a file loads (and while we restore
+// the saved choice), hence the guard; and while it unloads, when aid/sid fall
+// back to their option values ("auto", or false for "no") and track-list
+// empties. mpv doesn't promise those arrive after end-file, so a change only
+// counts once it has stayed in place for settle while the file kept playing:
+// the end-file (or shutdown) that comes with the unload cancels it.
+type trackWatch struct {
+	guard, settle time.Duration
+
+	playing   bool      // between file-loaded and end-file/idle/shutdown
+	guardTill time.Time // changes before this are mpv's or ours
+	tracks    []Track
+	aid, sid  trackSel
+
+	pending   bool      // a user change is waiting to settle
+	changedAt time.Time // when it was last changed
+}
+
+// loaded starts watching a freshly loaded (and restored) file.
+func (w *trackWatch) loaded(now time.Time, tracks []Track) {
+	w.playing, w.pending = true, false
+	w.guardTill = now.Add(w.guard)
+	w.tracks = tracks
+}
+
+// ended stops remembering anything until the next file is loaded.
+func (w *trackWatch) ended() { w.playing, w.pending = false, false }
+
+func (w *trackWatch) setTracks(tracks []Track) { w.tracks = tracks }
+
+// selection records an aid/sid change and reports whether it is a user change
+// that should be saved once it has settled (see due).
+func (w *trackWatch) selection(name string, raw json.RawMessage, now time.Time) bool {
+	sel, ok := parseTrackSel(raw)
+	if !ok {
+		return false // "auto" etc.: no change
+	}
+	if name == "aid" {
+		w.aid = sel
+	} else {
+		w.sid = sel
+	}
+	if !w.playing || now.Before(w.guardTill) {
+		return false
+	}
+	w.pending, w.changedAt = true, now
+	return true
+}
+
+// due reports when the pending change may be saved.
+func (w *trackWatch) due() (time.Time, bool) { return w.changedAt.Add(w.settle), w.pending }
+
+// discard drops the pending change.
+func (w *trackWatch) discard() { w.pending = false }
+
+// take returns the preferences to save for the pending change (old are the
+// saved ones, may be nil), if the current selection is still a valid choice
+// for the playing file.
+func (w *trackWatch) take(mediaID int, old *TrackPrefs) (TrackPrefs, bool) {
+	pending := w.pending
+	w.pending = false
+	if !pending || !w.playing {
+		return TrackPrefs{}, false
+	}
+	return mergeSelection(mediaID, old, w.tracks, w.aid, w.sid)
 }

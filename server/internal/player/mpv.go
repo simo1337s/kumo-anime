@@ -19,9 +19,9 @@ import (
 
 // Mpv controls one mpv process through its JSON IPC socket.
 type Mpv struct {
-	cmd    *exec.Cmd
 	conn   net.Conn
 	socket string
+	kill   func() // force-stops the process
 
 	writeMu sync.Mutex
 	reqID   atomic.Int64
@@ -125,17 +125,17 @@ func LaunchMpv(mpvPath string, opts LaunchOptions) (*Mpv, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("could not start mpv (%s): %w — install it with `sudo pacman -S mpv` or set the path in Settings", mpvPath, err)
 	}
-	m := &Mpv{cmd: cmd, socket: socket, Events: make(chan MpvEvent, 128), done: make(chan struct{})}
 
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 
 	// Wait for the socket to appear.
 	deadline := time.Now().Add(10 * time.Second)
+	var conn net.Conn
 	for {
-		conn, err := net.Dial("unix", socket)
+		c, err := net.Dial("unix", socket)
 		if err == nil {
-			m.conn = conn
+			conn = c
 			break
 		}
 		select {
@@ -146,17 +146,35 @@ func LaunchMpv(mpvPath string, opts LaunchOptions) (*Mpv, error) {
 		}
 		if time.Now().After(deadline) {
 			_ = cmd.Process.Kill()
+			_ = os.Remove(socket)
 			return nil, errors.New("timed out connecting to mpv")
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	go m.readLoop()
+	m := newMpv(conn, socket, func() { _ = cmd.Process.Kill() })
 	go func() {
 		<-exited
-		m.close()
+		// readLoop stops by itself once it has read everything mpv wrote
+		// before exiting (end-file, …); closing the connection now would
+		// lose those events. Only force it if that doesn't happen.
+		select {
+		case <-m.done:
+		case <-time.After(2 * time.Second):
+			m.close()
+		}
 	}()
 	return m, nil
+}
+
+// newMpv wraps an IPC connection to a running mpv.
+func newMpv(conn net.Conn, socket string, kill func()) *Mpv {
+	// Events has room for many seconds of property changes: the consumer
+	// may briefly block (IPC replies, database writes) and readLoop must not
+	// stall behind it (it also delivers the replies) or drop events.
+	m := &Mpv{conn: conn, socket: socket, kill: kill, Events: make(chan MpvEvent, 1024), done: make(chan struct{})}
+	go m.readLoop()
+	return m
 }
 
 func (m *Mpv) readLoop() {
@@ -231,8 +249,19 @@ func (m *Mpv) Command(args ...any) (json.RawMessage, error) {
 		m.pending.Delete(id)
 		return nil, errors.New("mpv: command timed out")
 	case <-m.done:
+		m.pending.Delete(id)
 		return nil, errors.New("mpv exited")
 	}
+}
+
+// decodeProp decodes a property value from an event. It fails when the
+// property is unavailable (mpv sends no data or null), e.g. time-pos once the
+// file has ended, so the last known value is kept.
+func decodeProp(raw json.RawMessage, v any) bool {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	return json.Unmarshal(raw, v) == nil
 }
 
 func (m *Mpv) Observe(id int, prop string) {
@@ -286,13 +315,14 @@ func (m *Mpv) ShowText(text string, ms int) {
 	_, _ = m.Command("show-text", text, ms)
 }
 
+// Quit asks mpv to quit and kills it if it doesn't within a few seconds.
 func (m *Mpv) Quit() {
 	_, _ = m.Command("quit")
 	select {
 	case <-m.done:
 	case <-time.After(3 * time.Second):
-		if m.cmd.Process != nil {
-			_ = m.cmd.Process.Kill()
+		if m.kill != nil {
+			m.kill()
 		}
 	}
 }
