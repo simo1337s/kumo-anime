@@ -28,7 +28,9 @@ type Scanner struct {
 
 	mu      sync.Mutex
 	running atomic.Bool
+	rescan  atomic.Bool
 
+	startMu   sync.Mutex // serializes StartWatcher (settings changes fire concurrently)
 	watcherMu sync.Mutex
 	watcher   *fsnotify.Watcher
 	stopWatch chan struct{}
@@ -70,56 +72,41 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, erro
 	if !s.mu.TryLock() {
 		return nil, ErrScanRunning
 	}
-	defer s.mu.Unlock()
+	defer func() {
+		s.mu.Unlock()
+		// Files changed while we were busy: go again.
+		if s.rescan.Swap(false) {
+			go s.autoScan()
+		}
+	}()
 	s.running.Store(true)
 	defer s.running.Store(false)
 
 	start := time.Now()
 	cfg := s.settings.Get()
 	roots := cfg.LibraryDirs()
-	var existingRoots []string
-	for _, r := range roots {
-		if st, err := os.Stat(r); err == nil && st.IsDir() {
-			existingRoots = append(existingRoots, r)
-		}
-	}
-	if len(existingRoots) == 0 {
-		return nil, errors.New("no library directory found — set one in Settings › Local Anime Library")
-	}
 
 	s.hub.Publish(events.ScanProgress, ScanProgress{Stage: "walking", Message: "Looking for video files…"})
 	found := map[string]fs.FileInfo{}
-	for _, root := range existingRoots {
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			name := d.Name()
-			if d.IsDir() {
-				if path != root && (strings.HasPrefix(name, ".") || ignored(name, cfg.Library.IgnorePatterns)) {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if !IsVideo(name) || strings.HasPrefix(name, ".") || ignored(name, cfg.Library.IgnorePatterns) {
-				return nil
-			}
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-			// Follow symlinks to files.
-			if info.Mode()&fs.ModeSymlink != 0 {
-				if info, err = os.Stat(path); err != nil || info.IsDir() {
-					return nil
-				}
-			}
-			found[path] = info
-			if len(found)%250 == 0 {
-				s.hub.Publish(events.ScanProgress, ScanProgress{Stage: "walking", Done: len(found), Message: "Found " + itoa(len(found)) + " files…"})
-			}
-			return nil
-		})
+	var walked, failed []string // roots read successfully / folders that couldn't be read
+	for _, root := range roots {
+		if st, err := os.Stat(root); err != nil || !st.IsDir() {
+			continue // missing (e.g. an unplugged drive): keep its files as they are
+		}
+		w, err := walkLibrary(root, cfg.Library.IgnorePatterns)
+		if err != nil {
+			log.Printf("scan: can't read %s: %v", root, err)
+			continue
+		}
+		walked = append(walked, root)
+		failed = append(failed, w.failed...)
+		for p, info := range w.files {
+			found[p] = info
+		}
+		s.hub.Publish(events.ScanProgress, ScanProgress{Stage: "walking", Done: len(found), Message: "Found " + itoa(len(found)) + " files…"})
+	}
+	if len(walked) == 0 {
+		return nil, errors.New("no library directory found — set one in Settings › Local Anime Library")
 	}
 
 	existing, err := s.Store.All()
@@ -138,8 +125,9 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, erro
 		old := byPath[path]
 		if old != nil && old.Size == info.Size() && old.ModTime == info.ModTime().Unix() && !opts.Full {
 			if old.MediaID == 0 && !old.Locked && !old.Ignored {
-				toMatch = append(toMatch, old)
-				changed = append(changed, old)
+				cp := *old
+				toMatch = append(toMatch, &cp)
+				changed = append(changed, &cp)
 			}
 			continue
 		}
@@ -149,7 +137,7 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, erro
 			Name:    filepath.Base(path),
 			Size:    info.Size(),
 			ModTime: info.ModTime().Unix(),
-			Parsed:  Parse(path, existingRoots),
+			Parsed:  Parse(path, roots),
 		}
 		f.Kind = f.Parsed.Kind
 		f.Episode = max(f.Parsed.Episode, 0)
@@ -167,12 +155,7 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, erro
 		}
 		changed = append(changed, f)
 	}
-	var removed []string
-	for path := range byPath {
-		if _, ok := found[path]; !ok {
-			removed = append(removed, path)
-		}
-	}
+	removed := s.removedFiles(byPath, found, roots, walked, failed)
 	res.Removed = len(removed)
 
 	if !opts.SkipMatching && len(toMatch) > 0 {
@@ -183,7 +166,9 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, erro
 	}
 
 	s.hub.Publish(events.ScanProgress, ScanProgress{Stage: "saving", Message: "Saving…"})
-	if err := s.Store.Save(changed...); err != nil {
+	// Matching can take minutes; don't overwrite what the user (or a
+	// finished download) changed in the meantime.
+	if err := s.Store.SaveScanned(changed, byPath); err != nil {
 		return nil, err
 	}
 	if err := s.Store.Delete(removed...); err != nil {
@@ -206,6 +191,77 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, erro
 	return res, nil
 }
 
+// removedFiles picks the indexed files that are really gone. A file is only
+// dropped when the folder it lives in was read successfully and the file
+// itself no longer exists, so an unplugged drive, an unmounted share or an
+// unreadable folder never wipes matches. Files outside the library folders
+// (e.g. a separate download folder) are dropped only when their folder still
+// exists but the file doesn't.
+func (s *Scanner) removedFiles(byPath map[string]*LocalFile, found map[string]fs.FileInfo, roots, walked, failed []string) []string {
+	// A root that is readable but suddenly empty while we know files in it
+	// is most likely a mount point whose drive isn't mounted.
+	foundIn := map[string]int{}
+	knownIn := map[string]int{}
+	for p := range found {
+		for _, r := range walked {
+			if underAny(p, []string{r}) {
+				foundIn[r]++
+			}
+		}
+	}
+	for p := range byPath {
+		for _, r := range walked {
+			if underAny(p, []string{r}) {
+				knownIn[r]++
+			}
+		}
+	}
+	var trusted []string
+	for _, r := range walked {
+		if foundIn[r] == 0 && knownIn[r] > 0 {
+			log.Printf("scan: %s is empty but %d files were indexed there — is the drive mounted? Keeping them.", r, knownIn[r])
+			s.hub.Error("Library folder " + r + " looks empty — is the drive connected? Kumo kept its " + itoa(knownIn[r]) + " files.")
+			continue
+		}
+		trusted = append(trusted, r)
+	}
+
+	var removed []string
+	for p := range byPath {
+		if _, ok := found[p]; ok {
+			continue
+		}
+		if underAny(p, failed) {
+			continue
+		}
+		if _, err := os.Lstat(p); !errors.Is(err, fs.ErrNotExist) {
+			continue // still there (e.g. written after the walk) or unknown
+		}
+		switch {
+		case underAny(p, trusted):
+			removed = append(removed, p)
+		case underAny(p, roots):
+			// in a missing or suspicious root: keep
+		default:
+			if st, err := os.Stat(filepath.Dir(p)); err == nil && st.IsDir() {
+				removed = append(removed, p)
+			}
+		}
+	}
+	return removed
+}
+
+// autoScan runs an incremental scan for the folder watcher.
+func (s *Scanner) autoScan() {
+	if _, err := s.Scan(context.Background(), ScanOptions{}); err != nil {
+		if errors.Is(err, ErrScanRunning) {
+			s.rescan.Store(true)
+			return
+		}
+		log.Printf("auto scan: %v", err)
+	}
+}
+
 func ignored(name string, patterns []string) bool {
 	lower := strings.ToLower(name)
 	for _, p := range patterns {
@@ -224,6 +280,8 @@ func itoa(n int) string { return strconv.Itoa(n) }
 // StartWatcher watches the library directories and triggers an incremental
 // scan shortly after files are added, removed or renamed.
 func (s *Scanner) StartWatcher() {
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
 	s.StopWatcher()
 	cfg := s.settings.Get()
 	if !cfg.Library.AutoRefresh {
@@ -235,15 +293,12 @@ func (s *Scanner) StartWatcher() {
 		return
 	}
 	for _, root := range cfg.LibraryDirs() {
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err == nil && d.IsDir() {
-				if path != root && strings.HasPrefix(d.Name(), ".") {
-					return filepath.SkipDir
-				}
-				_ = w.Add(path)
+		// Same walk as the scanner, so symlinked folders are watched too.
+		if res, err := walkLibrary(root, cfg.Library.IgnorePatterns); err == nil {
+			for _, dir := range res.dirs {
+				_ = w.Add(dir)
 			}
-			return nil
-		})
+		}
 	}
 	stop := make(chan struct{})
 	s.watcherMu.Lock()
@@ -284,11 +339,7 @@ func (s *Scanner) StartWatcher() {
 					}
 				})
 			case <-trigger:
-				go func() {
-					if _, err := s.Scan(context.Background(), ScanOptions{}); err != nil && !errors.Is(err, ErrScanRunning) {
-						log.Printf("auto scan: %v", err)
-					}
-				}()
+				go s.autoScan()
 			case err := <-w.Errors:
 				if err != nil {
 					log.Printf("library watcher: %v", err)

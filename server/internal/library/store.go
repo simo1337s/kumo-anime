@@ -120,6 +120,33 @@ func (s *Store) Save(files ...*LocalFile) error {
 	})
 }
 
+// SaveScanned stores scan results without clobbering changes made while
+// the scan was running (manual matches, ignores, downloads registering
+// files): an existing row is only updated if it still matches the snapshot
+// the scan started from, and new rows never replace rows added meanwhile.
+func (s *Store) SaveScanned(files []*LocalFile, snapshot map[string]*LocalFile) error {
+	return s.db.Tx(func(tx *sql.Tx) error {
+		for _, f := range files {
+			parsed, _ := json.Marshal(f.Parsed)
+			old := snapshot[f.Path]
+			if old == nil {
+				if _, err := tx.Exec(`INSERT INTO local_files(`+fileCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO NOTHING`,
+					f.Path, f.Dir, f.Name, f.Size, f.ModTime, string(parsed), f.MediaID, f.Episode, f.AiredEpisode, f.Kind, b2i(f.Locked), b2i(f.Ignored), f.MatchScore); err != nil {
+					return err
+				}
+				continue
+			}
+			if _, err := tx.Exec(`UPDATE local_files SET dir=?, name=?, size=?, mod_time=?, parsed=?, media_id=?, episode=?, aired_episode=?, kind=?, locked=?, ignored=?, match_score=?
+				WHERE path=? AND media_id=? AND episode=? AND kind=? AND locked=? AND ignored=?`,
+				f.Dir, f.Name, f.Size, f.ModTime, string(parsed), f.MediaID, f.Episode, f.AiredEpisode, f.Kind, b2i(f.Locked), b2i(f.Ignored), f.MatchScore,
+				f.Path, old.MediaID, old.Episode, old.Kind, b2i(old.Locked), b2i(old.Ignored)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (s *Store) Delete(paths ...string) error {
 	return s.db.Tx(func(tx *sql.Tx) error {
 		for _, p := range paths {
