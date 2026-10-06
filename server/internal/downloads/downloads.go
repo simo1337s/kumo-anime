@@ -3,12 +3,11 @@
 package downloads
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -81,10 +80,31 @@ type Manager struct {
 
 	Resolvers map[string]Resolver
 
-	mu      sync.Mutex
-	items   map[string]*Item
-	cancels map[string]context.CancelFunc
-	queue   chan string
+	// saveMu orders the writes of an item (database row and UI event) with
+	// its deletion, so a late update can't bring a removed item back.
+	// Lock it before mu.
+	saveMu sync.Mutex
+
+	mu       sync.Mutex
+	wake     *sync.Cond // signaled when pending grows
+	items    map[string]*Item
+	runs     map[string]*run // runs that haven't ended yet, by item id
+	pending  []string        // queued item ids, oldest first (may hold ids since canceled or removed)
+	restored []string        // downloads interrupted by the last shutdown, queued by Start
+
+	// fetch downloads res into out (replaced in tests).
+	fetch func(r *run, cfg config.Settings, res *Resolved, out string) error
+}
+
+// run is one attempt at downloading an item. Canceling or removing the item
+// makes the run stale: it no longer touches the item from then on, but it
+// stays in Manager.runs until it has stopped, so that the item is never
+// downloaded twice at the same time.
+type run struct {
+	it     *Item
+	ctx    context.Context
+	cancel context.CancelFunc
+	stale  bool // guarded by Manager.mu
 }
 
 func NewManager(s *config.Store, d *db.DB, hub *events.Hub, files *library.Store) *Manager {
@@ -95,9 +115,10 @@ func NewManager(s *config.Store, d *db.DB, hub *events.Hub, files *library.Store
 		files:     files,
 		Resolvers: map[string]Resolver{},
 		items:     map[string]*Item{},
-		cancels:   map[string]context.CancelFunc{},
-		queue:     make(chan string, 1024),
+		runs:      map[string]*run{},
 	}
+	m.wake = sync.NewCond(&m.mu)
+	m.fetch = m.download
 	m.load()
 	for i := 0; i < 2; i++ {
 		go m.worker()
@@ -111,7 +132,8 @@ func (m *Manager) load() {
 		return
 	}
 	defer rows.Close()
-	var requeue []string
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for rows.Next() {
 		var raw string
 		if rows.Scan(&raw) != nil {
@@ -121,28 +143,87 @@ func (m *Manager) load() {
 		if json.Unmarshal([]byte(raw), &it) != nil {
 			continue
 		}
-		switch it.Status {
-		case StatusQueued, StatusResolving, StatusDownloading:
+		if active(it.Status) {
 			it.Status, it.Progress, it.Speed, it.ETA = StatusQueued, 0, "", ""
-			requeue = append(requeue, it.ID)
+			m.restored = append(m.restored, it.ID)
 		}
 		m.items[it.ID] = &it
 	}
-	for _, id := range requeue {
-		m.queue <- id
+}
+
+// Start resumes the downloads that were interrupted when Kumo last quit.
+// Call it once the resolvers, and the extensions they rely on, are ready;
+// new downloads don't wait for it.
+func (m *Manager) Start() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pending = append(m.pending, m.restored...)
+	m.restored = nil
+	m.wake.Broadcast()
+}
+
+func active(status string) bool {
+	return status == StatusQueued || status == StatusResolving || status == StatusDownloading
+}
+
+// queue hands an item to the workers. The caller holds m.mu.
+func (m *Manager) queue(id string) {
+	m.pending = append(m.pending, id)
+	m.wake.Signal()
+}
+
+// save publishes the current state of it to the UI, and stores it as well
+// when persist is set. Nothing is written once the item has been removed.
+func (m *Manager) save(it *Item, persist bool) {
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
+	m.mu.Lock()
+	if m.items[it.ID] != it {
+		m.mu.Unlock()
+		return
 	}
-}
-
-func (m *Manager) persist(it *Item) {
-	it.UpdatedAt = time.Now().Unix()
-	raw, _ := json.Marshal(it)
-	_, _ = m.db.Write(`INSERT INTO downloads(id, data, created_at) VALUES(?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET data = excluded.data`, it.ID, string(raw), it.CreatedAt)
-}
-
-func (m *Manager) publish(it *Item) {
+	if persist {
+		it.UpdatedAt = time.Now().Unix()
+	}
 	c := *it
+	m.mu.Unlock()
+	if persist {
+		raw, _ := json.Marshal(&c)
+		_, _ = m.db.Write(`INSERT INTO downloads(id, data, created_at) VALUES(?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET data = excluded.data`, c.ID, string(raw), c.CreatedAt)
+	}
 	m.hub.Publish(events.DownloadProgress, &c)
+}
+
+// update applies fn to the run's item and saves it, unless the run is stale.
+func (m *Manager) update(r *run, fn func(it *Item)) {
+	m.mu.Lock()
+	if r.stale {
+		m.mu.Unlock()
+		return
+	}
+	fn(r.it)
+	m.mu.Unlock()
+	m.save(r.it, true)
+}
+
+// progress returns a func that records the run's progress (unless the run
+// is stale) and publishes it at most every 700ms.
+func (m *Manager) progress(r *run) func(fn func(it *Item)) {
+	var last time.Time
+	return func(fn func(it *Item)) {
+		m.mu.Lock()
+		if r.stale {
+			m.mu.Unlock()
+			return
+		}
+		fn(r.it)
+		m.mu.Unlock()
+		if time.Since(last) > 700*time.Millisecond {
+			last = time.Now()
+			m.save(r.it, false)
+		}
+	}
 }
 
 // List returns all items, newest first.
@@ -165,38 +246,42 @@ func (m *Manager) Enqueue(it Item) (*Item, error) {
 	}
 	m.mu.Lock()
 	for _, x := range m.items {
-		if x.MediaID == it.MediaID && x.Episode == it.Episode && x.Mode == it.Mode &&
-			(x.Status == StatusQueued || x.Status == StatusResolving || x.Status == StatusDownloading) {
+		if x.MediaID == it.MediaID && x.Episode == it.Episode && x.Mode == it.Mode && active(x.Status) {
+			c := *x
 			m.mu.Unlock()
-			return x, nil
+			return &c, nil
 		}
 	}
 	it.ID = uuid.NewString()
 	it.Status = StatusQueued
 	it.CreatedAt = time.Now().UnixNano() / int64(time.Millisecond)
-	m.items[it.ID] = &it
+	it.UpdatedAt = time.Now().Unix()
+	p := &it
+	m.items[it.ID] = p
+	m.queue(it.ID)
+	c := *p
 	m.mu.Unlock()
-	m.persist(&it)
-	m.publish(&it)
-	m.queue <- it.ID
-	return &it, nil
+	m.save(p, true)
+	return &c, nil
 }
 
 func (m *Manager) Cancel(id string) {
 	m.mu.Lock()
 	it := m.items[id]
-	cancel := m.cancels[id]
-	if it != nil && (it.Status == StatusQueued || it.Status == StatusResolving || it.Status == StatusDownloading) {
-		it.Status = StatusCanceled
+	if it == nil || !active(it.Status) {
+		m.mu.Unlock()
+		return
+	}
+	it.Status, it.Speed, it.ETA = StatusCanceled, "", ""
+	r := m.runs[id]
+	if r != nil {
+		r.stale = true
 	}
 	m.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if r != nil {
+		r.cancel()
 	}
-	if it != nil {
-		m.persist(it)
-		m.publish(it)
-	}
+	m.save(it, true)
 }
 
 func (m *Manager) Retry(id string) error {
@@ -210,26 +295,38 @@ func (m *Manager) Retry(id string) error {
 		m.mu.Unlock()
 		return nil
 	}
-	it.Status, it.Error, it.Progress = StatusQueued, "", 0
+	it.Status, it.Error, it.Progress, it.Speed, it.ETA = StatusQueued, "", 0, "", ""
+	// A canceled run that is still stopping requeues the item once it's done.
+	if m.runs[id] == nil {
+		m.queue(id)
+	}
 	m.mu.Unlock()
-	m.persist(it)
-	m.publish(it)
-	m.queue <- id
+	m.save(it, true)
 	return nil
 }
 
 // Remove deletes an item from the list (cancelling it first).
 func (m *Manager) Remove(id string) {
-	m.Cancel(id)
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
 	m.mu.Lock()
 	delete(m.items, id)
+	r := m.runs[id]
+	if r != nil {
+		r.stale = true
+	}
 	m.mu.Unlock()
+	if r != nil {
+		r.cancel()
+	}
 	_, _ = m.db.Write(`DELETE FROM downloads WHERE id = ?`, id)
 	m.hub.Publish(events.DownloadProgress, map[string]any{"id": id, "removed": true})
 }
 
 // ClearFinished removes completed/failed/canceled items.
 func (m *Manager) ClearFinished() {
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
 	m.mu.Lock()
 	var ids []string
 	for id, it := range m.items {
@@ -246,63 +343,89 @@ func (m *Manager) ClearFinished() {
 }
 
 func (m *Manager) worker() {
-	for id := range m.queue {
-		m.mu.Lock()
-		it := m.items[id]
-		if it == nil || it.Status != StatusQueued {
-			m.mu.Unlock()
-			continue
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		m.cancels[id] = cancel
-		m.mu.Unlock()
-
-		err := m.process(ctx, it)
-
-		m.mu.Lock()
-		delete(m.cancels, id)
-		if it.Status == StatusCanceled {
-			// keep
-		} else if err != nil {
-			it.Status, it.Error = StatusFailed, err.Error()
-		} else {
-			it.Status, it.Progress, it.Speed, it.ETA = StatusCompleted, 1, "", ""
-		}
-		m.mu.Unlock()
-		cancel()
-		m.persist(it)
-		m.publish(it)
-		switch it.Status {
-		case StatusCompleted:
-			m.hub.Success(fmt.Sprintf("Downloaded %s — episode %d", it.AnimeTitle, it.Episode))
-		case StatusFailed:
-			m.hub.Error(fmt.Sprintf("Download failed (%s ep %d): %s", it.AnimeTitle, it.Episode, it.Error))
-		}
+	for {
+		m.execute(m.next())
 	}
 }
 
-func (m *Manager) setStatus(it *Item, status string) {
+// next waits for a queued item and claims it.
+func (m *Manager) next() *run {
 	m.mu.Lock()
-	if it.Status != StatusCanceled {
-		it.Status = status
+	defer m.mu.Unlock()
+	for {
+		for len(m.pending) > 0 {
+			id := m.pending[0]
+			m.pending = m.pending[1:]
+			it := m.items[id]
+			// Skip items canceled or removed since they were queued, and items
+			// whose previous run is still stopping (it requeues them).
+			if it == nil || it.Status != StatusQueued || m.runs[id] != nil {
+				continue
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			r := &run{it: it, ctx: ctx, cancel: cancel}
+			m.runs[id] = r
+			return r
+		}
+		m.wake.Wait()
 	}
-	m.mu.Unlock()
-	m.persist(it)
-	m.publish(it)
 }
 
-func (m *Manager) process(ctx context.Context, it *Item) error {
+func (m *Manager) execute(r *run) {
+	err := m.process(r)
+	r.cancel()
+
+	m.mu.Lock()
+	it := r.it
+	delete(m.runs, it.ID)
+	if r.stale {
+		// Canceled or removed meanwhile. If it has been retried since, it was
+		// waiting for this run to stop.
+		if m.items[it.ID] == it && it.Status == StatusQueued {
+			m.queue(it.ID)
+		}
+		m.mu.Unlock()
+		return
+	}
+	if err != nil {
+		it.Status, it.Error = StatusFailed, err.Error()
+	} else {
+		it.Status, it.Progress = StatusCompleted, 1
+	}
+	it.Speed, it.ETA = "", ""
+	done := *it
+	m.mu.Unlock()
+	m.save(it, true)
+	switch done.Status {
+	case StatusCompleted:
+		m.hub.Success(fmt.Sprintf("Downloaded %s — episode %d", done.AnimeTitle, done.Episode))
+	case StatusFailed:
+		m.hub.Error(fmt.Sprintf("Download failed (%s ep %d): %s", done.AnimeTitle, done.Episode, done.Error))
+	}
+}
+
+func (m *Manager) process(r *run) error {
+	ctx := r.ctx
 	cfg := m.settings.Get()
-	m.setStatus(it, StatusResolving)
+	m.update(r, func(it *Item) { it.Status = StatusResolving })
+	m.mu.Lock()
+	it := *r.it // the fields read below never change
+	m.mu.Unlock()
 
 	res := &Resolved{URL: it.URL, Referrer: it.Referrer, Headers: it.Headers, SubURL: it.SubURL}
 	if res.URL == "" {
-		resolver := m.Resolvers[it.Source]
-		r, err := resolver(ctx, it)
+		resolve := m.Resolvers[it.Source]
+		if resolve == nil {
+			return fmt.Errorf("unknown download source %q", it.Source)
+		}
+		got, err := resolve(ctx, &it)
 		if err != nil {
 			return err
 		}
-		res = r
+		if got == nil || got.URL == "" {
+			return errors.New("no stream found for this episode")
+		}
+		res = got
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -319,9 +442,20 @@ func (m *Manager) process(ctx context.Context, it *Item) error {
 	tag := strings.ToUpper(util.FirstNonEmpty(it.Mode, "sub"))
 	name := util.SanitizeFilename(fmt.Sprintf("%s - %02d [%s]", it.AnimeTitle, it.Episode, tag))
 	out := filepath.Join(dir, name+".mp4")
-	it.Output = out
-	m.setStatus(it, StatusDownloading)
 
+	// Download into a hidden folder next to the destination (the library
+	// scanner skips it) and move only finished files into place: a failed or
+	// canceled download leaves nothing behind (half-written video, yt-dlp
+	// .part/.ytdl/fragment files, subtitles without their video).
+	work := filepath.Join(dir, ".kumo-download-"+it.ID)
+	_ = os.RemoveAll(work) // left over by a crash
+	if err := os.Mkdir(work, 0o755); err != nil {
+		return err
+	}
+	defer os.RemoveAll(work)
+	m.update(r, func(it *Item) { it.Status, it.Output = StatusDownloading, out })
+
+	var subs []string
 	if res.SubURL != "" {
 		ext := strings.ToLower(filepath.Ext(strings.Split(res.SubURL, "?")[0]))
 		if ext == "" || len(ext) > 5 {
@@ -332,10 +466,48 @@ func (m *Manager) process(ctx context.Context, it *Item) error {
 			headers["Referer"] = res.Referrer
 		}
 		if b, err := util.GetBytes(ctx, res.SubURL, headers); err == nil {
-			_ = os.WriteFile(filepath.Join(dir, name+".eng"+ext), b, 0o644)
+			sub := name + ".eng" + ext
+			if os.WriteFile(filepath.Join(work, sub), b, 0o644) == nil {
+				subs = append(subs, sub)
+			}
 		}
 	}
 
+	tmp := filepath.Join(work, name+".mp4")
+	err := m.fetch(r, cfg, res, tmp)
+	if ctx.Err() != nil {
+		return errors.New("canceled")
+	}
+	if err != nil {
+		return err
+	}
+	st, err := os.Stat(tmp)
+	if err != nil {
+		return errors.New("the download finished without writing a video file")
+	}
+	if err := os.Rename(tmp, out); err != nil {
+		return err
+	}
+	for _, sub := range subs {
+		_ = os.Rename(filepath.Join(work, sub), filepath.Join(dir, sub))
+	}
+
+	// Register the file as matched so it appears instantly.
+	roots := cfg.LibraryDirs()
+	f := &library.LocalFile{
+		Path: out, Dir: dir, Name: filepath.Base(out), Size: st.Size(), ModTime: st.ModTime().Unix(),
+		Parsed: library.Parse(out, roots), MediaID: it.MediaID, Episode: it.Episode, AiredEpisode: it.Episode,
+		Kind: "main", Locked: true, MatchScore: 1,
+	}
+	if err := m.files.Save(f); err != nil {
+		log.Printf("register download: %v", err)
+	}
+	m.hub.Publish(events.LibraryUpdated, nil)
+	return nil
+}
+
+// download fetches res into out with yt-dlp or ffmpeg, as configured.
+func (m *Manager) download(r *run, cfg config.Settings, res *Resolved, out string) error {
 	downloader := cfg.AniCli.Downloader
 	_, hasYtdlp := util.LookPath("yt-dlp")
 	if downloader == "" || downloader == "auto" {
@@ -345,39 +517,15 @@ func (m *Manager) process(ctx context.Context, it *Item) error {
 			downloader = "ffmpeg"
 		}
 	}
-	var err error
 	if downloader == "yt-dlp" && hasYtdlp {
-		err = m.ytdlp(ctx, it, res, out)
-	} else {
-		err = m.ffmpeg(ctx, it, res, out, cfg.Transcode.FfmpegPath, cfg.Transcode.FfprobePath)
+		return m.ytdlp(r, res, out)
 	}
-	if err != nil {
-		_ = os.Remove(out)
-		if ctx.Err() != nil {
-			return errors.New("canceled")
-		}
-		return err
-	}
-
-	// Register the file as matched so it appears instantly.
-	if st, err := os.Stat(out); err == nil {
-		roots := cfg.LibraryDirs()
-		f := &library.LocalFile{
-			Path: out, Dir: dir, Name: filepath.Base(out), Size: st.Size(), ModTime: st.ModTime().Unix(),
-			Parsed: library.Parse(out, roots), MediaID: it.MediaID, Episode: it.Episode, AiredEpisode: it.Episode,
-			Kind: "main", Locked: true, MatchScore: 1,
-		}
-		if err := m.files.Save(f); err != nil {
-			log.Printf("register download: %v", err)
-		}
-		m.hub.Publish(events.LibraryUpdated, nil)
-	}
-	return nil
+	return m.ffmpeg(r, res, out, cfg.Transcode.FfmpegPath, cfg.Transcode.FfprobePath)
 }
 
 var reYtdlp = regexp.MustCompile(`KUMO\|\s*([\d.]+)%\|([^|]*)\|(.*)$`)
 
-func (m *Manager) ytdlp(ctx context.Context, it *Item, res *Resolved, out string) error {
+func (m *Manager) ytdlp(r *run, res *Resolved, out string) error {
 	args := []string{
 		"--newline", "--no-colors", "--no-playlist", "--no-mtime",
 		"-N", "8", "--fragment-retries", "20", "--retries", "10",
@@ -395,40 +543,37 @@ func (m *Manager) ytdlp(ctx context.Context, it *Item, res *Resolved, out string
 		args = append(args, "--add-header", k+":"+v)
 	}
 	args = append(args, res.URL)
-	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	var lastErr string
-	go func() {
-		sc := bufio.NewScanner(stderr)
-		for sc.Scan() {
-			if l := strings.TrimSpace(sc.Text()); strings.Contains(l, "ERROR") {
-				lastErr = l
-			}
-		}
-	}()
-	sc := bufio.NewScanner(stdout)
-	last := time.Time{}
-	for sc.Scan() {
-		mm := reYtdlp.FindStringSubmatch(sc.Text())
+	cmd := exec.CommandContext(r.ctx, "yt-dlp", args...)
+	// An interrupt lets yt-dlp stop the ffmpeg it may have started; it gets
+	// killed if it's still running 10s later.
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = 10 * time.Second
+	progress := m.progress(r)
+	stdout := &lineWriter{fn: func(line string) {
+		mm := reYtdlp.FindStringSubmatch(line)
 		if mm == nil {
-			continue
+			return
 		}
 		p, _ := strconv.ParseFloat(mm[1], 64)
-		m.mu.Lock()
-		it.Progress = p / 100
-		it.Speed = strings.TrimSpace(mm[2])
-		it.ETA = strings.TrimSpace(mm[3])
-		m.mu.Unlock()
-		if time.Since(last) > 700*time.Millisecond {
-			last = time.Now()
-			m.publish(it)
+		progress(func(it *Item) {
+			it.Progress = p / 100
+			it.Speed = strings.TrimSpace(mm[2])
+			it.ETA = strings.TrimSpace(mm[3])
+		})
+	}}
+	var lastErr string
+	stderr := &lineWriter{fn: func(line string) {
+		if strings.Contains(line, "ERROR") {
+			lastErr = strings.TrimSpace(line)
 		}
-	}
-	if err := cmd.Wait(); err != nil {
+	}}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	err := cmd.Run()
+	// Run returns once both writers have consumed all the output, so lastErr
+	// is final (and no longer written) from here on.
+	stdout.flush()
+	stderr.flush()
+	if err != nil {
 		if lastErr != "" {
 			return errors.New(lastErr)
 		}
@@ -437,7 +582,8 @@ func (m *Manager) ytdlp(ctx context.Context, it *Item, res *Resolved, out string
 	return nil
 }
 
-func (m *Manager) ffmpeg(ctx context.Context, it *Item, res *Resolved, out, ffmpegPath, ffprobePath string) error {
+func (m *Manager) ffmpeg(r *run, res *Resolved, out, ffmpegPath, ffprobePath string) error {
+	ctx := r.ctx
 	if _, ok := util.LookPath(ffmpegPath); !ok {
 		return errors.New("neither yt-dlp nor ffmpeg is installed (sudo pacman -S yt-dlp ffmpeg)")
 	}
@@ -480,46 +626,39 @@ func (m *Manager) ffmpeg(ctx context.Context, it *Item, res *Resolved, out, ffmp
 	args = append(args, headerArgs()...)
 	args = append(args, "-i", res.URL, "-map", "0:v?", "-map", "0:a?", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", out)
 	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	errBuf := make(chan string, 1)
-	go func() {
-		b, _ := io.ReadAll(io.LimitReader(stderr, 64<<10))
-		errBuf <- strings.TrimSpace(string(b))
-	}()
-	sc := bufio.NewScanner(stdout)
-	last := time.Time{}
-	for sc.Scan() {
-		line := sc.Text()
+	cmd.WaitDelay = 10 * time.Second
+	progress := m.progress(r)
+	stdout := &lineWriter{fn: func(line string) {
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
-			continue
+			return
 		}
-		m.mu.Lock()
 		switch k {
 		case "out_time_us", "out_time_ms":
 			us, _ := strconv.ParseFloat(v, 64)
 			if duration > 0 {
-				it.Progress = min(us/1e6/duration, 0.99)
+				progress(func(it *Item) { it.Progress = min(us/1e6/duration, 0.99) })
 			}
 		case "speed":
-			it.Speed = strings.TrimSpace(v)
+			progress(func(it *Item) { it.Speed = strings.TrimSpace(v) })
 		}
-		m.mu.Unlock()
-		if time.Since(last) > 700*time.Millisecond {
-			last = time.Now()
-			m.publish(it)
+	}}
+	var lastErr string
+	stderr := &lineWriter{fn: func(line string) {
+		if line = strings.TrimSpace(line); line != "" {
+			lastErr = line
 		}
-	}
-	if err := cmd.Wait(); err != nil {
-		msg := <-errBuf
-		if msg == "" {
-			msg = err.Error()
+	}}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	err := cmd.Run()
+	// Run returns once both writers have consumed all the output.
+	stdout.flush()
+	stderr.flush()
+	if err != nil {
+		if lastErr == "" {
+			lastErr = err.Error()
 		}
-		return fmt.Errorf("ffmpeg: %s", lastLine(msg))
+		return fmt.Errorf("ffmpeg: %s", lastErr)
 	}
 	return nil
 }
@@ -537,7 +676,47 @@ func hlsExtensionPicky(ffmpegPath string) bool {
 	return pickyOK
 }
 
-func lastLine(s string) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	return lines[len(lines)-1]
+// maxLine caps the length of a line kept by lineWriter.
+const maxLine = 64 << 10
+
+// lineWriter hands every non-empty line written to it to fn, without the
+// line break (\r ends a line too). It accepts everything, so a command's
+// output pipe can never fill up and block it; lines over maxLine are cut.
+type lineWriter struct {
+	fn   func(line string)
+	buf  []byte
+	long bool // the line in buf was cut: drop the rest of it
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	for len(p) > 0 {
+		i := bytes.IndexAny(p, "\r\n")
+		if i < 0 {
+			w.add(p)
+			break
+		}
+		w.add(p[:i])
+		w.flush()
+		p = p[i+1:]
+	}
+	return n, nil
+}
+
+func (w *lineWriter) add(b []byte) {
+	if w.long {
+		return
+	}
+	if room := maxLine - len(w.buf); len(b) > room {
+		b, w.long = b[:room], true
+	}
+	w.buf = append(w.buf, b...)
+}
+
+// flush ends the current line (also used for a last line without a break).
+func (w *lineWriter) flush() {
+	if len(w.buf) > 0 {
+		w.fn(string(w.buf))
+	}
+	w.buf, w.long = w.buf[:0], false
 }

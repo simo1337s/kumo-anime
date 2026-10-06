@@ -91,7 +91,10 @@ func (l *Local) Probe(ctx context.Context, path string) (*Probe, error) {
 	}
 	cfg := l.settings.Get()
 	key := "probe:" + path
-	st, _ := os.Stat(path)
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
 	var p Probe
 	if l.db.GetCache(key, &p) && p.Size == st.Size() {
 		p.Method, p.Reason = decide(&p, cfg.Transcode.Mode, 0)
@@ -192,7 +195,7 @@ func decide(p *Probe, mode string, audioIdx int) (string, string) {
 	}
 	audioOK := true
 	if len(p.Audio) > 0 {
-		a := p.Audio[min(audioIdx, len(p.Audio)-1)]
+		a := p.Audio[min(max(audioIdx, 0), len(p.Audio)-1)]
 		audioOK = browserAudio[a.Codec] && a.Channels <= 2 || a.Codec == "aac" || a.Codec == "opus"
 	}
 	containerOK := strings.Contains(p.Container, "mp4") || strings.Contains(p.Container, "webm") || strings.Contains(p.Container, "mov")
@@ -288,28 +291,51 @@ func (l *Local) ServeTranscode(w http.ResponseWriter, r *http.Request, path stri
 	}
 	args = append(args, "-sn", "-dn", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1")
 
-	cmd := exec.CommandContext(r.Context(), cfg.Transcode.FfmpegPath, args...)
+	// ffmpeg is stopped when the request ends, or as soon as the player stops
+	// reading (see below).
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, cfg.Transcode.FfmpegPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	stderr, _ := cmd.StderrPipe()
+	// All of stderr must be read: a damaged file makes ffmpeg print an error
+	// per frame, and once the pipe is full it blocks and playback freezes.
+	// Wait returns only after this writer has consumed everything.
+	stderr := &headWriter{max: 8 << 10}
+	cmd.Stderr = stderr
+	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Start(); err != nil {
 		http.Error(w, "ffmpeg is not installed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	go func() {
-		b, _ := io.ReadAll(io.LimitReader(stderr, 8<<10))
-		if s := strings.TrimSpace(string(b)); s != "" && r.Context().Err() == nil {
-			log.Printf("ffmpeg: %s", s)
-		}
-	}()
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Kumo-Method", method)
-	_, _ = io.Copy(w, stdout)
+	if _, err := io.Copy(w, stdout); err != nil {
+		// The player went away (or the connection broke): stop ffmpeg now
+		// instead of leaving it blocked on a pipe nobody reads.
+		cancel()
+	}
 	_ = cmd.Wait()
+	if s := strings.TrimSpace(string(stderr.buf)); s != "" && ctx.Err() == nil {
+		log.Printf("ffmpeg: %s", s)
+	}
+}
+
+// headWriter keeps the first max bytes written to it and discards the rest.
+type headWriter struct {
+	buf []byte
+	max int
+}
+
+func (h *headWriter) Write(p []byte) (int, error) {
+	if n := min(len(p), h.max-len(h.buf)); n > 0 {
+		h.buf = append(h.buf, p[:n]...)
+	}
+	return len(p), nil
 }
 
 // ServeSubtitle extracts an embedded text subtitle (or reads an external

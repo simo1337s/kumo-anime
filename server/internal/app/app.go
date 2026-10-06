@@ -269,6 +269,7 @@ func pickSource(srcs []stream.Source, quality string) stream.Source {
 // Start runs the background jobs.
 func (a *App) Start() {
 	a.Extensions.LoadAll()
+	a.Downloads.Start()
 	a.Scanner.StartWatcher()
 	go a.Torrents.RunCounter(a.ctx)
 	go a.AutoDL.Loop(a.ctx, func() (bool, time.Duration) {
