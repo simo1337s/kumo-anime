@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/simo1337s/animetest/server/internal/db"
@@ -276,14 +277,23 @@ func NewStore(d *db.DB) (*Store, error) {
 	return s, nil
 }
 
+// Get returns a copy of the settings. Slices are copied too: callers decode
+// JSON into the result, which would otherwise write into the live settings.
 func (s *Store) Get() Settings {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.current
+	return s.current.clone()
+}
+
+func (c Settings) clone() Settings {
+	c.Library.ExtraDirs = slices.Clone(c.Library.ExtraDirs)
+	c.Library.IgnorePatterns = slices.Clone(c.Library.IgnorePatterns)
+	c.UI.HomeSections = slices.Clone(c.UI.HomeSections)
+	return c
 }
 
 func (s *Store) Save(next Settings) (Settings, error) {
-	next = sanitize(next)
+	next = sanitize(next.clone())
 	if err := s.db.SetKV(settingsKey, next); err != nil {
 		return s.Get(), err
 	}
@@ -292,10 +302,11 @@ func (s *Store) Save(next Settings) (Settings, error) {
 	s.current = next
 	listeners := append([]func(old, new Settings){}, s.onChange...)
 	s.mu.Unlock()
+	// Listeners get their own copies; none of them may touch s.current.
 	for _, fn := range listeners {
-		go fn(old, next)
+		go fn(old.clone(), next.clone())
 	}
-	return next, nil
+	return next.clone(), nil
 }
 
 // OnChange registers a callback invoked (in a goroutine) after every save.

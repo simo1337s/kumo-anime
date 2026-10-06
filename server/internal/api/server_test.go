@@ -167,3 +167,39 @@ func TestCrossSiteRequests(t *testing.T) {
 		t.Fatalf("text/plain JSON body: got %d", rec.Code)
 	}
 }
+
+// Settings slices must not be shared with the live settings: decoding a
+// LAN device's request used to write its extraDirs straight into them.
+func TestSettingsSlicesNotShared(t *testing.T) {
+	s := newTestServer(t)
+	cfg := s.app.Settings.Get()
+	cfg.Library.ExtraDirs = []string{"/srv/anime-a", "/srv/anime-b"}
+	cfg.Server.AllowLAN, cfg.Server.Password = true, ""
+	cfg.Qbittorrent.Password = "secret"
+	if _, err := s.app.Settings.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	lan := "192.168.1.20:5000"
+	evil := s.app.Settings.Get()
+	evil.Library.ExtraDirs = []string{"/home/u/.ssh", "/etc"}
+	evil.Qbittorrent.Host = "203.0.113.9"
+	raw, _ := json.Marshal(evil)
+	if w := do(s, "PUT", "/api/settings", lan, string(raw), nil); w.Code != http.StatusOK {
+		t.Fatalf("LAN save: %d %s", w.Code, w.Body.String())
+	} else if strings.Contains(w.Body.String(), "secret") {
+		t.Fatal("LAN device received the qBittorrent password")
+	}
+	got := s.app.Settings.Get()
+	if got.Library.ExtraDirs[0] != "/srv/anime-a" || got.Library.ExtraDirs[1] != "/srv/anime-b" || got.Qbittorrent.Host == "203.0.113.9" {
+		t.Fatalf("LAN device changed protected settings: %q %q", got.Library.ExtraDirs, got.Qbittorrent.Host)
+	}
+	if w := do(s, "GET", "/api/settings", lan, "", nil); strings.Contains(w.Body.String(), "secret") {
+		t.Fatal("LAN device can read the qBittorrent password")
+	}
+	// A copy from Get can be changed freely.
+	c := s.app.Settings.Get()
+	c.Library.ExtraDirs[0] = "/changed"
+	if s.app.Settings.Get().Library.ExtraDirs[0] != "/srv/anime-a" {
+		t.Fatal("Get returned a slice shared with the live settings")
+	}
+}

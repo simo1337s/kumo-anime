@@ -23,7 +23,7 @@ func (s *Server) routes() {
 
 	// --- core
 	m.HandleFunc("GET /api/status", h(s.status))
-	m.HandleFunc("GET /api/settings", h(func(r *http.Request) (any, error) { return s.app.Settings.Get(), nil }))
+	m.HandleFunc("GET /api/settings", h(func(r *http.Request) (any, error) { return settingsFor(r, s.app.Settings.Get()), nil }))
 	m.HandleFunc("PUT /api/settings", h(s.saveSettings))
 	m.HandleFunc("GET /api/events", s.events)
 	m.HandleFunc("POST /api/auth/anilist", h(s.anilistLogin))
@@ -260,14 +260,14 @@ func (s *Server) status(r *http.Request) (any, error) {
 		"dataDir":        s.app.DataDir,
 		"listenAddr":     s.addr,
 		"webUiForced":    s.ForceWebUI,
-		"settings":       cfg,
+		"settings":       settingsFor(r, cfg),
 	}, nil
 }
 
 func (s *Server) saveSettings(r *http.Request) (any, error) {
-	var next config.Settings
-	cur := s.app.Settings.Get()
-	next = cur
+	// Two separate copies: decoding writes into next's slices, and cur must
+	// keep the old values to restore the fields LAN devices may not change.
+	cur, next := s.app.Settings.Get(), s.app.Settings.Get()
 	if err := decode(r, &next); err != nil {
 		return nil, err
 	}
@@ -279,14 +279,26 @@ func (s *Server) saveSettings(r *http.Request) (any, error) {
 		next.Mpv.Path, next.Mpv.ExtraArgs, next.Mpv.Socket = cur.Mpv.Path, cur.Mpv.ExtraArgs, cur.Mpv.Socket
 		next.Transcode.FfmpegPath, next.Transcode.FfprobePath, next.Transcode.VaapiNode = cur.Transcode.FfmpegPath, cur.Transcode.FfprobePath, cur.Transcode.VaapiNode
 		next.AniCli.Path, next.AniCli.DownloadDir = cur.AniCli.Path, cur.AniCli.DownloadDir
-		next.Qbittorrent.Executable, next.Transmission.Executable = cur.Qbittorrent.Executable, cur.Transmission.Executable
+		// Torrent client logins too: they never see the passwords, and
+		// pointing the client at another host would send it the password.
+		next.Qbittorrent, next.Transmission = cur.Qbittorrent, cur.Transmission
 		next.Library.Dir, next.Library.ExtraDirs = cur.Library.Dir, cur.Library.ExtraDirs
 	}
 	// Turning off the web UI from a browser would lock the browser out.
 	if kindOf(r) != clientShell && !next.Server.WebUI && cur.Server.WebUI && !s.ForceWebUI {
 		return nil, forbidden("turn off the Web UI from the desktop app, otherwise this browser would lose access")
 	}
-	return s.app.Settings.Save(next)
+	saved, err := s.app.Settings.Save(next)
+	return settingsFor(r, saved), err
+}
+
+// settingsFor hides passwords from devices on the LAN.
+func settingsFor(r *http.Request, cfg config.Settings) config.Settings {
+	if !isTrusted(r) {
+		cfg.Server.Password = ""
+		cfg.Qbittorrent.Password, cfg.Transmission.Password = "", ""
+	}
+	return cfg
 }
 
 func (s *Server) anilistLogin(r *http.Request) (any, error) {
