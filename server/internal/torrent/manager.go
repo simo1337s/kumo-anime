@@ -123,6 +123,8 @@ type Status struct {
 	Connected bool   `json:"connected"`
 	Version   string `json:"version"`
 	Error     string `json:"error,omitempty"`
+	// NeedsAuth: the client runs but refuses the configured credentials.
+	NeedsAuth bool `json:"needsAuth,omitempty"`
 }
 
 func (m *Manager) Status(ctx context.Context) Status {
@@ -136,6 +138,7 @@ func (m *Manager) Status(ctx context.Context) Status {
 	st := Status{Client: c.Name(), Version: v, Connected: err == nil}
 	if err != nil {
 		st.Error = err.Error()
+		st.NeedsAuth = IsAuthError(err)
 	}
 	return st
 }
@@ -145,6 +148,9 @@ func (m *Manager) Status(ctx context.Context) Status {
 func (m *Manager) StartClient(ctx context.Context) error {
 	if st := m.Status(ctx); st.Connected {
 		return nil
+	} else if st.NeedsAuth {
+		// It's running; launching it again would only bring its window up.
+		return errors.New(st.Error)
 	}
 	cfg := m.settings.Get()
 	exe := cfg.Qbittorrent.Executable
@@ -167,6 +173,8 @@ func (m *Manager) StartClient(ctx context.Context) error {
 		time.Sleep(time.Second)
 		if st := m.Status(ctx); st.Connected {
 			return nil
+		} else if st.NeedsAuth {
+			return errors.New(st.Error)
 		}
 	}
 	return errors.New("the torrent client started but its Web UI/RPC is not reachable — check host/port/credentials")

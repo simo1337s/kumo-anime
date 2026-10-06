@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowDown, ArrowUp, FolderOpen, Magnet, Pause, Play, Plus, Power, Trash2 } from "lucide-react"
+import { ArrowDown, ArrowUp, FolderOpen, Magnet, Pause, Play, Plus, Power, Settings2, Trash2 } from "lucide-react"
 import { useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { Badge, Button, Dialog, Dropdown, DropdownContent, DropdownItem, DropdownTrigger, EmptyState, IconButton, Input, Progress, Tabs } from "@/components/ui"
 import { api } from "@/lib/api"
@@ -23,10 +23,11 @@ const stateTone: Record<string, "green" | "blue" | "amber" | "red" | "gray" | "b
 
 export default function TorrentsPage() {
     const { data: status } = useStatus()
+    const navigate = useNavigate()
     const clientName = status?.settings.torrent.defaultClient
     const { data: clientStatus, refetch: refetchStatus } = useQuery({
         queryKey: ["torrent-client-status"],
-        queryFn: () => api.get<{ client: string; connected: boolean; version: string; error?: string }>("/api/torrent-client/status"),
+        queryFn: () => api.get<{ client: string; connected: boolean; version: string; error?: string; needsAuth?: boolean }>("/api/torrent-client/status"),
         refetchInterval: 15000,
     })
     const { data: list, isLoading } = useTorrentList(!!clientStatus?.connected)
@@ -71,7 +72,9 @@ export default function TorrentsPage() {
                             ? "No torrent client configured"
                             : clientStatus?.connected
                               ? `${clientStatus.client === "qbittorrent" ? "qBittorrent" : "Transmission"} ${clientStatus.version}`
-                              : `${clientName === "qbittorrent" ? "qBittorrent" : "Transmission"} is not reachable`}
+                              : clientStatus?.needsAuth
+                                ? `${clientName === "qbittorrent" ? "qBittorrent" : "Transmission"} is running but needs your login`
+                                : `${clientName === "qbittorrent" ? "qBittorrent" : "Transmission"} is not reachable`}
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -85,7 +88,12 @@ export default function TorrentsPage() {
                             </span>
                         </div>
                     )}
-                    {!clientStatus?.connected && clientName && clientName !== "none" && (
+                    {!clientStatus?.connected && clientName && clientName !== "none" && clientStatus?.needsAuth && (
+                        <Button variant="primary" icon={<Settings2 className="size-4" />} onClick={() => navigate("/settings?tab=torrent-client")}>
+                            Fix login in settings
+                        </Button>
+                    )}
+                    {!clientStatus?.connected && clientName && clientName !== "none" && !clientStatus?.needsAuth && (
                         <Button variant="primary" icon={<Power className="size-4" />} loading={starting} onClick={start}>
                             Start client
                         </Button>

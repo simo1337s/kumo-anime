@@ -49,6 +49,18 @@ type Client interface {
 
 var ErrNoClient = errors.New("no torrent client configured (Settings › Torrent Client)")
 
+// AuthError means the client is running but refuses Kumo's credentials.
+// Starting the client again won't help; the settings need fixing.
+type AuthError struct{ Msg string }
+
+func (e *AuthError) Error() string { return e.Msg }
+
+// IsAuthError reports whether err is an AuthError.
+func IsAuthError(err error) bool {
+	var ae *AuthError
+	return errors.As(err, &ae)
+}
+
 func baseURL(c config.TorrentClientConfig) string {
 	scheme := "http"
 	if c.UseHTTPS {
@@ -67,10 +79,15 @@ func baseURL(c config.TorrentClientConfig) string {
 // qBittorrent (WebUI API v2)
 
 type Qbittorrent struct {
-	cfg    config.TorrentClientConfig
-	http   *http.Client
-	mu     sync.Mutex
-	logged bool
+	cfg  config.TorrentClientConfig
+	http *http.Client
+	mu   sync.Mutex
+	// A failed login is remembered and not retried for a while: qBittorrent
+	// bans an IP after a few failed attempts, and Kumo polls every few
+	// seconds. Settings changes create a new client, so fixing the password
+	// takes effect at once.
+	authErr error
+	retryAt time.Time
 }
 
 func NewQbittorrent(cfg config.TorrentClientConfig) *Qbittorrent {
@@ -80,11 +97,18 @@ func NewQbittorrent(cfg config.TorrentClientConfig) *Qbittorrent {
 
 func (q *Qbittorrent) Name() string { return "qbittorrent" }
 
-func (q *Qbittorrent) login(ctx context.Context, force bool) error {
+const qbitAuthHint = ` Enter your qBittorrent Web UI username and password in Settings › Torrent Client, or turn on "Bypass authentication for clients on localhost" in qBittorrent (Tools › Options › Web UI).`
+
+func (q *Qbittorrent) login(ctx context.Context) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.logged && !force {
-		return nil
+	if q.authErr != nil && time.Now().Before(q.retryAt) {
+		return q.authErr
+	}
+	if q.cfg.Password == "" {
+		// qBittorrent never accepts an empty password; don't burn attempts.
+		q.authErr, q.retryAt = &AuthError{"qBittorrent asks for a password." + qbitAuthHint}, time.Now().Add(time.Minute)
+		return q.authErr
 	}
 	form := url.Values{"username": {q.cfg.Username}, "password": {q.cfg.Password}}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, baseURL(q.cfg)+"/api/v2/auth/login", strings.NewReader(form.Encode()))
@@ -92,24 +116,32 @@ func (q *Qbittorrent) login(ctx context.Context, force bool) error {
 	req.Header.Set("Referer", baseURL(q.cfg))
 	resp, err := q.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("qBittorrent unreachable at %s (is the Web UI enabled?): %w", baseURL(q.cfg), err)
+		return q.unreachable(err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == http.StatusForbidden {
-		return errors.New("qBittorrent: login forbidden (too many failed attempts?)")
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	switch {
+	case resp.StatusCode == http.StatusForbidden:
+		q.authErr = &AuthError{"qBittorrent has temporarily blocked Kumo after too many failed logins. Fix the password in Settings › Torrent Client, then restart qBittorrent (File › Exit and open it again) to lift the block."}
+		q.retryAt = time.Now().Add(5 * time.Minute)
+		return q.authErr
+	case !strings.Contains(string(body), "Ok") && resp.StatusCode != http.StatusNoContent:
+		q.authErr = &AuthError{"qBittorrent rejected the username or password." + qbitAuthHint}
+		q.retryAt = time.Now().Add(10 * time.Minute)
+		return q.authErr
 	}
-	if !strings.Contains(string(body), "Ok") && resp.StatusCode != http.StatusNoContent {
-		return errors.New("qBittorrent: wrong username or password")
-	}
-	q.logged = true
+	q.authErr = nil
 	return nil
 }
 
+func (q *Qbittorrent) unreachable(err error) error {
+	return fmt.Errorf("qBittorrent isn't reachable at %s — is it running with its Web UI enabled (Tools › Options › Web UI)? (%w)", baseURL(q.cfg), err)
+}
+
+// do sends an API request. The first try goes without logging in, which
+// works when qBittorrent bypasses authentication for localhost; on 403 it
+// logs in once and retries.
 func (q *Qbittorrent) do(ctx context.Context, method, path string, form url.Values, out any) error {
-	if err := q.login(ctx, false); err != nil {
-		return err
-	}
 	for attempt := 0; attempt < 2; attempt++ {
 		var body io.Reader
 		u := baseURL(q.cfg) + path
@@ -125,12 +157,12 @@ func (q *Qbittorrent) do(ctx context.Context, method, path string, form url.Valu
 		req.Header.Set("Referer", baseURL(q.cfg))
 		resp, err := q.http.Do(req)
 		if err != nil {
-			return err
+			return q.unreachable(err)
 		}
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusForbidden && attempt == 0 {
-			if err := q.login(ctx, true); err != nil {
+			if err := q.login(ctx); err != nil {
 				return err
 			}
 			continue
@@ -150,7 +182,7 @@ func (q *Qbittorrent) do(ctx context.Context, method, path string, form url.Valu
 		}
 		return nil
 	}
-	return errors.New("qBittorrent: authentication failed")
+	return &AuthError{"qBittorrent refused Kumo's session." + qbitAuthHint}
 }
 
 var errNotFound = errors.New("not found")
@@ -301,7 +333,7 @@ func (t *Transmission) rpc(ctx context.Context, method string, args any, out any
 			continue
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
-			return errors.New("Transmission: wrong username or password")
+			return &AuthError{"Transmission rejected the username or password — check Settings › Torrent Client."}
 		}
 		if resp.StatusCode >= 400 {
 			return fmt.Errorf("Transmission: %s", resp.Status)

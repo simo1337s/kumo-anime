@@ -90,8 +90,75 @@ func TestQbittorrent(t *testing.T) {
 		t.Fatalf("re-login: %v", err)
 	}
 	bad := NewQbittorrent(config.TorrentClientConfig{Host: cfg.Host, Port: cfg.Port, Username: "admin", Password: "wrong"})
-	if _, err := bad.Version(ctx); err == nil || !strings.Contains(err.Error(), "wrong username or password") {
+	if _, err := bad.Version(ctx); !IsAuthError(err) || !strings.Contains(err.Error(), "rejected the username or password") {
 		t.Fatalf("expected auth error, got %v", err)
+	}
+}
+
+// qBittorrent bans an IP after a few failed logins, so Kumo must not retry
+// a failing login on every poll, and must not log in at all when
+// qBittorrent bypasses authentication for localhost.
+func TestQbittorrentLoginAttempts(t *testing.T) {
+	attempts, bypass, ban := 0, false, false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/auth/login" {
+			attempts++
+			if ban {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			_, _ = io.WriteString(w, "Fails.")
+			return
+		}
+		if !bypass {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_, _ = io.WriteString(w, "v5.2.4")
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	cfg := cfgFor(t, srv)
+
+	bypass = true
+	q := NewQbittorrent(cfg)
+	for i := 0; i < 5; i++ {
+		if v, err := q.Version(ctx); err != nil || v != "v5.2.4" {
+			t.Fatalf("bypass: %q %v", v, err)
+		}
+	}
+	if attempts != 0 {
+		t.Fatalf("logged in %d times although auth is bypassed", attempts)
+	}
+
+	bypass = false
+	q = NewQbittorrent(cfg) // wrong password
+	for i := 0; i < 10; i++ {
+		if _, err := q.Version(ctx); !IsAuthError(err) {
+			t.Fatalf("wrong password: %v", err)
+		}
+	}
+	if attempts != 1 {
+		t.Fatalf("wrong password: %d login attempts for 10 polls", attempts)
+	}
+
+	attempts, ban = 0, true
+	q = NewQbittorrent(cfg)
+	for i := 0; i < 10; i++ {
+		if _, err := q.Version(ctx); !IsAuthError(err) || !strings.Contains(err.Error(), "blocked") {
+			t.Fatalf("banned: %v", err)
+		}
+	}
+	if attempts != 1 {
+		t.Fatalf("banned: %d login attempts for 10 polls", attempts)
+	}
+
+	attempts = 0
+	empty := cfg
+	empty.Password = ""
+	q = NewQbittorrent(empty)
+	if _, err := q.Version(ctx); !IsAuthError(err) || attempts != 0 {
+		t.Fatalf("empty password: attempts=%d err=%v", attempts, err)
 	}
 }
 
