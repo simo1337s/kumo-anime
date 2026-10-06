@@ -213,20 +213,33 @@ func (a *App) wire() {
 	})
 
 	// Discord rich presence.
-	var lastPresence time.Time
+	var (
+		presenceMu   sync.Mutex
+		lastPresence time.Time
+		showing      bool // a presence is set and must be cleared eventually
+	)
+	clearPresence := func() {
+		presenceMu.Lock()
+		was := showing
+		showing, lastPresence = false, time.Time{}
+		presenceMu.Unlock()
+		if was {
+			a.Discord.Clear()
+		}
+	}
 	a.Player.OnStatus = append(a.Player.OnStatus, func(s *player.Session) {
 		cfg := a.Settings.Get()
-		if !cfg.Discord.RichPresence || cfg.Discord.ClientID == "" {
+		if !cfg.Discord.RichPresence || cfg.Discord.ClientID == "" || !s.Active {
+			clearPresence()
 			return
 		}
-		if !s.Active {
-			a.Discord.Clear()
-			return
-		}
+		presenceMu.Lock()
 		if time.Since(lastPresence) < 15*time.Second {
+			presenceMu.Unlock()
 			return
 		}
-		lastPresence = time.Now()
+		lastPresence, showing = time.Now(), true
+		presenceMu.Unlock()
 		media, err := a.Platform.MediaLite(context.Background(), s.MediaID)
 		act := discord.Activity{Details: s.Title, State: fmt.Sprintf("Episode %d", s.Episode)}
 		if err == nil {
@@ -244,6 +257,9 @@ func (a *App) wire() {
 	a.Extensions.Host = a.pluginServices()
 
 	a.Settings.OnChange(func(old, cur config.Settings) {
+		if !cur.Discord.RichPresence || cur.Discord.ClientID != old.Discord.ClientID {
+			clearPresence() // turned off: don't leave "Watching…" behind
+		}
 		if old.Library.AutoRefresh != cur.Library.AutoRefresh || fmt.Sprint(old.LibraryDirs()) != fmt.Sprint(cur.LibraryDirs()) {
 			a.Scanner.StartWatcher()
 		}
