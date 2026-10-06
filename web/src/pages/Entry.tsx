@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
     CalendarClock,
     CheckCheck,
@@ -25,11 +25,11 @@ import { TorrentPanel } from "@/components/entry/TorrentPanel"
 import { Carousel, MediaCard } from "@/components/MediaCard"
 import { PluginActions, PluginSlot, usePluginDropdownActions } from "@/components/plugins/PluginSlot"
 import { sendPluginEvent } from "@/components/plugins/PluginRenderer"
-import { Badge, Button, Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTrigger, EmptyState, Skeleton, Tabs } from "@/components/ui"
+import { Badge, Button, Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTrigger, EmptyState, Skeleton, Tabs, Tooltip } from "@/components/ui"
 import { api } from "@/lib/api"
 import { usePlay } from "@/lib/play"
-import { fetchLanguageMode, useEntry, useEpisodeMarker, useStatus } from "@/lib/queries"
-import type { EntryView } from "@/lib/types"
+import { fetchLanguageMode, useEntry, useEpisodeMarker, useLanguageMode, useStatus } from "@/lib/queries"
+import type { EntryView, Probe } from "@/lib/types"
 import { banner, cleanDescription, cn, cover, formatLabel, img, scoreColor, seasonLabel, statusLabel, timeUntil, title, totalEpisodes } from "@/lib/utils"
 
 type Tab = "episodes" | "stream" | "torrents" | "details"
@@ -254,10 +254,13 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
 
     return (
         <div className="flex flex-col gap-8">
-            <div className="flex items-center justify-between">
-                <p className="text-sm text-muted">
-                    {withFiles.length} of {entry.episodes.length || "?"} episodes downloaded
-                </p>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-4">
+                    <p className="text-sm text-muted">
+                        {withFiles.length} of {entry.episodes.length || "?"} episodes downloaded
+                    </p>
+                    <LocalLanguageSwitch mediaId={media.id} samplePath={withFiles[0]?.file?.path} />
+                </div>
                 {entry.episodes.length > withFiles.length && (
                     <button onClick={() => setShowAll(s => !s)} className="text-sm font-medium text-brand-strong hover:underline">
                         {showAll ? "Show downloaded only" : "Show all episodes"}
@@ -329,6 +332,45 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
                 </div>
             )}
             {entry.metadataNote && <p className="text-xs text-subtle">{entry.metadataNote}</p>}
+        </div>
+    )
+}
+
+// Sub/Dub for dual-audio files: shown when the files have an English and an
+// original-language audio track (found by language tag or track title).
+function LocalLanguageSwitch({ mediaId, samplePath }: { mediaId: number; samplePath?: string }) {
+    const language = useLanguageMode(mediaId)
+    const { data: probe } = useQuery({
+        queryKey: ["probe", samplePath],
+        queryFn: () => api.get<Probe>(`/api/local/probe?path=${encodeURIComponent(samplePath!)}`),
+        enabled: !!samplePath,
+        staleTime: Infinity,
+        retry: false,
+    })
+    const audio = probe?.audio ?? []
+    const english = (a: { language: string; title: string }) => !/commentary/i.test(a.title ?? "") && (/^(eng?)$/i.test((a.language ?? "").trim()) || /english|dub|\beng\b/i.test(a.title ?? ""))
+    const dual = audio.length > 1 && audio.some(english) && audio.some(a => !english(a))
+    if (!dual || !language.loaded) return null
+    const mode = language.mode ?? "sub"
+    const names = (want: boolean) => audio.filter(a => english(a) === want).map(a => a.title || a.language.toUpperCase()).filter(Boolean)[0]
+    return (
+        <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-subtle">Audio</span>
+            <div className="flex rounded-xl border border-line bg-surface-1 p-1">
+                {(["sub", "dub"] as const).map(m => (
+                    <Tooltip key={m} content={m === "dub" ? `English audio${names(true) ? ` (${names(true)})` : ""}, signs & songs subtitles` : `Original audio${names(false) ? ` (${names(false)})` : ""} with full subtitles`}>
+                        <button
+                            onClick={() => {
+                                language.set(m)
+                                toast.success(m === "dub" ? "Dub: English audio from now on" : "Sub: original audio with subtitles from now on")
+                            }}
+                            className={cn("h-7 rounded-lg px-3.5 text-xs font-semibold uppercase transition", mode === m ? "bg-brand text-white" : "text-muted hover:text-fg")}
+                        >
+                            {m}
+                        </button>
+                    </Tooltip>
+                ))}
+            </div>
         </div>
     )
 }

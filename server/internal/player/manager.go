@@ -393,9 +393,37 @@ func (m *Manager) saveTrackChoice(s *Session, w *trackWatch, saveTracks *time.Ti
 // is loaded (track ids differ between files, so we match by language/title).
 func (m *Manager) applyTrackPrefs(s *Session, mpv *Mpv, w *trackWatch) {
 	tracks := mpv.Tracks()
-	var prefs *TrackPrefs
-	if m.settings.Get().Playback.RememberTracks && s.MediaID > 0 {
-		prefs = m.Tracks.Get(s.MediaID)
+	cfg := m.settings.Get()
+	var prefs, saved *TrackPrefs
+	if s.MediaID > 0 {
+		saved = m.Tracks.Get(s.MediaID)
+	}
+	if cfg.Playback.RememberTracks {
+		prefs = saved
+	}
+	// The sub/dub choice for this anime (or a "dub" default) picks the audio
+	// of dual-audio files, unless a track was picked by hand.
+	mode := ""
+	if saved != nil {
+		mode = saved.StreamMode
+	}
+	if mode == "" && cfg.AniCli.DefaultMode == "dub" {
+		mode = "dub"
+	}
+	handAudio := prefs != nil && (prefs.AudioLang != "" || prefs.AudioTitle != "" || prefs.AudioIndex > 0)
+	handSub := prefs != nil && (prefs.SubOff || prefs.SubLang != "" || prefs.SubTitle != "" || prefs.SubIndex > 0)
+	if mode != "" && s.Source == "local" && !handAudio {
+		if pick := PickByMode(tracks, mode); pick.HasAudio {
+			_ = mpv.Set("aid", pick.Audio)
+			if !handSub {
+				if pick.HasSub {
+					_ = mpv.Set("sid", pick.Sub)
+				} else if pick.SubOff {
+					_ = mpv.Set("sid", "no")
+				}
+			}
+			mpv.ShowText(map[string]string{"dub": "Dub: English audio", "sub": "Sub: original audio"}[mode], 2000)
+		}
 	}
 	if prefs != nil {
 		if prefs.AudioLang != "" || prefs.AudioTitle != "" || prefs.AudioIndex > 0 {
@@ -417,7 +445,7 @@ func (m *Manager) applyTrackPrefs(s *Session, mpv *Mpv, w *trackWatch) {
 	// The track changes caused by loading/applying are ignored for a moment
 	// so only user choices are remembered.
 	w.loaded(time.Now(), tracks)
-	if prefs != nil {
+	if handAudio || handSub {
 		mpv.ShowText("Restored your audio & subtitle choice", 2000)
 	}
 }

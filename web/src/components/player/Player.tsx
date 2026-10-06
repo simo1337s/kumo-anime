@@ -123,13 +123,28 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                     let ai = res.probe.audio?.findIndex(a => a.default) ?? 0
                     if (ai < 0) ai = 0
                     const p = res.tracks
-                    if (settings?.playback.rememberTracks && p && (p.audioLang || p.audioTitle || p.audioIndex)) {
+                    // Sub/dub chosen for this anime (or a "dub" default) picks the
+                    // audio of dual-audio files, unless a track was picked by hand.
+                    const mode = p?.streamMode || (settings?.aniCli.defaultMode === "dub" ? "dub" : "")
+                    const handAudio = !!(settings?.playback.rememberTracks && p && (p.audioLang || p.audioTitle || p.audioIndex))
+                    const handSub = !!(settings?.playback.rememberTracks && p && (p.subOff || p.subLang || p.subTitle || p.subIndex))
+                    let modeAudio = false
+                    if (handAudio && p) {
                         const m =
                             audio.find(a => normLang(a.lang) === normLang(p.audioLang) && a.title === p.audioTitle) ??
                             audio.find(a => p.audioTitle && a.title === p.audioTitle) ??
                             audio.find(a => p.audioLang && normLang(a.lang) === normLang(p.audioLang)) ??
                             (p.audioIndex ? audio[p.audioIndex - 1] : undefined)
                         if (m) ai = m.index
+                    } else if (mode && audio.length > 1 && (mode === "dub" ? audio.some(a => isEnglishTrack(a.lang, a.title)) : true)) {
+                        const m =
+                            mode === "dub"
+                                ? audio.find(a => isEnglishTrack(a.lang, a.title))
+                                : (audio.find(a => isJapaneseTrack(a.lang, a.title)) ?? audio.find(a => !isEnglishTrack(a.lang, a.title)))
+                        if (m) {
+                            ai = m.index
+                            modeAudio = true
+                        }
                     } else if (settings?.playback.preferredAudioLang) {
                         const m = audio.find(a => langIn(a.lang, settings.playback.preferredAudioLang))
                         if (m) ai = m.index
@@ -161,7 +176,16 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                         })),
                     ]
                     setSubs(subOpts)
-                    setSubKey(pickSub(subOpts, p, settings?.playback.preferredSubLang ?? "", (res.probe.subtitles ?? []).find(s => s.default)?.typeIndex))
+                    if (modeAudio && !handSub && mode === "dub") {
+                        // With a dub only signs & songs (on-screen text), if there are any.
+                        const signs = subOpts.find(o => !o.bitmap && /sign|song|forced/i.test(o.title) && (!o.lang || langIn(o.lang, "eng,en")))
+                        setSubKey(signs ? signs.key : "off")
+                    } else if (modeAudio && !handSub && mode === "sub") {
+                        const full = subOpts.find(o => !o.bitmap && (langIn(o.lang, "eng,en") || /english/i.test(o.title)) && !/sign|song|forced/i.test(o.title))
+                        setSubKey(full ? full.key : pickSub(subOpts, null, settings?.playback.preferredSubLang ?? "", (res.probe.subtitles ?? []).find(s => s.default)?.typeIndex))
+                    } else {
+                        setSubKey(pickSub(subOpts, p, settings?.playback.preferredSubLang ?? "", (res.probe.subtitles ?? []).find(s => s.default)?.typeIndex))
+                    }
                 } else {
                     const res = await api.get<{ sources: StreamSource[]; resumeAt: number; tracks: TrackPrefs | null; title: string }>(
                         `/api/onlinestream/sources${qs({ provider: req.provider, mediaId: req.mediaId, episode: req.episode, dub: req.dub, server: req.server })}`,
@@ -828,6 +852,21 @@ function qualityRank(q: string) {
     if (m) return Number(m[1])
     if (/auto|default|best/i.test(q ?? "")) return 5000
     return 0
+}
+
+// An English (dub) or Japanese (original) track, by language tag or title —
+// dual-audio releases often only name their tracks ("English 5.1").
+function isEnglishTrack(lang?: string, title?: string) {
+    const l = (lang ?? "").trim().toLowerCase()
+    const t = (title ?? "").toLowerCase()
+    if (t.includes("commentary")) return false
+    return l === "eng" || l === "en" || t.includes("english") || t.includes("dub") || /\beng\b/.test(t)
+}
+
+function isJapaneseTrack(lang?: string, title?: string) {
+    const l = (lang ?? "").trim().toLowerCase()
+    const t = (title ?? "").toLowerCase()
+    return l === "jpn" || l === "ja" || l === "jp" || t.includes("japanese") || /\b(jpn|jap)\b/.test(t)
 }
 
 function pickSub(opts: SubOption[], prefs: TrackPrefs | null, preferred: string, defaultIndex?: number, fallbackKey?: string): string {
