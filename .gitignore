@@ -1,0 +1,15 @@
+# build output
+/dist/
+/build/
+/server/kumo
+/server/internal/webui/dist/*
+!/server/internal/webui/dist/.keep
+/web/node_modules/
+/web/dist/
+/desktop/node_modules/
+/desktop/out/
+/packaging/arch/src/
+/packaging/arch/pkg/
+/packaging/arch/*.pkg.tar.*
+*.log
+.DS_Store
