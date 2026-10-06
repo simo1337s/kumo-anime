@@ -104,6 +104,21 @@ func (l *Local) Probe(ctx context.Context, path string) (*Probe, error) {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, cfg.Transcode.FfprobePath, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path).Output()
 	if err != nil {
+		var exit *exec.ExitError
+		switch {
+		case ctx.Err() != nil:
+			return nil, errors.New("ffprobe took too long to read the file")
+		case errors.As(err, &exit):
+			// ffprobe is there but the file is unreadable (broken or unfinished).
+			msg := strings.TrimSpace(string(exit.Stderr))
+			if i := strings.LastIndexByte(msg, '\n'); i >= 0 {
+				msg = msg[i+1:]
+			}
+			if msg == "" {
+				msg = err.Error()
+			}
+			return nil, fmt.Errorf("ffprobe couldn't read the file: %s", msg)
+		}
 		return nil, fmt.Errorf("ffprobe failed (install ffmpeg: sudo pacman -S ffmpeg): %w", err)
 	}
 	var raw struct {

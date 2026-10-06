@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,5 +122,32 @@ func TestDecideOutOfRangeAudioTrack(t *testing.T) {
 		if method, _ := decide(p, "auto", idx); method == "" || method == "direct" {
 			t.Errorf("decide(audio %d) = %q, want remux or transcode", idx, method)
 		}
+	}
+}
+
+// A missing ffprobe and a file ffprobe can't read are different problems.
+func TestProbeErrors(t *testing.T) {
+	l, cached := newTestLocal(t, "")
+	video := filepath.Join(filepath.Dir(cached), "Show - 02.mkv")
+	if err := os.WriteFile(video, []byte("half a video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.files.Save(&library.LocalFile{Path: video, Dir: filepath.Dir(video), Name: filepath.Base(video), Kind: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Probe(context.Background(), video); err == nil || !strings.Contains(err.Error(), "install ffmpeg") {
+		t.Errorf("missing ffprobe: %v", err)
+	}
+	cfg := l.settings.Get()
+	cfg.Transcode.FfprobePath = writeScript(t, `echo "$0: some warning" >&2
+echo "Show - 02.mkv: Invalid data found when processing input" >&2
+exit 1
+`)
+	if _, err := l.settings.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	_, err := l.Probe(context.Background(), video)
+	if err == nil || err.Error() != "ffprobe couldn't read the file: Show - 02.mkv: Invalid data found when processing input" {
+		t.Errorf("unreadable file: %v", err)
 	}
 }
