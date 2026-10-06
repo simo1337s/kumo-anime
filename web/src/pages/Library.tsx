@@ -3,6 +3,7 @@ import { EyeOff, FileVideo, FolderSync, Link2, Link2Off, Lock, RefreshCw, Search
 import { useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
+import { LibraryFolders } from "@/components/library/LibraryFolders"
 import { MediaPicker } from "@/components/MediaPicker"
 import { Badge, Button, EmptyState, IconButton, Input, Select, Tabs } from "@/components/ui"
 import { api } from "@/lib/api"
@@ -11,11 +12,11 @@ import { scanStore, useStore } from "@/lib/store"
 import type { LocalFile } from "@/lib/types"
 import { cn, formatBytes, title } from "@/lib/utils"
 
-type Tab = "unmatched" | "files" | "ignored"
+type Tab = "folders" | "unmatched" | "files" | "ignored"
 
 export default function LibraryPage() {
     const [params, setParams] = useSearchParams()
-    const tab = (params.get("tab") as Tab) || "unmatched"
+    const tab = (params.get("tab") as Tab) || "folders"
     const { data: coll } = useCollection()
     const scan = useScan()
     const scanning = useStore(scanStore, s => s.running)
@@ -40,11 +41,13 @@ export default function LibraryPage() {
                 value={tab}
                 onChange={t => setParams({ tab: t }, { replace: true })}
                 tabs={[
+                    { value: "folders", label: "Folders & matches" },
                     { value: "unmatched", label: "Unmatched", count: coll?.unmatchedCount ?? 0 },
                     { value: "files", label: "All files" },
                     { value: "ignored", label: "Ignored", count: coll?.ignoredCount ?? 0 },
                 ]}
             />
+            {tab === "folders" && <LibraryFolders />}
             {tab === "unmatched" && <Unmatched />}
             {tab === "files" && <AllFiles />}
             {tab === "ignored" && <Ignored />}

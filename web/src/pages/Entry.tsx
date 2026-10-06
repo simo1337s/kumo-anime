@@ -4,6 +4,7 @@ import {
     CheckCheck,
     ExternalLink,
     Film,
+    FolderInput,
     FolderOpen,
     HardDrive,
     Info,
@@ -19,6 +20,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import { EpisodeCard, WatchedToggle } from "@/components/EpisodeCard"
+import { AddFromLibraryDialog, EntryFilesMenu } from "@/components/library/EntryFileTools"
 import { ListStatusButton, ProgressEditor, ScoreEditor } from "@/components/entry/ListEditor"
 import { StreamPanel } from "@/components/entry/StreamPanel"
 import { TorrentPanel } from "@/components/entry/TorrentPanel"
@@ -223,6 +225,7 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
     const { data: status } = useStatus()
     const marker = useEpisodeMarker(entry.media, entry.listEntry)
     const [showAll, setShowAll] = useState(false)
+    const [adding, setAdding] = useState(false)
     const media = entry.media
 
     const withFiles = entry.episodes.filter(e => e.hasFile)
@@ -235,7 +238,7 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
                 icon={<HardDrive className="size-6" />}
                 title="No local files yet"
                 action={
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap justify-center gap-2">
                         {status?.settings.onlineStream.enabled !== false && (
                             <Button variant="primary" icon={<Tv className="size-4" />} onClick={onStream}>
                                 Watch online
@@ -244,10 +247,14 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
                         <Button icon={<Magnet className="size-4" />} onClick={onTorrents}>
                             Find torrents
                         </Button>
+                        <Button icon={<FolderInput className="size-4" />} onClick={() => setAdding(true)}>
+                            Already have it? Add from library
+                        </Button>
+                        <AddFromLibraryDialog open={adding} onOpenChange={setAdding} media={media} />
                     </div>
                 }
             >
-                Download episodes with ani-cli or a torrent and they will show up here automatically.
+                Download episodes with ani-cli or a torrent and they will show up here automatically. If they're already in your library but weren't recognized, add them here.
             </EmptyState>
         )
     }
@@ -261,11 +268,14 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
                     </p>
                     <LocalLanguageSwitch mediaId={media.id} samplePath={withFiles[0]?.file?.path} />
                 </div>
-                {entry.episodes.length > withFiles.length && (
-                    <button onClick={() => setShowAll(s => !s)} className="text-sm font-medium text-brand-strong hover:underline">
-                        {showAll ? "Show downloaded only" : "Show all episodes"}
-                    </button>
-                )}
+                <div className="flex items-center gap-3">
+                    {entry.episodes.length > withFiles.length && (
+                        <button onClick={() => setShowAll(s => !s)} className="text-sm font-medium text-brand-strong hover:underline">
+                            {showAll ? "Show downloaded only" : "Show all episodes"}
+                        </button>
+                    )}
+                    <EntryFilesMenu entry={entry} />
+                </div>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-x-6 gap-y-8">
                 {list.map(ep => (

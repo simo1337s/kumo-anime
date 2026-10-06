@@ -1,6 +1,9 @@
 package api
 
-import "testing"
+import (
+	"sort"
+	"testing"
+)
 
 func TestMarkedProgress(t *testing.T) {
 	for _, c := range []struct {
@@ -30,6 +33,17 @@ func TestMarkedProgress(t *testing.T) {
 		p, st, r := markedProgress(c.status, c.progress, c.repeat, c.tot, c.ep, c.watched)
 		if p != c.wantProg || st != c.wantStatus || r != c.wantRepeat {
 			t.Errorf("%s: got progress=%d status=%s repeat=%d, want %d %s %d", c.name, p, st, r, c.wantProg, c.wantStatus, c.wantRepeat)
+		}
+	}
+}
+
+func TestNaturalLess(t *testing.T) {
+	names := []string{"Show - 10.mkv", "Show - 2.mkv", "Show - 1.mkv", "Show - 1v2.mkv", "OVA.mkv"}
+	sort.SliceStable(names, func(i, j int) bool { return naturalLess(names[i], names[j]) })
+	want := []string{"OVA.mkv", "Show - 1.mkv", "Show - 1v2.mkv", "Show - 2.mkv", "Show - 10.mkv"}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("got %q", names)
 		}
 	}
 }

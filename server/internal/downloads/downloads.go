@@ -431,11 +431,10 @@ func (m *Manager) process(r *run) error {
 		return ctx.Err()
 	}
 
-	baseDir := config.ExpandHome(util.FirstNonEmpty(cfg.AniCli.DownloadDir, cfg.Library.Dir))
-	if baseDir == "" {
-		return errors.New("no download directory configured")
+	dir, err := m.folderFor(cfg, it.MediaID, it.AnimeTitle)
+	if err != nil {
+		return err
 	}
-	dir := filepath.Join(baseDir, util.SanitizeFilename(it.AnimeTitle))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -474,7 +473,7 @@ func (m *Manager) process(r *run) error {
 	}
 
 	tmp := filepath.Join(work, name+".mp4")
-	err := m.fetch(r, cfg, res, tmp)
+	err = m.fetch(r, cfg, res, tmp)
 	if ctx.Err() != nil {
 		return errors.New("canceled")
 	}
@@ -521,6 +520,45 @@ func (m *Manager) download(r *run, cfg config.Settings, res *Resolved, out strin
 		return m.ytdlp(r, res, out)
 	}
 	return m.ffmpeg(r, res, out, cfg.Transcode.FfmpegPath, cfg.Transcode.FfprobePath)
+}
+
+// folderFor is where episodes of an anime are downloaded: the folder that
+// already holds its episodes (when it's inside the download/library
+// folder), otherwise a new folder named after the anime — never loose in
+// the library folder itself.
+func (m *Manager) folderFor(cfg config.Settings, mediaID int, animeTitle string) (string, error) {
+	baseDir := config.ExpandHome(util.FirstNonEmpty(cfg.AniCli.DownloadDir, cfg.Library.Dir))
+	if baseDir == "" {
+		return "", errors.New("no download directory configured")
+	}
+	baseDir = filepath.Clean(baseDir)
+	if mediaID > 0 && m.files != nil {
+		if existing, _ := m.files.ByMedia(mediaID); len(existing) > 0 {
+			counts := map[string]int{}
+			best := ""
+			for _, f := range existing {
+				d := filepath.Clean(f.Dir)
+				// Only a folder of its own below the base folder.
+				if d == baseDir || !util.IsSubPath(baseDir, d) || strings.HasPrefix(filepath.Base(d), ".") {
+					continue
+				}
+				counts[d]++
+				if counts[d] > counts[best] {
+					best = d
+				}
+			}
+			if best != "" {
+				if st, err := os.Stat(best); err == nil && st.IsDir() {
+					return best, nil
+				}
+			}
+		}
+	}
+	name := strings.TrimSpace(animeTitle)
+	if name == "" {
+		name = fmt.Sprintf("AniList %d", mediaID)
+	}
+	return filepath.Join(baseDir, util.SanitizeFilename(name)), nil
 }
 
 var reYtdlp = regexp.MustCompile(`KUMO\|\s*([\d.]+)%\|([^|]*)\|(.*)$`)

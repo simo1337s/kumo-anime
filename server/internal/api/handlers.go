@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -95,6 +96,9 @@ type pathsBody struct {
 	Ignored bool     `json:"ignored"`
 	// Optional: shift episode numbers (e.g. -12 when a folder uses absolute numbering).
 	EpisodeOffset int `json:"episodeOffset"`
+	// Optional: number the episodes 1, 2, 3… in file-name order instead
+	// (for files whose names carry no usable episode number).
+	Renumber bool `json:"renumber"`
 }
 
 func (s *Server) loadFiles(paths []string) ([]*library.LocalFile, error) {
@@ -125,9 +129,25 @@ func (s *Server) match(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	order := map[string]int{}
+	if body.Renumber {
+		var main []*library.LocalFile
+		for _, f := range files {
+			if f.Kind != "nc" && f.Kind != "special" {
+				main = append(main, f)
+			}
+		}
+		sort.SliceStable(main, func(i, j int) bool { return naturalLess(main[i].Name, main[j].Name) })
+		for i, f := range main {
+			order[f.Path] = i + 1
+		}
+	}
 	for _, f := range files {
 		f.MediaID, f.Locked, f.Ignored, f.MatchScore = body.MediaID, true, false, 1
 		ep := f.Parsed.Episode + body.EpisodeOffset
+		if n, ok := order[f.Path]; ok {
+			ep = n + body.EpisodeOffset
+		}
 		switch {
 		case f.Kind == "nc":
 			f.Episode = 0
@@ -144,6 +164,37 @@ func (s *Server) match(r *http.Request) (any, error) {
 	}
 	s.app.Hub.Publish("library-updated", nil)
 	return nil, nil
+}
+
+// naturalLess compares file names with numbers in numeric order
+// ("Ep 2" < "Ep 10").
+func naturalLess(a, b string) bool {
+	a, b = strings.ToLower(a), strings.ToLower(b)
+	for a != "" && b != "" {
+		da, db := leadingDigits(a), leadingDigits(b)
+		if da != "" && db != "" {
+			na, _ := strconv.Atoi(da)
+			nb, _ := strconv.Atoi(db)
+			if na != nb {
+				return na < nb
+			}
+			a, b = a[len(da):], b[len(db):]
+			continue
+		}
+		if a[0] != b[0] {
+			return a[0] < b[0]
+		}
+		a, b = a[1:], b[1:]
+	}
+	return len(a) < len(b)
+}
+
+func leadingDigits(s string) string {
+	i := 0
+	for i < len(s) && i < 9 && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	return s[:i]
 }
 
 func (s *Server) unmatch(r *http.Request) (any, error) {
