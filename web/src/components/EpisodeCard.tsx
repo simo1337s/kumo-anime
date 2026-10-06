@@ -25,8 +25,19 @@ export function EpisodeCard({ image, number, title, subtitle, runtime, watched, 
         <div
             role="button"
             tabIndex={0}
-            onClick={onClick}
-            onKeyDown={e => (e.key === "Enter" || e.key === " ") && onClick?.()}
+            onClick={e => {
+                // Menus open in portals outside the card, but React still
+                // bubbles their clicks up to here: "Play in mpv" from the
+                // episode menu used to also start the default player.
+                if (!e.currentTarget.contains(e.target as Node)) return
+                onClick?.()
+            }}
+            onKeyDown={e => {
+                // Only keys on the card itself, not on its buttons.
+                if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return
+                e.preventDefault()
+                onClick?.()
+            }}
             className={cn("group/ep focus-ring flex cursor-pointer flex-col gap-3 rounded-2xl outline-none", !aired && "cursor-default opacity-50", className)}
         >
             <div className="relative aspect-video overflow-hidden rounded-2xl bg-surface-2 ring-1 ring-line transition-all duration-300 group-hover/ep:ring-line-strong group-hover/ep:shadow-[0_18px_40px_-14px_rgb(0_0_0/0.9)]">
@@ -60,7 +71,11 @@ export function EpisodeCard({ image, number, title, subtitle, runtime, watched, 
                         </span>
                     )}
                 </div>
-                {actions && <div className="absolute top-2 right-2 opacity-0 transition-opacity group-hover/ep:opacity-100">{actions}</div>}
+                {actions && (
+                    <div className="absolute top-2 right-2 opacity-0 transition-opacity group-hover/ep:opacity-100 focus-within:opacity-100" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+                        {actions}
+                    </div>
+                )}
                 {resumeAt !== undefined && resumeAt > 0 && (
                     <span className="absolute right-2.5 bottom-3 flex items-center gap-1 rounded-md bg-black/65 px-1.5 py-0.5 text-[11px] font-semibold text-white backdrop-blur">
                         <Clock className="size-3" /> {formatDuration(resumeAt)}

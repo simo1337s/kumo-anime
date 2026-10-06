@@ -72,29 +72,28 @@ export function useUpdateEntry(mediaId: number) {
 }
 
 // Marks single episodes as watched or unwatched. AniList only stores how far
-// you got, so "episode 7 watched" means progress 7 (1-6 count as watched too)
-// and "unwatched" means progress 6. Finishing the last episode completes the
-// show (a rewatch counts +1); marking an earlier one reopens it.
-export function useEpisodeMarker(media: Media | undefined, listEntry: Pick<ListEntry, "status" | "progress" | "repeat"> | null | undefined) {
-    const update = useUpdateEntry(media?.id ?? 0)
+// you got, so marking episode 7 watched raises progress to 7 (1-6 count as
+// watched too) and unwatched lowers it to 6. The server works it out from the
+// current list entry: watched never lowers progress, unwatched never raises
+// it; the last episode completes the show and an earlier one reopens it.
+export function useEpisodeMarker(media: Media | undefined, _listEntry?: Pick<ListEntry, "status" | "progress" | "repeat"> | null) {
+    const qc = useQueryClient()
+    const m = useMutation({
+        mutationFn: (v: { episode: number; watched: boolean }) => api.post<{ changed: boolean; progress: number; status: string }>(`/api/anime/${media?.id ?? 0}/episode`, v),
+        onSuccess: (res, v) => {
+            qc.invalidateQueries({ queryKey: ["entry", media?.id] })
+            qc.invalidateQueries({ queryKey: ["collection"] })
+            qc.invalidateQueries({ queryKey: ["list"] })
+            const what = media?.format === "MOVIE" ? "Movie" : `Episode ${v.episode}`
+            if (!res.changed) toast.info(`${what} is already ${v.watched ? "watched" : "unwatched"}`)
+            else toast.success(`${what} marked as ${v.watched ? "watched" : "unwatched"}${res.status === "COMPLETED" ? " — completed!" : ""}`)
+        },
+        onError: (e: Error) => toast.error(e.message),
+    })
     const mark = (episode: number, watched: boolean) => {
-        if (!media) return
-        const total = media.episodes ?? 0
-        const progress = Math.max(0, watched ? episode : episode - 1)
-        let status = listEntry?.status
-        let repeat: number | undefined
-        if (total > 0 && progress >= total) {
-            if (status === "REPEATING") repeat = (listEntry?.repeat ?? 0) + 1
-            status = "COMPLETED"
-        } else if (status !== "REPEATING") {
-            status = progress > 0 || status === "COMPLETED" ? "CURRENT" : (status ?? "PLANNING")
-        }
-        update.mutate(
-            { status, progress, repeat },
-            { onSuccess: () => toast.success(`${media.format === "MOVIE" ? "Movie" : `Episode ${episode}`} marked as ${watched ? "watched" : "unwatched"}`) },
-        )
+        if (media) m.mutate({ episode, watched })
     }
-    return { mark, pending: update.isPending }
+    return { mark, pending: m.isPending }
 }
 
 export function useDeleteEntry(mediaId: number) {

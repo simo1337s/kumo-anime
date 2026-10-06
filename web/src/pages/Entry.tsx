@@ -79,7 +79,8 @@ export default function EntryPage() {
             <div className="relative z-10 flex flex-col gap-8 px-6 md:px-10 xl:px-14">
                 <PluginSlot slot="before-anime-entry-episode-list" />
                 <Tabs value={tab} onChange={setTab} tabs={tabs} className="self-start" />
-                <div key={tab} className="fade-in">
+                {/* Keyed by anime too: panels keep per-anime state (dub, search results). */}
+                <div key={`${entry.media.id}-${tab}`} className="fade-in">
                     {tab === "episodes" && <EpisodesTab entry={entry} onStream={() => setTab("stream")} onTorrents={() => setTab("torrents")} />}
                     {tab === "stream" && <StreamPanel entry={entry} />}
                     {tab === "torrents" && <TorrentPanel entry={entry} />}

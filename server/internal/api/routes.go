@@ -42,6 +42,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/anime/collection", h(s.animeCollection))
 	m.HandleFunc("GET /api/anime/{id}", h(s.animeEntry))
 	m.HandleFunc("POST /api/anime/{id}/entry", h(s.updateEntry))
+	m.HandleFunc("POST /api/anime/{id}/episode", h(s.markEpisode))
 	m.HandleFunc("DELETE /api/anime/{id}/entry", h(s.deleteEntry))
 	m.HandleFunc("POST /api/anilist/search", h(s.search))
 	m.HandleFunc("GET /api/anilist/discover", h(s.discover))
