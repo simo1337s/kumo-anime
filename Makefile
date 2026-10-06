@@ -2,6 +2,9 @@
 #   make            build web UI + server binary (./dist/kumo)
 #   make desktop    also install the Electron shell's deps
 #   make test       run the Go tests
+#   make windows    cross-compile the Windows server (./dist/windows/kumo.exe);
+#                   the Windows installer itself is built on Windows, see
+#                   packaging/windows/README.md
 
 PREFIX ?= /usr
 GO ?= go
@@ -11,7 +14,7 @@ NPM ?= npm
 GO_BUILDFLAGS ?= -trimpath
 GO_LDFLAGS ?= -s -w
 
-.PHONY: all web embed server desktop test clean run
+.PHONY: all web embed server desktop test clean run windows
 
 all: server
 
@@ -27,6 +30,10 @@ embed: web
 server: embed
 	mkdir -p dist
 	cd server && CGO_ENABLED=0 $(GO) build $(GO_BUILDFLAGS) -ldflags "$(GO_LDFLAGS)" -o ../dist/kumo ./cmd/kumo
+
+windows: embed
+	mkdir -p dist/windows
+	cd server && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GO_BUILDFLAGS) -ldflags "$(GO_LDFLAGS)" -o ../dist/windows/kumo.exe ./cmd/kumo
 
 desktop:
 	cd desktop && $(NPM) ci --no-audit --no-fund

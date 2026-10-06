@@ -1,0 +1,55 @@
+# electron-builder config for the WINDOWS release only: the installer and the
+# portable zip, built by packaging/windows/build.ps1 and the "Windows release"
+# workflow (.github/workflows/windows.yml). The Arch Linux package doesn't use
+# it: packaging/arch/PKGBUILD installs main.js, preload.js and package.json for
+# the system electron.
+#
+# Build the Windows server first (dist/windows/kumo.exe); it ships as
+# resources\kumo.exe, where main.js looks for it.
+
+appId: app.kumo.desktop # also the AppUserModelID set in main.js
+productName: Kumo
+# Publisher shown in the exe's details and in Settings > Apps (otherwise the
+# exe keeps Electron's "GitHub, Inc.").
+extraMetadata:
+  author:
+    name: Kumo
+publish: null # the workflow uploads the release; there is no auto-update
+npmRebuild: false # no native modules
+
+directories:
+  output: ../dist/windows/release
+
+files:
+  - main.js
+  - preload.js
+  - icon.png
+  - package.json
+
+extraResources:
+  - from: ../dist/windows/kumo.exe
+    to: kumo.exe
+beforePack: ./check-windows-server.js # fails the build when kumo.exe is missing
+
+win:
+  icon: icon.png
+  target:
+    - target: nsis
+      arch: x64
+    - target: zip
+      arch: x64
+  # The portable zip's name (the installer's is set below).
+  artifactName: Kumo-${version}-windows-${arch}-portable.${ext}
+
+nsis:
+  artifactName: Kumo-Setup-${version}-windows-${arch}.${ext}
+  oneClick: false
+  perMachine: false
+  # Always installs for the current user (no admin rights, no "for all
+  # users?" page).
+  include: ../packaging/windows/installer.nsh
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Kumo
+  differentialPackage: false # no auto-update, so no .blockmap
