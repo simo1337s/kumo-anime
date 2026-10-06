@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/5rahim/habari"
 )
@@ -57,13 +58,49 @@ var (
 	reSpecialTag = regexp.MustCompile(`(?i)\b(?:OVA|OAD|ONA|special|SP\d+|S00E\d+)\b`)
 )
 
+// titleWords are words habari reads as metadata (NHK is a broadcaster
+// "source") that are also part of real titles: "Welcome to the NHK",
+// "NHK ni Youkoso!".
+var titleWords = []string{"nhk"}
+
+// restoreTitleWords puts such words back when habari cut them from the
+// start or end of the title.
+func restoreTitleWords(raw, title string) string {
+	if title == "" {
+		return title
+	}
+	norm := strings.ToLower(strings.NewReplacer("_", " ", ".", " ").Replace(raw))
+	lt := strings.ToLower(title)
+	idx := strings.Index(norm, lt)
+	if idx < 0 {
+		return title
+	}
+	isWordEnd := func(s string, i int) bool {
+		return i >= len(s) || !unicode.IsLetter(rune(s[i])) && !unicode.IsDigit(rune(s[i]))
+	}
+	for _, w := range titleWords {
+		if strings.Contains(lt, w) {
+			continue
+		}
+		after := strings.TrimLeft(norm[idx+len(lt):], " ")
+		before := strings.TrimRight(norm[:idx], " ")
+		switch {
+		case strings.HasPrefix(after, w) && isWordEnd(after, len(w)):
+			title += " " + strings.ToUpper(w)
+		case strings.HasSuffix(before, w) && (len(before) == len(w) || isWordEnd(before, len(before)-len(w)-1)):
+			title = strings.ToUpper(w) + " " + title
+		}
+	}
+	return title
+}
+
 // Parse extracts metadata from a file path. roots are the library roots so
 // folder names above the library aren't used as titles.
 func Parse(path string, roots []string) Parsed {
 	name := filepath.Base(path)
 	md := habari.Parse(name)
 	p := Parsed{
-		Title:        cleanTitle(firstNonEmpty(md.Title, md.FormattedTitle)),
+		Title:        cleanTitle(restoreTitleWords(name, firstNonEmpty(md.Title, md.FormattedTitle))),
 		EpisodeTitle: md.EpisodeTitle,
 		ReleaseGroup: md.ReleaseGroup,
 		Resolution:   md.VideoResolution,
@@ -123,7 +160,7 @@ func Parse(path string, roots []string) Parsed {
 			}
 			if p.FolderTitle == "" && !reGenericDir.MatchString(strings.TrimSpace(d)) {
 				fmd := habari.Parse(d)
-				ft := cleanTitle(firstNonEmpty(fmd.Title, fmd.FormattedTitle))
+				ft := cleanTitle(restoreTitleWords(d, firstNonEmpty(fmd.Title, fmd.FormattedTitle)))
 				if ft != "" {
 					p.FolderTitle = ft
 					if p.Season == 0 && len(fmd.SeasonNumber) > 0 {

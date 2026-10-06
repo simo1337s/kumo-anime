@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // walkResult is what a walk of one library root found.
@@ -22,8 +23,9 @@ type walkResult struct {
 // (~/Videos/Anime -> /mnt/hdd/Anime) and symlinked show folders — with
 // loop protection. Paths are reported under root as configured, not under
 // the symlink targets, so they stay stable.
-func walkLibrary(root string, ignorePatterns []string) (*walkResult, error) {
+func walkLibrary(root string, ignorePatterns []string, progress func(found int)) (*walkResult, error) {
 	res := &walkResult{files: map[string]fs.FileInfo{}}
+	lastReport := time.Now()
 	real, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return nil, err
@@ -83,6 +85,10 @@ func walkLibrary(root string, ignorePatterns []string) (*walkResult, error) {
 				continue
 			}
 			res.files[p] = info
+			if progress != nil && time.Since(lastReport) > 250*time.Millisecond {
+				lastReport = time.Now()
+				progress(len(res.files))
+			}
 		}
 		return nil
 	}

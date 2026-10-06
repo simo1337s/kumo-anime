@@ -247,6 +247,10 @@ func (a *App) wire() {
 		if old.Library.AutoRefresh != cur.Library.AutoRefresh || fmt.Sprint(old.LibraryDirs()) != fmt.Sprint(cur.LibraryDirs()) {
 			a.Scanner.StartWatcher()
 		}
+		// A new library folder: index it right away.
+		if fmt.Sprint(old.LibraryDirs()) != fmt.Sprint(cur.LibraryDirs()) && a.Scanner.HasLibrary() {
+			a.Scanner.ScanSoon()
+		}
 		a.Hub.Publish(events.SettingsUpdated, nil)
 	})
 }
@@ -278,7 +282,7 @@ func (a *App) Start() {
 		if view, err := a.Library.Collection(ctx, false); err == nil {
 			a.PrefetchCollectionArt(view)
 		}
-		if a.Settings.Get().Library.RefreshOnStartup {
+		if a.Settings.Get().Library.RefreshOnStartup && a.Scanner.HasLibrary() {
 			if _, err := a.Scanner.Scan(a.ctx, library.ScanOptions{}); err != nil && !errors.Is(err, library.ErrScanRunning) {
 				log.Printf("startup scan: %v", err)
 			}

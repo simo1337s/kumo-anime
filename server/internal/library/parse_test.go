@@ -19,6 +19,9 @@ func TestParse(t *testing.T) {
 		{"/lib/Show/NC/[Group] Show - NCOP 01 [1080p].mkv", "Show", 0, 1, "nc"},
 		{"/lib/One Piece/One Piece - 1050 [720p].avi", "One Piece", 0, 1050, "main"},
 		{"/lib/Bocchi/Extras/Bocchi the Rock! - OVA.mkv", "Bocchi the Rock!", 0, -1, "special"},
+		{"/lib/[WSE] Welcome to the NHK [DVD x264 576p FLAC][Dual Audio]/[WSE] Welcome to the NHK - 01 [DVD x264 576p FLAC][Dual Audio].mkv", "Welcome to the NHK", 0, 1, "main"},
+		{"/lib/NHK ni Youkoso!/NHK ni Youkoso! - 02.mkv", "NHK ni Youkoso!", 0, 2, "main"},
+		{"/lib/Welcome.to.the.NHK.S01.1080p/Welcome.to.the.NHK.S01E03.1080p.BluRay.mkv", "Welcome to the NHK", 1, 3, "main"},
 	}
 	for _, c := range cases {
 		p := Parse(c.path, roots)

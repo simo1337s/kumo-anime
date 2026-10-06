@@ -70,8 +70,7 @@ func (s *Server) scan(r *http.Request) (any, error) {
 	go func() {
 		res, err := s.app.Scanner.Scan(s.app.Context(), opts)
 		if err != nil {
-			s.app.Hub.Error("Scan failed: " + err.Error())
-			return
+			return // reported to the UI with the scan-done event
 		}
 		msg := fmt.Sprintf("Library scanned — %d files, %d matched", res.Total, res.Matched)
 		if res.Unmatched > 0 {

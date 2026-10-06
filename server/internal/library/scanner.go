@@ -67,12 +67,32 @@ func (s *Scanner) Running() bool { return s.running.Load() }
 
 var ErrScanRunning = errors.New("a library scan is already running")
 
+// ScanDonePayload is sent with events.ScanDone.
+type ScanDonePayload struct {
+	*ScanResult
+	Error string `json:"error,omitempty"`
+}
+
+// HasLibrary reports whether any configured library folder exists.
+func (s *Scanner) HasLibrary() bool {
+	for _, r := range s.settings.Get().LibraryDirs() {
+		if st, err := os.Stat(r); err == nil && st.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
 // Scan indexes the library directories and matches new files.
-func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, error) {
+func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (res *ScanResult, err error) {
 	if !s.mu.TryLock() {
 		return nil, ErrScanRunning
 	}
 	defer func() {
+		// Always tell the UI the scan is over, also when it failed.
+		if err != nil {
+			s.hub.Publish(events.ScanDone, ScanDonePayload{Error: err.Error()})
+		}
 		s.mu.Unlock()
 		// Files changed while we were busy: go again.
 		if s.rescan.Swap(false) {
@@ -93,7 +113,10 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, erro
 		if st, err := os.Stat(root); err != nil || !st.IsDir() {
 			continue // missing (e.g. an unplugged drive): keep its files as they are
 		}
-		w, err := walkLibrary(root, cfg.Library.IgnorePatterns)
+		base := len(found)
+		w, err := walkLibrary(root, cfg.Library.IgnorePatterns, func(n int) {
+			s.hub.Publish(events.ScanProgress, ScanProgress{Stage: "walking", Done: base + n, Message: "Found " + itoa(base+n) + " files…"})
+		})
 		if err != nil {
 			log.Printf("scan: can't read %s: %v", root, err)
 			continue
@@ -113,12 +136,13 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, erro
 	if err != nil {
 		return nil, err
 	}
+	s.hub.Publish(events.ScanProgress, ScanProgress{Stage: "walking", Done: len(found), Message: "Found " + itoa(len(found)) + " files, reading names…"})
 	byPath := map[string]*LocalFile{}
 	for _, f := range existing {
 		byPath[f.Path] = f
 	}
 
-	res := &ScanResult{Total: len(found)}
+	res = &ScanResult{Total: len(found)}
 	var changed []*LocalFile
 	var toMatch []*LocalFile
 	for path, info := range found {
@@ -186,7 +210,7 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (*ScanResult, erro
 		}
 	}
 	res.Seconds = time.Since(start).Seconds()
-	s.hub.Publish(events.ScanDone, res)
+	s.hub.Publish(events.ScanDone, ScanDonePayload{ScanResult: res})
 	s.hub.Publish(events.LibraryUpdated, nil)
 	return res, nil
 }
@@ -251,6 +275,10 @@ func (s *Scanner) removedFiles(byPath map[string]*LocalFile, found map[string]fs
 	return removed
 }
 
+// ScanSoon starts an incremental scan in the background, or queues one if a
+// scan is already running.
+func (s *Scanner) ScanSoon() { go s.autoScan() }
+
 // autoScan runs an incremental scan for the folder watcher.
 func (s *Scanner) autoScan() {
 	if _, err := s.Scan(context.Background(), ScanOptions{}); err != nil {
@@ -294,7 +322,7 @@ func (s *Scanner) StartWatcher() {
 	}
 	for _, root := range cfg.LibraryDirs() {
 		// Same walk as the scanner, so symlinked folders are watched too.
-		if res, err := walkLibrary(root, cfg.Library.IgnorePatterns); err == nil {
+		if res, err := walkLibrary(root, cfg.Library.IgnorePatterns, nil); err == nil {
 			for _, dir := range res.dirs {
 				_ = w.Add(dir)
 			}

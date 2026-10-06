@@ -29,6 +29,7 @@ export function connectEvents(qc: QueryClient) {
                 break
             case "scan-done":
                 scanStore.set({ running: false, stage: "", done: 0, total: 0, message: "" })
+                if (p?.error) toast.error(`Library scan failed: ${p.error}`)
                 qc.invalidateQueries({ queryKey: ["collection"] })
                 qc.invalidateQueries({ queryKey: ["library"] })
                 qc.invalidateQueries({ queryKey: ["entry"] })
@@ -86,6 +87,16 @@ export function connectEvents(qc: QueryClient) {
     const connect = () => {
         if (closed) return
         es = new EventSource("/api/events")
+        // Events sent while disconnected are lost: re-sync the scan state so
+        // a missed "scan-done" can't leave the scan indicator spinning.
+        es.onopen = () => {
+            fetch("/api/status", { credentials: "same-origin" })
+                .then(r => (r.ok ? r.json() : null))
+                .then(st => {
+                    if (st && !st.scanning) scanStore.set({ running: false, stage: "", done: 0, total: 0, message: "" })
+                })
+                .catch(() => {})
+        }
         es.onmessage = msg => {
             try {
                 handle(JSON.parse(msg.data))
