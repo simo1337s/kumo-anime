@@ -13,12 +13,14 @@ import (
 	"time"
 
 	"github.com/simo1337s/animetest/server/internal/anilist"
+	"github.com/simo1337s/animetest/server/internal/config"
 	"github.com/simo1337s/animetest/server/internal/downloads"
 	"github.com/simo1337s/animetest/server/internal/library"
 	"github.com/simo1337s/animetest/server/internal/manga"
 	"github.com/simo1337s/animetest/server/internal/player"
 	"github.com/simo1337s/animetest/server/internal/stream"
 	"github.com/simo1337s/animetest/server/internal/torrent"
+	"github.com/simo1337s/animetest/server/internal/util"
 )
 
 func constEq(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
@@ -164,6 +166,35 @@ func (s *Server) match(r *http.Request) (any, error) {
 	}
 	s.app.Hub.Publish("library-updated", nil)
 	return nil, nil
+}
+
+// torrentFolder is where a torrent for an anime is saved: the folder that
+// already holds its episodes (inside the library), else the usual new
+// per-anime folder.
+func (s *Server) torrentFolder(mediaID int, title string) string {
+	def := s.app.Torrents.SavePathFor(title)
+	cfg := s.app.Settings.Get()
+	lib := filepath.Clean(config.ExpandHome(cfg.Library.Dir))
+	if mediaID <= 0 || cfg.Library.Dir == "" || !cfg.Torrent.CreateSubfolder {
+		return def
+	}
+	files, _ := s.app.Files.ByMedia(mediaID)
+	counts := map[string]int{}
+	best := ""
+	for _, f := range files {
+		d := filepath.Clean(f.Dir)
+		if d == lib || !util.IsSubPath(lib, d) || strings.HasPrefix(filepath.Base(d), ".") {
+			continue
+		}
+		counts[d]++
+		if counts[d] > counts[best] {
+			best = d
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return def
 }
 
 // naturalLess compares file names with numbers in numeric order
@@ -764,7 +795,7 @@ func (s *Server) torrentDownload(r *http.Request) (any, error) {
 	if len(uris) == 0 {
 		return nil, badRequest("nothing to download")
 	}
-	save := s.app.Torrents.SavePathFor(title)
+	save := s.torrentFolder(body.MediaID, title)
 	if err := s.app.Torrents.Add(r.Context(), uris, save); err != nil {
 		return nil, err
 	}
