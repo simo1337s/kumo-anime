@@ -28,7 +28,7 @@ import { sendPluginEvent } from "@/components/plugins/PluginRenderer"
 import { Badge, Button, Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTrigger, EmptyState, Skeleton, Tabs } from "@/components/ui"
 import { api } from "@/lib/api"
 import { usePlay } from "@/lib/play"
-import { useEntry, useEpisodeMarker, useStatus } from "@/lib/queries"
+import { fetchLanguageMode, useEntry, useEpisodeMarker, useStatus } from "@/lib/queries"
 import type { EntryView } from "@/lib/types"
 import { banner, cleanDescription, cn, cover, formatLabel, img, scoreColor, seasonLabel, statusLabel, timeUntil, title, totalEpisodes } from "@/lib/utils"
 
@@ -107,13 +107,12 @@ function EntryHero({ entry, onTab }: { entry: EntryView; onTab: (t: Tab) => void
     const score = media.meanScore ?? media.averageScore
     const bannerImg = entry.images?.fanart ? img(entry.images.fanart) : banner(media)
 
-    const watch = () => {
+    const watch = async () => {
         if (!next) return
         if (next.file) playLocal(next.file.path, media.id, next.number)
         else if (status?.settings.onlineStream.enabled !== false) {
             const provider = localStorage.getItem(`kumo-provider-${media.id}`) || status?.settings.onlineStream.defaultProvider || "ani-cli"
-            const savedDub = localStorage.getItem(`kumo-dub-${media.id}`)
-            const dub = savedDub !== null ? savedDub === "1" : status?.settings.aniCli.defaultMode === "dub"
+            const dub = await fetchLanguageMode(media.id, status?.settings.aniCli.defaultMode === "dub")
             playStream(provider, media.id, next.number, dub)
         } else onTab("torrents")
     }

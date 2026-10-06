@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { api, qs } from "@/lib/api"
 import { usePlay } from "@/lib/play"
-import { useEpisodeMarker, useOnlineProviders, useStatus, useStreamEpisodes } from "@/lib/queries"
+import { useEpisodeMarker, useLanguageMode, useOnlineProviders, useStatus, useStreamEpisodes } from "@/lib/queries"
 import type { EntryView } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { EpisodeCard, WatchedToggle } from "../EpisodeCard"
@@ -16,11 +16,11 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
     const { data: providers } = useOnlineProviders()
     const media = entry.media
     const [provider, setProvider] = useState<string>(() => localStorage.getItem(`kumo-provider-${media.id}`) || settings?.onlineStream.defaultProvider || "ani-cli")
-    const [dub, setDub] = useState<boolean>(() => {
-        const saved = localStorage.getItem(`kumo-dub-${media.id}`)
-        if (saved !== null) return saved === "1"
-        return settings?.aniCli.defaultMode === "dub" || !!settings?.onlineStream.preferDub
-    })
+    // Sub/dub is remembered per anime on the server (also used by "continue
+    // watching", the next-episode button and local files).
+    const language = useLanguageMode(media.id)
+    const dub = language.mode ? language.mode === "dub" : settings?.aniCli.defaultMode === "dub" || !!settings?.onlineStream.preferDub
+    const setDub = (d: boolean) => language.set(d ? "dub" : "sub")
     const [matchOpen, setMatchOpen] = useState(false)
     const [dlOpen, setDlOpen] = useState(false)
     const { playStream, streamPlayer, remote } = usePlay()
@@ -30,14 +30,15 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
     useEffect(() => {
         try {
             localStorage.setItem(`kumo-provider-${media.id}`, provider)
-            localStorage.setItem(`kumo-dub-${media.id}`, dub ? "1" : "0")
         } catch {
             /* ignore */
         }
-    }, [provider, dub, media.id])
+    }, [provider, media.id])
 
     const prov = providers?.find(p => p.id === provider)
-    const { data, isLoading, error, refetch, isFetching } = useStreamEpisodes(provider, media.id, dub)
+    // Wait for the remembered choice, or the first request would list (and
+    // remember) the default mode instead.
+    const { data, isLoading, error, refetch, isFetching } = useStreamEpisodes(provider, media.id, dub, language.loaded)
     const progress = entry.listEntry?.progress ?? 0
 
     const episodes = useMemo(() => {

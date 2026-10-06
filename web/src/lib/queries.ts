@@ -96,6 +96,36 @@ export function useEpisodeMarker(media: Media | undefined, _listEntry?: Pick<Lis
     return { mark, pending: m.isPending }
 }
 
+// The sub/dub choice remembered for an anime (server-side, so every device
+// and every way of starting an episode uses it).
+export type LanguageMode = { mode: "sub" | "dub"; saved: boolean }
+
+export function useLanguageMode(mediaId: number) {
+    const qc = useQueryClient()
+    const query = useQuery({
+        queryKey: ["language", mediaId],
+        queryFn: () => api.get<LanguageMode>(`/api/anime/${mediaId}/language`),
+        enabled: mediaId > 0,
+        staleTime: 60_000,
+    })
+    const set = useMutation({
+        mutationFn: (mode: "sub" | "dub") => api.put<LanguageMode>(`/api/anime/${mediaId}/language`, { mode }),
+        onMutate: mode => qc.setQueryData<LanguageMode>(["language", mediaId], { mode, saved: true }),
+        onSettled: () => qc.invalidateQueries({ queryKey: ["language", mediaId] }),
+        onError: (e: Error) => toast.error(e.message),
+    })
+    return { mode: query.data?.mode, saved: query.data?.saved ?? false, loaded: query.isSuccess || query.isError, set: set.mutate }
+}
+
+// For click handlers outside a component that has the hook.
+export async function fetchLanguageMode(mediaId: number, fallbackDub: boolean): Promise<boolean> {
+    try {
+        return (await api.get<LanguageMode>(`/api/anime/${mediaId}/language`)).mode === "dub"
+    } catch {
+        return fallbackDub
+    }
+}
+
 export function useDeleteEntry(mediaId: number) {
     const qc = useQueryClient()
     return useMutation({

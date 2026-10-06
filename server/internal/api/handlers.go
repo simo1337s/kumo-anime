@@ -445,7 +445,7 @@ func (s *Server) osEpisodes(r *http.Request) (any, error) {
 		if dub {
 			mm = "dub"
 		}
-		_ = s.app.Player.Tracks.SetStreamMode(media.ID, mm)
+		_ = s.setLanguageMode(media.ID, mm)
 	}
 	return s.app.Stream.Episodes(r.Context(), util2(q.Get("provider"), stream.AniCliProvider), media, dub, q.Get("refresh") == "1")
 }
@@ -476,9 +476,17 @@ func (s *Server) osSources(r *http.Request) (any, error) {
 	}
 	q := r.URL.Query()
 	ep, _ := strconv.ParseFloat(q.Get("episode"), 64)
-	res, err := s.app.Stream.Sources(r.Context(), util2(q.Get("provider"), stream.AniCliProvider), media, ep, q.Get("dub") == "1", q.Get("server"), q.Get("quality"))
+	dub := q.Get("dub") == "1" || q.Get("dub") == "true"
+	res, err := s.app.Stream.Sources(r.Context(), util2(q.Get("provider"), stream.AniCliProvider), media, ep, dub, q.Get("server"), q.Get("quality"))
 	if err != nil {
 		return nil, err
+	}
+	if q.Get("dub") != "" { // playing in the in-app player: remember the choice
+		mode := "sub"
+		if dub {
+			mode = "dub"
+		}
+		_ = s.setLanguageMode(media.ID, mode)
 	}
 	out := make([]map[string]any, 0, len(res.Sources))
 	for _, src := range res.Sources {
@@ -564,7 +572,7 @@ func (s *Server) osPlay(r *http.Request) (any, error) {
 	if body.Dub {
 		mode = "dub"
 	}
-	_ = s.app.Player.Tracks.SetStreamMode(media.ID, mode)
+	_ = s.setLanguageMode(media.ID, mode)
 	title := fmt.Sprintf("%s — Episode %s [%s]", media.PreferredTitle(), strconv.FormatFloat(body.Episode, 'f', -1, 64), strings.ToUpper(mode))
 	return s.app.Player.PlayMpv(player.PlayRequest{
 		MediaID: media.ID, Episode: int(body.Episode), Title: title, Source: source, Target: src.URL,

@@ -9,7 +9,7 @@ import { Button, Dropdown, DropdownContent, DropdownItem, DropdownLabel, Dropdow
 import { api } from "@/lib/api"
 import { usePersisted } from "@/lib/hooks"
 import { usePlay } from "@/lib/play"
-import { useCollection, useScan, useStatus } from "@/lib/queries"
+import { fetchLanguageMode, useCollection, useScan, useStatus } from "@/lib/queries"
 import { scanStore, useStore } from "@/lib/store"
 import type { CollectionItem, ContinueItem } from "@/lib/types"
 import { banner, cn, img as imgUrl, title } from "@/lib/utils"
@@ -268,11 +268,13 @@ function ContinueRow({ items, onFocus }: { items: ContinueItem[]; onFocus: (i: n
     const { data: status } = useStatus()
     const navigate = useNavigate()
     const ref = useRef<HTMLDivElement>(null)
-    const play = (it: ContinueItem) => {
+    const play = async (it: ContinueItem) => {
         if (it.hasFile && it.filePath) playLocal(it.filePath, it.media.id, it.episode)
         else if (status?.settings.onlineStream.enabled) {
-            const dub = status.settings.aniCli.defaultMode === "dub"
-            playStream(status.settings.onlineStream.defaultProvider || "ani-cli", it.media.id, it.episode, dub)
+            // Same provider and sub/dub as last time for this anime.
+            const provider = localStorage.getItem(`kumo-provider-${it.media.id}`) || status.settings.onlineStream.defaultProvider || "ani-cli"
+            const dub = await fetchLanguageMode(it.media.id, status.settings.aniCli.defaultMode === "dub")
+            playStream(provider, it.media.id, it.episode, dub)
         } else navigate(`/entry?id=${it.media.id}`)
     }
     return (
