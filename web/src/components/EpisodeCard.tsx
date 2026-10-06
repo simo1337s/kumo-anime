@@ -1,4 +1,4 @@
-import { Check, CheckCheck, Clock, HardDrive, Play } from "lucide-react"
+import { Check, CheckCheck, Clock, HardDrive, Minus, Play } from "lucide-react"
 import { cn, formatDuration, img } from "@/lib/utils"
 import { Tooltip } from "./ui"
 
@@ -17,10 +17,11 @@ type Props = {
     large?: boolean
     onClick?: () => void
     actions?: React.ReactNode
+    onRemove?: () => void // "Continue watching": removes the card's item
     className?: string
 }
 
-export function EpisodeCard({ image, number, title, subtitle, runtime, watched, hasFile, progress, resumeAt, aired = true, blur, large, onClick, actions, className }: Props) {
+export function EpisodeCard({ image, number, title, subtitle, runtime, watched, hasFile, progress, resumeAt, aired = true, blur, large, onClick, actions, onRemove, className }: Props) {
     return (
         <div
             role="button"
@@ -74,6 +75,24 @@ export function EpisodeCard({ image, number, title, subtitle, runtime, watched, 
                 {actions && (
                     <div className="absolute top-2 right-2 opacity-0 transition-opacity group-hover/ep:opacity-100 focus-within:opacity-100" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
                         {actions}
+                    </div>
+                )}
+                {onRemove && (
+                    <div
+                        // On hover, and always on touch screens, which can't hover.
+                        className="absolute top-2 right-2 opacity-0 transition-opacity group-hover/ep:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+                        onClick={e => e.stopPropagation()}
+                        onKeyDown={e => e.stopPropagation()}
+                    >
+                        <Tooltip content="Remove from Continue watching">
+                            <button
+                                aria-label="Remove from Continue watching"
+                                onClick={onRemove}
+                                className="focus-ring grid size-8 place-items-center rounded-full bg-black/60 text-white backdrop-blur transition hover:bg-black/80"
+                            >
+                                <Minus className="size-4" />
+                            </button>
+                        </Tooltip>
                     </div>
                 )}
                 {resumeAt !== undefined && resumeAt > 0 && (

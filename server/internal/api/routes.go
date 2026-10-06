@@ -40,6 +40,8 @@ func (s *Server) routes() {
 
 	// --- anime / anilist
 	m.HandleFunc("GET /api/anime/collection", h(s.animeCollection))
+	m.HandleFunc("POST /api/continue/hide", h(s.hideContinue))
+	m.HandleFunc("POST /api/continue/unhide", h(s.unhideContinue))
 	m.HandleFunc("GET /api/anime/{id}", h(s.animeEntry))
 	m.HandleFunc("POST /api/anime/{id}/entry", h(s.updateEntry))
 	m.HandleFunc("POST /api/anime/{id}/episode", h(s.markEpisode))
@@ -456,6 +458,43 @@ func (s *Server) animeCollection(r *http.Request) (any, error) {
 		go s.app.PrefetchCollectionArt(view)
 	}
 	return view, err
+}
+
+// hideContinue removes an anime from "Continue watching" until it offers
+// another episode or is watched again.
+func (s *Server) hideContinue(r *http.Request) (any, error) {
+	var body struct {
+		MediaID int `json:"mediaId"`
+		Episode int `json:"episode"`
+	}
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	if body.MediaID <= 0 || body.Episode <= 0 {
+		return nil, badRequest("mediaId and episode are required")
+	}
+	if err := s.app.Library.HideContinue(body.MediaID, body.Episode); err != nil {
+		return nil, err
+	}
+	s.app.Hub.Publish("collection-updated", map[string]any{"mediaId": body.MediaID})
+	return nil, nil
+}
+
+func (s *Server) unhideContinue(r *http.Request) (any, error) {
+	var body struct {
+		MediaID int `json:"mediaId"`
+	}
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	if body.MediaID <= 0 {
+		return nil, badRequest("mediaId is required")
+	}
+	if err := s.app.Library.UnhideContinue(body.MediaID); err != nil {
+		return nil, err
+	}
+	s.app.Hub.Publish("collection-updated", map[string]any{"mediaId": body.MediaID})
+	return nil, nil
 }
 
 func (s *Server) animeEntry(r *http.Request) (any, error) {

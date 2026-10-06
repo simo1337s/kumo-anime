@@ -3,8 +3,11 @@ package library
 import (
 	"context"
 	"sort"
+	"sync"
+	"time"
 
 	"github.com/simo1337s/animetest/server/internal/anilist"
+	"github.com/simo1337s/animetest/server/internal/db"
 	"github.com/simo1337s/animetest/server/internal/history"
 	"github.com/simo1337s/animetest/server/internal/metadata"
 )
@@ -17,6 +20,9 @@ type Service struct {
 	Platform *anilist.Platform
 	Meta     *metadata.Service
 	History  *history.Store
+	DB       *db.DB // items removed from "Continue watching"
+
+	hiddenMu sync.Mutex
 }
 
 type EpisodeView struct {
@@ -328,9 +334,16 @@ func (s *Service) continueWatching(ctx context.Context, coll *anilist.Collection
 	var out []*ContinueItem
 	seen := map[int]bool{}
 	last := s.History.LastWatched()
+	hidden := s.hiddenContinue()
 
 	add := func(media *anilist.Media, ep int, src string) {
 		if media == nil || seen[media.ID] || ep <= 0 {
+			return
+		}
+		// Removed by the user: stays away until the episode to continue
+		// with changes or the anime is watched again.
+		if h, ok := hidden[media.ID]; ok && h.Episode == ep && last[media.ID] <= h.HiddenAt {
+			seen[media.ID] = true // not offered again from the history below
 			return
 		}
 		total := media.TotalEpisodes()
@@ -412,4 +425,56 @@ func (s *Service) continueWatching(ctx context.Context, coll *anilist.Collection
 	// Most recently watched first, list-only items keep their order after.
 	sort.SliceStable(out, func(i, j int) bool { return out[i].LastWatched > out[j].LastWatched })
 	return out
+}
+
+// continueHiddenKey holds the items removed from "Continue watching", by
+// media id: the episode the item offered and when it was removed.
+const continueHiddenKey = "continue-hidden"
+
+type hiddenItem struct {
+	Episode  int   `json:"episode"`
+	HiddenAt int64 `json:"hiddenAt"` // unix seconds, like the watch history
+}
+
+func (s *Service) hiddenContinue() map[int]hiddenItem {
+	out := map[int]hiddenItem{}
+	_, _ = s.DB.GetKV(continueHiddenKey, &out)
+	return out
+}
+
+// updateHidden changes the removed items under a lock, so requests at the
+// same time can't overwrite each other's changes.
+func (s *Service) updateHidden(fn func(items map[int]hiddenItem)) error {
+	s.hiddenMu.Lock()
+	defer s.hiddenMu.Unlock()
+	items := map[int]hiddenItem{}
+	if _, err := s.DB.GetKV(continueHiddenKey, &items); err != nil {
+		return err
+	}
+	fn(items)
+	if len(items) == 0 {
+		return s.DB.DeleteKV(continueHiddenKey)
+	}
+	return s.DB.SetKV(continueHiddenKey, items)
+}
+
+// HideContinue removes an anime from "Continue watching" for as long as it
+// offers that episode: it comes back by itself once the episode changes
+// (progress made elsewhere) or the anime is watched again.
+func (s *Service) HideContinue(mediaID, episode int) error {
+	last := s.History.LastWatched()
+	now := time.Now().Unix()
+	return s.updateHidden(func(items map[int]hiddenItem) {
+		for id, it := range items {
+			if last[id] > it.HiddenAt {
+				delete(items, id) // watched again since: back for good
+			}
+		}
+		items[mediaID] = hiddenItem{Episode: episode, HiddenAt: now}
+	})
+}
+
+// UnhideContinue puts a removed anime back in "Continue watching".
+func (s *Service) UnhideContinue(mediaID int) error {
+	return s.updateHidden(func(items map[int]hiddenItem) { delete(items, mediaID) })
 }

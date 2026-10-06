@@ -109,7 +109,7 @@ func New(dataDir string) (*App, error) {
 	files := library.NewStore(d)
 	scanner := library.NewScanner(files, platform, settings, hub)
 	hist := history.NewStore(d)
-	lib := &library.Service{Store: files, Scanner: scanner, Platform: platform, Meta: meta, History: hist}
+	lib := &library.Service{Store: files, Scanner: scanner, Platform: platform, Meta: meta, History: hist, DB: d}
 	pl := player.NewManager(settings, hist, d, platform, hub)
 	ani := anicli.New(settings)
 	dls := downloads.NewManager(settings, d, hub, files)
@@ -354,7 +354,7 @@ func (a *App) PrefetchCollectionArt(view *library.CollectionView) {
 	}
 	add(view.LocalOnly)
 	for _, c := range view.ContinueWatching {
-		urls = append(urls, c.Image)
+		urls = append(urls, c.Image, c.Media.BannerImage) // the banner is the Home page header
 	}
 	a.Images.Prefetch(urls...)
 }

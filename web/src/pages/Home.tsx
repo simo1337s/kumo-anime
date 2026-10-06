@@ -11,8 +11,8 @@ import { usePersisted } from "@/lib/hooks"
 import { usePlay } from "@/lib/play"
 import { fetchLanguageMode, useCollection, useScan, useStatus } from "@/lib/queries"
 import { scanStore, useStore } from "@/lib/store"
-import type { CollectionItem, ContinueItem } from "@/lib/types"
-import { banner, cn, img as imgUrl, title } from "@/lib/utils"
+import type { CollectionItem, CollectionView, ContinueItem } from "@/lib/types"
+import { banner, cn, cover, img as imgUrl, title } from "@/lib/utils"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
@@ -32,7 +32,9 @@ export default function HomePage() {
 
     const continueItems = data?.continueWatching ?? []
     const [heroIdx, setHeroIdx] = useState(0)
-    const hero = continueItems[heroIdx] ?? null
+    // Removing items can leave the index past the end.
+    const heroAt = Math.min(heroIdx, Math.max(0, continueItems.length - 1))
+    const hero = continueItems[heroAt] ?? null
 
     const filterItems = (items: CollectionItem[]) => {
         let out = items
@@ -96,7 +98,7 @@ export default function HomePage() {
             <Hero
                 item={hero}
                 count={continueItems.length}
-                index={heroIdx}
+                index={heroAt}
                 onIndex={setHeroIdx}
                 loading={isLoading}
                 toolbar={
@@ -245,7 +247,9 @@ export default function HomePage() {
 }
 
 function Hero({ item, count, index, onIndex, loading, toolbar }: { item: ContinueItem | null; count: number; index: number; onIndex: (i: number) => void; loading: boolean; toolbar: React.ReactNode }) {
-    const img = item?.image ? imgUrl(item.image) : item ? banner(item.media) : ""
+    // The sharp AniList banner, like the anime page: episode thumbnails are
+    // often small, blurry screenshots.
+    const img = !item ? "" : item.media.bannerImage ? banner(item.media) : imgUrl(item.image) || cover(item.media)
     return (
         <div className="relative h-[clamp(320px,46vh,520px)] w-full overflow-hidden">
             {img ? (
@@ -296,6 +300,7 @@ function ContinueRow({ items, onFocus }: { items: ContinueItem[]; onFocus: (i: n
     const { playLocal, playStream } = usePlay()
     const { data: status } = useStatus()
     const navigate = useNavigate()
+    const qc = useQueryClient()
     const ref = useRef<HTMLDivElement>(null)
     const play = async (it: ContinueItem) => {
         if (it.hasFile && it.filePath) playLocal(it.filePath, it.media.id, it.episode)
@@ -305,6 +310,31 @@ function ContinueRow({ items, onFocus }: { items: ContinueItem[]; onFocus: (i: n
             const dub = await fetchLanguageMode(it.media.id, status.settings.aniCli.defaultMode === "dub")
             playStream(provider, it.media.id, it.episode, dub)
         } else navigate(`/entry?id=${it.media.id}`)
+    }
+    // The server hides it until it offers another episode or the anime is
+    // watched again. This row and the hero both show the collection's list,
+    // so it is edited right away (a refetch in flight would undo that).
+    const remove = async (it: ContinueItem, at: number) => {
+        const edit = (fn: (list: ContinueItem[]) => ContinueItem[]) =>
+            qc.setQueryData<CollectionView>(["collection"], old => (old ? { ...old, continueWatching: fn(old.continueWatching ?? []) } : old))
+        const refresh = () => qc.invalidateQueries({ queryKey: ["collection"] })
+        await qc.cancelQueries({ queryKey: ["collection"] })
+        edit(list => list.filter(x => x.media.id !== it.media.id))
+        const hidden = api.post("/api/continue/hide", { mediaId: it.media.id, episode: it.episode })
+        hidden.catch(e => toast.error(e.message)).finally(refresh)
+        toast.success("Removed from Continue watching", {
+            action: {
+                label: "Undo",
+                onClick: async () => {
+                    await qc.cancelQueries({ queryKey: ["collection"] })
+                    edit(list => (list.some(x => x.media.id === it.media.id) ? list : [...list.slice(0, at), it, ...list.slice(at)]))
+                    await hidden.catch(() => {}) // unhide after the hide, never before
+                    api.post("/api/continue/unhide", { mediaId: it.media.id })
+                        .catch(e => toast.error(e.message))
+                        .finally(refresh)
+                },
+            },
+        })
     }
     return (
         <div ref={ref} className="no-scrollbar -mx-2 flex snap-x gap-6 overflow-x-auto px-2 pb-2">
@@ -327,6 +357,7 @@ function ContinueRow({ items, onFocus }: { items: ContinueItem[]; onFocus: (i: n
                         progress={it.duration > 0 ? it.resumeAt / it.duration : 0}
                         resumeAt={it.resumeAt}
                         onClick={() => play(it)}
+                        onRemove={() => remove(it, i)}
                     />
                 </div>
             ))}
