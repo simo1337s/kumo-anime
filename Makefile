@@ -6,8 +6,10 @@
 PREFIX ?= /usr
 GO ?= go
 NPM ?= npm
-GOFLAGS ?= -trimpath
-LDFLAGS ?= -s -w
+# Not named LDFLAGS/GOFLAGS on purpose: makepkg exports C linker flags in
+# LDFLAGS (e.g. -Wl,-O1) which the Go linker doesn't understand.
+GO_BUILDFLAGS ?= -trimpath
+GO_LDFLAGS ?= -s -w
 
 .PHONY: all web embed server desktop test clean run
 
@@ -24,7 +26,7 @@ embed: web
 
 server: embed
 	mkdir -p dist
-	cd server && CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o ../dist/kumo ./cmd/kumo
+	cd server && CGO_ENABLED=0 $(GO) build $(GO_BUILDFLAGS) -ldflags "$(GO_LDFLAGS)" -o ../dist/kumo ./cmd/kumo
 
 desktop:
 	cd desktop && $(NPM) ci --no-audit --no-fund
