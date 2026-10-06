@@ -3,6 +3,8 @@ package library
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -203,14 +205,16 @@ func containsFold(list []string, s string) bool {
 
 func scoreCandidates(queries []query, pool []*anilist.Media, g *group) candidateScore {
 	var best candidateScore
+	titleMarkers, season := fileMarkers(g)
 	for _, media := range pool {
 		if media == nil {
 			continue
 		}
 		var s float64
-		for _, q := range queries {
-			for _, t := range media.AllTitles() {
-				if v := util.Similarity(q.text, t) * q.weight; v > s {
+		for _, t := range media.AllTitles() {
+			penalty := markerPenalty(titleMarkers, season, util.SequelMarkers(t))
+			for _, q := range queries {
+				if v := util.Similarity(q.text, t)*q.weight - penalty; v > s {
 					s = v
 				}
 			}
@@ -239,6 +243,43 @@ func scoreCandidates(queries []query, pool []*anilist.Media, g *group) candidate
 		best.score = 1
 	}
 	return best
+}
+
+// fileMarkers returns the sequel markers (util.SequelMarkers) in the
+// group's own titles, like the "R2" of "Code Geass Hangyaku no Lelouch R2",
+// and the season number its name gave, if any.
+func fileMarkers(g *group) (title []string, season string) {
+	for _, t := range []string{g.title, g.folderTitle} {
+		for _, m := range util.SequelMarkers(reSeasonAny.ReplaceAllString(t, "")) {
+			if !slices.Contains(title, m) {
+				title = append(title, m)
+			}
+		}
+	}
+	if g.season > 1 {
+		season = strconv.Itoa(g.season)
+	}
+	return title, season
+}
+
+// markerPenalty lowers the score of a candidate title whose sequel markers
+// differ from the file's. Titles that differ only in those look almost the
+// same to util.Similarity ("Code Geass: Hangyaku no Lelouch" and its "R2"
+// score 0.95), but a file named after a sequel isn't the first season, and
+// a file named after the first season is less likely a sequel. Seasons the
+// name gave as such ("S2") are scored by the queries, like before.
+func markerPenalty(fileTitle []string, season string, candidate []string) float64 {
+	for _, m := range fileTitle {
+		if !slices.Contains(candidate, m) {
+			return 0.5
+		}
+	}
+	for _, m := range candidate {
+		if !slices.Contains(fileTitle, m) && m != season {
+			return 0.1
+		}
+	}
+	return 0
 }
 
 func abs(n int) int {

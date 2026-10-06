@@ -205,17 +205,16 @@ func (a *App) wire() {
 		if err != nil {
 			return nil, err
 		}
-		for _, f := range files {
-			if f.Kind == "main" && f.Episode == s.Episode+1 {
-				media, _ := a.Platform.MediaLite(ctx, s.MediaID)
-				title := f.Name
-				if media != nil {
-					title = fmt.Sprintf("%s — Episode %d", media.PreferredTitle(), f.Episode)
-				}
-				return &player.PlayRequest{MediaID: s.MediaID, Episode: f.Episode, Title: title, Source: "local", Target: f.Path}, nil
-			}
+		f := library.EpisodeFile(files, s.Episode+1)
+		if f == nil {
+			return nil, nil
 		}
-		return nil, nil
+		media, _ := a.Platform.MediaLite(ctx, s.MediaID)
+		title := f.Name
+		if media != nil {
+			title = fmt.Sprintf("%s — Episode %d", media.PreferredTitle(), f.Episode)
+		}
+		return &player.PlayRequest{MediaID: s.MediaID, Episode: f.Episode, Title: title, Source: "local", Target: f.Path}, nil
 	}
 
 	// Plugins hooks after progress updates.

@@ -90,7 +90,7 @@ func (s *Service) Entry(ctx context.Context, mediaID int, refresh bool) (*EntryV
 	for _, f := range files {
 		switch {
 		case f.Kind == "main" && f.Episode > 0:
-			if old, ok := mainFiles[f.Episode]; !ok || f.Size > old.Size {
+			if old, ok := mainFiles[f.Episode]; !ok || betterFile(f, old) {
 				mainFiles[f.Episode] = f
 			}
 		case f.Kind == "nc":
@@ -354,11 +354,8 @@ func (s *Service) continueWatching(ctx context.Context, coll *anilist.Collection
 			return
 		}
 		it := &ContinueItem{Media: media, Episode: ep, Total: total, LastWatched: last[media.ID], Source: src}
-		for _, f := range files[media.ID] {
-			if f.Kind == "main" && f.Episode == ep {
-				it.HasFile, it.FilePath = true, f.Path
-				break
-			}
+		if f := EpisodeFile(files[media.ID], ep); f != nil {
+			it.HasFile, it.FilePath = true, f.Path
 		}
 		if h := s.History.Get(media.ID, ep); h != nil {
 			it.ResumeAt = s.History.ResumePosition(media.ID, ep)
@@ -477,4 +474,30 @@ func (s *Service) HideContinue(mediaID, episode int) error {
 // UnhideContinue puts a removed anime back in "Continue watching".
 func (s *Service) UnhideContinue(mediaID int) error {
 	return s.updateHidden(func(items map[int]hiddenItem) { delete(items, mediaID) })
+}
+
+// EpisodeFile returns the file to play for an episode among an anime's
+// files, or nil (see betterFile).
+func EpisodeFile(files []*LocalFile, episode int) *LocalFile {
+	var best *LocalFile
+	for _, f := range files {
+		if f.Kind == "main" && f.Episode == episode && !f.Ignored && (best == nil || betterFile(f, best)) {
+			best = f
+		}
+	}
+	return best
+}
+
+// betterFile reports whether f is the one to play when it and old are
+// matched to the same episode, e.g. a sequel's files wrongly matched to
+// its first season: a match made by hand wins, then the surer match, then
+// the bigger file.
+func betterFile(f, old *LocalFile) bool {
+	if f.Locked != old.Locked {
+		return f.Locked
+	}
+	if f.MatchScore != old.MatchScore {
+		return f.MatchScore > old.MatchScore
+	}
+	return f.Size > old.Size
 }
