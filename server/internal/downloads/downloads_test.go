@@ -531,3 +531,43 @@ func TestLineWriter(t *testing.T) {
 		t.Fatalf("lines = %.80q, want %.80q", lines, want)
 	}
 }
+
+// Episodes go into a folder per anime: the one that already holds its
+// episodes, else a new one named after the anime — never loose in the
+// library folder.
+func TestDownloadFolder(t *testing.T) {
+	m, lib := newTestManager(t, nil)
+	cfg := m.settings.Get()
+	lib = filepath.Clean(lib)
+
+	dir, err := m.folderFor(cfg, 2904, "Code Geass: Hangyaku no Lelouch R2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(dir) != lib {
+		t.Fatalf("new anime: %q, want a folder inside %q", dir, lib)
+	}
+
+	// The user's own folder for it is reused.
+	own := filepath.Join(lib, "Code Geass Hangyaku no Lelouch R2")
+	if err := os.MkdirAll(own, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.files.Save(&library.LocalFile{Path: filepath.Join(own, "ep01.mkv"), Dir: own, Name: "ep01.mkv", MediaID: 2904, Episode: 1, Kind: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if dir, _ := m.folderFor(cfg, 2904, "Code Geass: Hangyaku no Lelouch R2"); dir != own {
+		t.Fatalf("existing folder: got %q, want %q", dir, own)
+	}
+
+	// Files loose in the library folder itself don't count.
+	if err := m.files.Save(&library.LocalFile{Path: filepath.Join(lib, "loose.mkv"), Dir: lib, Name: "loose.mkv", MediaID: 21, Episode: 1, Kind: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if dir, _ := m.folderFor(cfg, 21, "One Piece"); dir != filepath.Join(lib, "One Piece") {
+		t.Fatalf("loose files: got %q", dir)
+	}
+	if dir, _ := m.folderFor(cfg, 99, "  "); filepath.Base(dir) != "AniList 99" {
+		t.Fatalf("no title: got %q", dir)
+	}
+}
