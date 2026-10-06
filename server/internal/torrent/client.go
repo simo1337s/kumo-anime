@@ -111,7 +111,10 @@ func (q *Qbittorrent) login(ctx context.Context) error {
 		return q.authErr
 	}
 	form := url.Values{"username": {q.cfg.Username}, "password": {q.cfg.Password}}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, baseURL(q.cfg)+"/api/v2/auth/login", strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL(q.cfg)+"/api/v2/auth/login", strings.NewReader(form.Encode()))
+	if err != nil {
+		return badAddress("qBittorrent", q.cfg, err)
+	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Referer", baseURL(q.cfg))
 	resp, err := q.http.Do(req)
@@ -138,6 +141,19 @@ func (q *Qbittorrent) unreachable(err error) error {
 	return fmt.Errorf("qBittorrent isn't reachable at %s — is it running with its Web UI enabled (Tools › Options › Web UI)? (%w)", baseURL(q.cfg), err)
 }
 
+// badAddress reports a host setting that doesn't make a valid URL.
+func badAddress(client string, c config.TorrentClientConfig, err error) error {
+	return fmt.Errorf("the %s address %q is invalid — check the host in Settings › Torrent Client (%w)", client, baseURL(c), err)
+}
+
+// apiError is an error status answered by the qBittorrent Web API.
+type apiError struct {
+	status int
+	msg    string
+}
+
+func (e *apiError) Error() string { return e.msg }
+
 // do sends an API request. The first try goes without logging in, which
 // works when qBittorrent bypasses authentication for localhost; on 403 it
 // logs in once and retries.
@@ -150,7 +166,10 @@ func (q *Qbittorrent) do(ctx context.Context, method, path string, form url.Valu
 		} else if form != nil {
 			body = strings.NewReader(form.Encode())
 		}
-		req, _ := http.NewRequestWithContext(ctx, method, u, body)
+		req, err := http.NewRequestWithContext(ctx, method, u, body)
+		if err != nil {
+			return badAddress("qBittorrent", q.cfg, err)
+		}
 		if body != nil {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
@@ -171,7 +190,7 @@ func (q *Qbittorrent) do(ctx context.Context, method, path string, form url.Valu
 			return errNotFound
 		}
 		if resp.StatusCode >= 400 {
-			return fmt.Errorf("qBittorrent %s: %s %s", path, resp.Status, strings.TrimSpace(string(raw)))
+			return &apiError{resp.StatusCode, fmt.Sprintf("qBittorrent %s: %s %s", path, resp.Status, strings.TrimSpace(string(raw)))}
 		}
 		if out != nil {
 			if s, ok := out.(*string); ok {
@@ -264,7 +283,15 @@ func (q *Qbittorrent) Add(ctx context.Context, uris []string, savePath string) e
 	if q.cfg.Tags != "" {
 		form.Set("tags", q.cfg.Tags)
 	}
-	return q.do(ctx, http.MethodPost, "/api/v2/torrents/add", form, nil)
+	// When nothing was added, typically because the torrents are already in
+	// qBittorrent, WebAPI 2.14+ answers 409 and older versions 200 "Fails.".
+	// Either way they are in the client, which is what the caller wants.
+	err := q.do(ctx, http.MethodPost, "/api/v2/torrents/add", form, nil)
+	var ae *apiError
+	if errors.As(err, &ae) && ae.status == http.StatusConflict {
+		return nil
+	}
+	return err
 }
 
 func (q *Qbittorrent) action(ctx context.Context, names []string, hashes []string, extra url.Values) error {
@@ -309,10 +336,19 @@ func NewTransmission(cfg config.TorrentClientConfig) *Transmission {
 
 func (t *Transmission) Name() string { return "transmission" }
 
+// rpcResultError is a call that Transmission answered with a result other
+// than "success".
+type rpcResultError struct{ result string }
+
+func (e *rpcResultError) Error() string { return "Transmission: " + e.result }
+
 func (t *Transmission) rpc(ctx context.Context, method string, args any, out any) error {
 	body, _ := json.Marshal(map[string]any{"method": method, "arguments": args})
 	for attempt := 0; attempt < 2; attempt++ {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, baseURL(t.cfg)+"/transmission/rpc", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL(t.cfg)+"/transmission/rpc", bytes.NewReader(body))
+		if err != nil {
+			return badAddress("Transmission", t.cfg, err)
+		}
 		req.Header.Set("Content-Type", "application/json")
 		t.mu.Lock()
 		req.Header.Set("X-Transmission-Session-Id", t.session)
@@ -346,7 +382,7 @@ func (t *Transmission) rpc(ctx context.Context, method string, args any, out any
 			return err
 		}
 		if r.Result != "success" {
-			return fmt.Errorf("Transmission: %s", r.Result)
+			return &rpcResultError{r.Result}
 		}
 		if out != nil {
 			return json.Unmarshal(r.Arguments, out)
@@ -409,7 +445,9 @@ func (t *Transmission) List(ctx context.Context) ([]Torrent, error) {
 		case 6:
 			state = "seeding"
 		}
-		if x.Error != 0 {
+		// 1 and 2 are tracker warnings and errors: the torrent keeps running
+		// (DHT, PEX, other trackers). 3 is a local error, which stops it.
+		if x.Error == 3 {
 			state = "error"
 		}
 		res = append(res, Torrent{
@@ -421,7 +459,10 @@ func (t *Transmission) List(ctx context.Context) ([]Torrent, error) {
 	return res, nil
 }
 
+// Add adds each torrent. One that Transmission rejects doesn't stop the
+// others; the first such error is returned.
 func (t *Transmission) Add(ctx context.Context, uris []string, savePath string) error {
+	var rejected error
 	for _, u := range uris {
 		args := map[string]any{"filename": u}
 		if savePath != "" {
@@ -430,11 +471,20 @@ func (t *Transmission) Add(ctx context.Context, uris []string, savePath string) 
 		if t.cfg.Tags != "" {
 			args["labels"] = strings.Split(t.cfg.Tags, ",")
 		}
-		if err := t.rpc(ctx, "torrent-add", args, nil); err != nil {
-			return err
+		err := t.rpc(ctx, "torrent-add", args, nil)
+		var re *rpcResultError
+		switch {
+		case err == nil:
+		case !errors.As(err, &re):
+			return err // unreachable or refused: the others would fail too
+		case re.result == "duplicate torrent":
+			// Already in Transmission (2.x and 3.x report it as a failure,
+			// 4.x as a success with "torrent-duplicate").
+		case rejected == nil:
+			rejected = err
 		}
 	}
-	return nil
+	return rejected
 }
 
 func (t *Transmission) Pause(ctx context.Context, h []string) error {

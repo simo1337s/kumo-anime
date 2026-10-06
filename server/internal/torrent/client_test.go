@@ -200,6 +200,107 @@ func TestTransmission(t *testing.T) {
 	}
 }
 
+// qBittorrent answers 409 (WebAPI 2.14+) or 200 "Fails." (older) when
+// nothing was added, e.g. because the torrent is already in the client.
+func TestQbittorrentAddAlreadyPresent(t *testing.T) {
+	answer := http.StatusConflict
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/torrents/add" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(answer)
+		if answer == http.StatusUnsupportedMediaType {
+			_, _ = io.WriteString(w, "Torrent file is not valid.")
+			return
+		}
+		_, _ = io.WriteString(w, "Fails.")
+	}))
+	defer srv.Close()
+	q := NewQbittorrent(cfgFor(t, srv))
+	ctx := context.Background()
+	if err := q.Add(ctx, []string{"magnet:?xt=urn:btih:abc"}, ""); err != nil {
+		t.Fatalf("409: %v", err)
+	}
+	answer = http.StatusOK
+	if err := q.Add(ctx, []string{"magnet:?xt=urn:btih:abc"}, ""); err != nil {
+		t.Fatalf("200 Fails.: %v", err)
+	}
+	answer = http.StatusUnsupportedMediaType
+	if err := q.Add(ctx, []string{"https://example.org/x.torrent"}, ""); err == nil || !strings.Contains(err.Error(), "not valid") {
+		t.Fatalf("415: %v", err)
+	}
+}
+
+func TestTransmissionStatesAndAdd(t *testing.T) {
+	var added []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Method    string         `json:"method"`
+			Arguments map[string]any `json:"arguments"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		switch body.Method {
+		case "torrent-get":
+			// error: 0 none, 1 tracker warning, 2 tracker error, 3 local error.
+			_, _ = io.WriteString(w, `{"result":"success","arguments":{"torrents":[
+				{"hashString":"h0","name":"ok","status":4,"rateDownload":100,"error":0},
+				{"hashString":"h1","name":"warning","status":4,"rateDownload":100,"error":1},
+				{"hashString":"h2","name":"tracker","status":6,"percentDone":1,"error":2},
+				{"hashString":"h3","name":"local","status":0,"error":3}]}}`)
+		case "torrent-add":
+			name, _ := body.Arguments["filename"].(string)
+			switch {
+			case strings.Contains(name, "dupe"):
+				// Transmission 2.x/3.x
+				_, _ = io.WriteString(w, `{"result":"duplicate torrent","arguments":{"torrent-duplicate":{"hashString":"h0","id":1,"name":"ok"}}}`)
+			case strings.Contains(name, "bad"):
+				_, _ = io.WriteString(w, `{"result":"invalid or corrupt torrent file","arguments":{}}`)
+			default:
+				added = append(added, name)
+				_, _ = io.WriteString(w, `{"result":"success","arguments":{"torrent-added":{"hashString":"h9","id":9,"name":"new"}}}`)
+			}
+		default:
+			_, _ = io.WriteString(w, `{"result":"success","arguments":{}}`)
+		}
+	}))
+	defer srv.Close()
+	tr := NewTransmission(cfgFor(t, srv))
+	ctx := context.Background()
+	list, err := tr.List(ctx)
+	if err != nil || len(list) != 4 {
+		t.Fatalf("list %+v %v", list, err)
+	}
+	for i, want := range []string{"downloading", "downloading", "seeding", "error"} {
+		if list[i].State != want {
+			t.Errorf("%s: state %q, want %q", list[i].Name, list[i].State, want)
+		}
+	}
+	if err := tr.Add(ctx, []string{"magnet:?dupe"}, ""); err != nil {
+		t.Fatalf("duplicate: %v", err)
+	}
+	err = tr.Add(ctx, []string{"https://x/bad.torrent", "magnet:?good"}, "")
+	if err == nil || !strings.Contains(err.Error(), "invalid or corrupt") || len(added) != 1 || added[0] != "magnet:?good" {
+		t.Fatalf("one bad torrent: %v, added %v", err, added)
+	}
+}
+
+// A host that doesn't make a valid URL is an error, not a crash of the
+// goroutines polling the client.
+func TestInvalidClientHost(t *testing.T) {
+	cfg := config.TorrentClientConfig{Host: "127.0.0. 1", Port: 8080, Username: "admin", Password: "pw"}
+	ctx := context.Background()
+	if _, err := NewQbittorrent(cfg).Version(ctx); err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("qBittorrent: %v", err)
+	}
+	if err := NewQbittorrent(cfg).Add(ctx, []string{"magnet:?x"}, ""); err == nil {
+		t.Fatal("qBittorrent add: no error")
+	}
+	if _, err := NewTransmission(cfg).Version(ctx); err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("Transmission: %v", err)
+	}
+}
+
 func TestEnrich(t *testing.T) {
 	r := &SearchResult{Name: "[SubsPlease] Sousou no Frieren - 12 (1080p) [ABCD1234].mkv"}
 	enrich(r)

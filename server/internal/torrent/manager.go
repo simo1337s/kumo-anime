@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/simo1337s/animetest/server/internal/config"
 	"github.com/simo1337s/animetest/server/internal/events"
@@ -157,20 +158,21 @@ func (m *Manager) StartClient(ctx context.Context) error {
 	if cfg.Torrent.DefaultClient == "transmission" {
 		exe = cfg.Transmission.Executable
 	}
-	if exe == "" {
-		return errors.New("no executable path configured for the torrent client")
+	prog, args, err := splitCommand(exe)
+	if err != nil {
+		return err
 	}
-	parts := strings.Fields(exe)
-	if _, ok := util.LookPath(parts[0]); !ok {
-		return fmt.Errorf("torrent client executable not found: %s", parts[0])
-	}
-	if err := util.Detach(parts[0], parts[1:]...); err != nil {
+	if err := util.Detach(prog, args...); err != nil {
 		return err
 	}
 	// Flatpak apps can take a while on their first start.
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		time.Sleep(time.Second)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
 		if st := m.Status(ctx); st.Connected {
 			return nil
 		} else if st.NeedsAuth {
@@ -178,6 +180,29 @@ func (m *Manager) StartClient(ctx context.Context) error {
 		}
 	}
 	return errors.New("the torrent client started but its Web UI/RPC is not reachable — check host/port/credentials")
+}
+
+// splitCommand splits the configured client executable into a program and
+// its arguments. The program is the longest leading part that names an
+// executable, so a path may contain spaces ("/opt/My Apps/qbittorrent"),
+// with or without arguments ("flatpak run org.qbittorrent.qBittorrent").
+func splitCommand(exe string) (string, []string, error) {
+	exe = strings.TrimSpace(exe)
+	if exe == "" {
+		return "", nil, errors.New("no executable path configured for the torrent client")
+	}
+	for end := len(exe); end > 0; {
+		if _, ok := util.LookPath(exe[:end]); ok {
+			return exe[:end], strings.Fields(exe[end:]), nil
+		}
+		// Drop the last word.
+		i := strings.LastIndexFunc(exe[:end], unicode.IsSpace)
+		if i < 0 {
+			break
+		}
+		end = len(strings.TrimRightFunc(exe[:i], unicode.IsSpace))
+	}
+	return "", nil, fmt.Errorf("torrent client executable not found: %s", exe)
 }
 
 // SavePathFor returns where a torrent for an anime should be saved.

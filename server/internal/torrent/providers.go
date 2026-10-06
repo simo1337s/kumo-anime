@@ -96,19 +96,13 @@ func Enrich(r *SearchResult) {
 	if r.EpisodeNumber <= 0 {
 		r.EpisodeNumber = -1
 		if len(md.EpisodeNumber) == 1 {
-			r.EpisodeNumber = atoi(md.EpisodeNumber[0])
+			r.EpisodeNumber = episodeNumber(md.EpisodeNumber[0])
 		}
 	}
-	if len(md.EpisodeNumber) > 1 {
+	if isBatchName(r.Name, md) {
 		r.IsBatch = true
 	}
 	lower := strings.ToLower(r.Name)
-	if strings.Contains(lower, "batch") || strings.Contains(lower, "complete") || reRange.MatchString(r.Name) {
-		r.IsBatch = true
-	}
-	if len(md.EpisodeNumber) == 0 && len(md.SeasonNumber) > 0 {
-		r.IsBatch = true
-	}
 	for _, a := range md.AudioTerm {
 		if strings.Contains(strings.ToLower(a), "dual") {
 			r.Dub = true
@@ -127,7 +121,56 @@ func enrich(r *SearchResult) {
 	Enrich(r)
 }
 
-var reRange = regexp.MustCompile(`\b\d{1,4}\s?[-~]\s?\d{1,4}\b`)
+// isBatchName reports whether a release name says it holds several episodes.
+func isBatchName(name string, md *habari.Metadata) bool {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "batch"), strings.Contains(lower, "complete"):
+		return true
+	case len(md.EpisodeNumber) > 1, len(md.VolumeNumber) > 1:
+		return true
+	case len(md.EpisodeNumber) == 0 && len(md.SeasonNumber) > 0:
+		return true // a whole season
+	}
+	// With exactly one episode number, a bare "8 - 05" is a title ending in
+	// a number followed by the episode ("Kaiju No. 8 - 05", "Spy x Family
+	// Season 3 - 05"): only a range written like one counts.
+	return hasEpisodeRange(name, len(md.EpisodeNumber) == 0)
+}
+
+var (
+	// Episode ranges written the way batches are named: "(01-12)",
+	// "[ 01~28 ]", "Show - 01-12", "S01E01-E12", "Ep 1-12", "01 ~ 12".
+	reEpisodeRanges = []*regexp.Regexp{
+		regexp.MustCompile(`[\[(【]\s*(\d{1,4})\s*[-~]\s*(\d{1,4})\s*[\])】]`),
+		regexp.MustCompile(`\s-\s*(\d{1,4})\s*[-~]\s*(\d{1,4})\b`),
+		regexp.MustCompile(`(?i)(?:\b|\d)e(?:p|pisodes?)?\.?\s*(\d{1,4})\s*[-~]\s*(?:e(?:p|pisodes?)?\.?\s*)?(\d{1,4})\b`),
+		regexp.MustCompile(`\b(\d{1,4})\s*~\s*(\d{1,4})\b`),
+	}
+	// Any "1-12" ("Vol.1-6", "Part 1-3"); only used when the name has no
+	// episode number.
+	reLooseRange = regexp.MustCompile(`\b(\d{1,4})\s?[-~]\s?(\d{1,4})\b`)
+)
+
+// hasEpisodeRange reports whether name contains a range of episodes: two
+// numbers in increasing order, written as a range. loose also accepts any
+// "a-b".
+func hasEpisodeRange(name string, loose bool) bool {
+	isRange := func(re *regexp.Regexp) bool {
+		for _, m := range re.FindAllStringSubmatch(name, -1) {
+			if from, to := atoi(m[1]), atoi(m[2]); from >= 0 && from < to {
+				return true
+			}
+		}
+		return false
+	}
+	for _, re := range reEpisodeRanges {
+		if isRange(re) {
+			return true
+		}
+	}
+	return loose && isRange(reLooseRange)
+}
 
 func normRes(s string) string {
 	s = strings.ToLower(s)
@@ -145,14 +188,25 @@ func normRes(s string) string {
 }
 
 func atoi(s string) int {
-	if i := strings.IndexByte(s, '.'); i >= 0 {
-		s = s[:i]
-	}
 	n, err := strconv.Atoi(strings.TrimSpace(s))
 	if err != nil {
 		return -1
 	}
 	return n
+}
+
+// episodeNumber converts a parsed episode number. A fractional one ("10.5",
+// a recap or special) isn't part of the regular numbering: -1, so that it
+// isn't taken for episode 10.
+func episodeNumber(s string) int {
+	s = strings.TrimSpace(s)
+	if whole, frac, ok := strings.Cut(s, "."); ok {
+		if strings.Trim(frac, "0") != "" {
+			return -1
+		}
+		s = whole
+	}
+	return atoi(s)
 }
 
 func humanSize(b int64) string {
@@ -194,8 +248,7 @@ func smartQueries(q SmartQuery) []string {
 	}
 	var out []string
 	for _, t := range titles {
-		// Nyaa's search doesn't like some punctuation.
-		t = strings.NewReplacer(":", "", "!", "", "?", "", "\"", "", "(", "", ")", "").Replace(t)
+		t = searchText(t)
 		s := t
 		if !q.Batch && q.Episode > 0 && q.Media.Format != "MOVIE" {
 			s = fmt.Sprintf("%s %02d", t, q.Episode)
@@ -208,6 +261,18 @@ func smartQueries(q SmartQuery) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// searchText turns a title into search terms. Nyaa's search doesn't like some
+// punctuation, and reads "-word" as "without word" (AniList titles such as
+// "Ore dake Level Up na Ken: Season 2 -Arise from the Shadow-").
+func searchText(t string) string {
+	t = strings.NewReplacer(":", "", "!", "", "?", "", "\"", "", "(", "", ")", "").Replace(t)
+	words := strings.Fields(t)
+	for i, w := range words {
+		words[i] = strings.TrimLeft(w, "-")
+	}
+	return strings.Join(strings.Fields(strings.Join(words, " ")), " ")
 }
 
 func containsFold(list []string, s string) bool {
@@ -350,10 +415,17 @@ func (n *Nyaa) Magnet(_ context.Context, r *SearchResult) (string, error) {
 // ---------------------------------------------------------------------------
 // AnimeTosho
 
-type AnimeTosho struct{}
+type AnimeTosho struct{ Base string }
 
 func (a *AnimeTosho) ID() string   { return "animetosho" }
 func (a *AnimeTosho) Name() string { return "AnimeTosho" }
+
+func (a *AnimeTosho) base() string {
+	if a.Base != "" {
+		return a.Base
+	}
+	return "https://feed.animetosho.org"
+}
 
 type toshoItem struct {
 	Title      string `json:"title"`
@@ -371,7 +443,7 @@ type toshoItem struct {
 
 func (a *AnimeTosho) fetch(ctx context.Context, params url.Values) ([]*SearchResult, error) {
 	var items []toshoItem
-	if err := util.GetJSON(ctx, "https://feed.animetosho.org/json?"+params.Encode(), nil, &items); err != nil {
+	if err := util.GetJSON(ctx, a.base()+"/json?"+params.Encode(), nil, &items); err != nil {
 		return nil, err
 	}
 	var out []*SearchResult
@@ -387,7 +459,9 @@ func (a *AnimeTosho) fetch(ctx context.Context, params url.Values) ([]*SearchRes
 			r.Date = time.Unix(it.Timestamp, 0).Format(time.RFC3339)
 		}
 		enrich(r)
-		if it.NumFiles > 1 {
+		// Several files make a batch, unless the name is one episode's
+		// (an episode can come with extra files).
+		if it.NumFiles > 1 && r.EpisodeNumber < 0 {
 			r.IsBatch = true
 		}
 		out = append(out, r)
@@ -402,15 +476,22 @@ func (a *AnimeTosho) Search(ctx context.Context, query string) ([]*SearchResult,
 func (a *AnimeTosho) SmartSearch(ctx context.Context, q SmartQuery) ([]*SearchResult, error) {
 	// Exact episode lookups via AniDB ids when available.
 	if q.Query == "" && q.AnidbEID > 0 && !q.Batch {
-		res, err := a.fetch(ctx, url.Values{"eid": {strconv.Itoa(q.AnidbEID)}})
-		if err == nil && len(res) > 0 {
-			return dedupeSort(filterRes(res, q.Resolution)), nil
+		if res, err := a.fetch(ctx, url.Values{"eid": {strconv.Itoa(q.AnidbEID)}}); err == nil {
+			if res = filterRes(res, q.Resolution); len(res) > 0 {
+				return dedupeSort(res), nil
+			}
 		}
 	}
+	// The AniDB anime feed only lists the newest releases: an older episode
+	// or a batch needs the title search too.
+	var byID []*SearchResult
 	if q.Query == "" && q.AnidbAID > 0 {
 		res, err := a.fetch(ctx, url.Values{"aid": {strconv.Itoa(q.AnidbAID)}})
-		if err == nil && len(res) > 0 {
-			return dedupeSort(filterRes(filterSmart(res, q), q.Resolution)), nil
+		if err == nil {
+			byID = filterRes(filterSmart(res, q), q.Resolution)
+			if answers(byID, q) {
+				return dedupeSort(byID), nil
+			}
 		}
 	}
 	var all []*SearchResult
@@ -423,10 +504,25 @@ func (a *AnimeTosho) SmartSearch(ctx context.Context, q SmartQuery) ([]*SearchRe
 		}
 		all = append(all, res...)
 	}
+	all = append(filterSmart(all, q), byID...)
 	if len(all) == 0 && firstErr != nil {
 		return nil, firstErr
 	}
-	return dedupeSort(filterSmart(all, q)), nil
+	return dedupeSort(all), nil
+}
+
+// answers reports whether results already filtered for q have what it asks
+// for: a release of the episode, or anything for other queries.
+func answers(results []*SearchResult, q SmartQuery) bool {
+	if q.Batch || q.Episode <= 0 || q.Media == nil || q.Media.Format == "MOVIE" {
+		return len(results) > 0
+	}
+	for _, r := range results {
+		if r.EpisodeNumber == q.Episode && !r.IsBatch {
+			return true
+		}
+	}
+	return false
 }
 
 func filterRes(res []*SearchResult, resolution string) []*SearchResult {
