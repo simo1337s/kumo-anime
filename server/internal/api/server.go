@@ -242,13 +242,20 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			kind = clientShell
 		}
 
+		// Other websites may link to the app, but must not load or call the
+		// API (Fetch Metadata; browsers send it to 127.0.0.1 and HTTPS).
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if site := r.Header.Get("Sec-Fetch-Site"); site == "cross-site" || site == "same-site" {
+				http.Error(w, "cross-site request refused", http.StatusForbidden)
+				return
+			}
+		}
 		// CSRF: state-changing requests must come from our own origin.
+		// "null" (sandboxed frames, file: pages) is refused too.
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-			if origin := r.Header.Get("Origin"); origin != "" && origin != "null" {
-				if !strings.HasSuffix(origin, "://"+r.Host) {
-					http.Error(w, "cross-origin request refused", http.StatusForbidden)
-					return
-				}
+			if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host && origin != "https://"+r.Host {
+				http.Error(w, "cross-origin request refused", http.StatusForbidden)
+				return
 			}
 		}
 
@@ -272,6 +279,10 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			// API responses (JSON, media, subtitles) are never pages.
+			w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+		}
 		ctx := context.WithValue(r.Context(), ctxKey{}, kind)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -340,6 +351,11 @@ func h(fn func(r *http.Request) (any, error)) http.HandlerFunc {
 func decode(r *http.Request, v any) error {
 	if r.Body == nil {
 		return badRequest("missing body")
+	}
+	// A JSON content type can't be sent cross-site without a CORS
+	// preflight (which is never granted), unlike text/plain form posts.
+	if ct := strings.ToLower(r.Header.Get("Content-Type")); !strings.HasPrefix(strings.TrimSpace(ct), "application/json") {
+		return badRequest("expected a JSON body (Content-Type: application/json)")
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 8<<20))
 	if err := dec.Decode(v); err != nil {

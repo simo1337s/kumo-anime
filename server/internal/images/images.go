@@ -4,6 +4,7 @@
 package images
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -106,9 +107,12 @@ func (c *Cache) fetch(ctx context.Context, u string) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", errors.New(resp.Status)
 	}
-	ct := resp.Header.Get("Content-Type")
-	if ct != "" && !strings.HasPrefix(ct, "image/") && !strings.HasPrefix(ct, "application/octet-stream") && !strings.HasPrefix(ct, "binary/") {
-		return "", errors.New("not an image: " + ct)
+	// Judge by the bytes, not the server's Content-Type: only raster
+	// images are cached (no HTML error pages, no SVG).
+	body := bufio.NewReaderSize(io.LimitReader(resp.Body, 20<<20), 512)
+	head, _ := body.Peek(512)
+	if rasterType(head) == "" {
+		return "", errors.New("not an image: " + resp.Header.Get("Content-Type"))
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", err
@@ -117,7 +121,7 @@ func (c *Cache) fetch(ctx context.Context, u string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	n, err := io.Copy(tmp, io.LimitReader(resp.Body, 20<<20))
+	n, err := io.Copy(tmp, body)
 	_ = tmp.Close()
 	if err != nil || n == 0 {
 		_ = os.Remove(tmp.Name())
@@ -133,8 +137,26 @@ func (c *Cache) fetch(ctx context.Context, u string) (string, error) {
 	return p, nil
 }
 
+// rasterType sniffs the image formats browsers display; "" otherwise.
+func rasterType(b []byte) string {
+	// AVIF: an ISO-BMFF "ftyp" box with an avif brand.
+	if len(b) >= 12 && string(b[4:8]) == "ftyp" && (string(b[8:12]) == "avif" || string(b[8:12]) == "avis") {
+		return "image/avif"
+	}
+	switch ct := http.DetectContentType(b); ct {
+	case "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/x-icon":
+		return ct
+	}
+	return ""
+}
+
 // ServeHTTP implements GET /api/img?u=<url>.
 func (c *Cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	if r.Header.Get("Sec-Fetch-Dest") == "document" || r.Header.Get("Sec-Fetch-Dest") == "iframe" {
+		http.Error(w, "not a page", http.StatusForbidden)
+		return
+	}
 	u := r.URL.Query().Get("u")
 	if !valid(u) {
 		http.Error(w, "invalid image url", http.StatusBadRequest)
@@ -158,7 +180,22 @@ func (c *Cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(f, head)
+	ct := rasterType(head[:n])
+	if ct == "" {
+		// Not an image (e.g. cached by an older version): drop it.
+		_ = f.Close()
+		_ = os.Remove(p)
+		http.Redirect(w, r, u, http.StatusTemporaryRedirect)
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	st, _ := f.Stat()
+	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	http.ServeContent(w, r, "", st.ModTime(), f)
 }

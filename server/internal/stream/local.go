@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -218,9 +219,15 @@ func (l *Local) ServeFile(w http.ResponseWriter, r *http.Request, path string) {
 	}
 	defer f.Close()
 	st, _ := f.Stat()
-	if ext := strings.ToLower(filepath.Ext(path)); ext == ".mkv" {
-		w.Header().Set("Content-Type", "video/x-matroska")
+	// Set the type explicitly so a mislabelled file is never sniffed as HTML.
+	ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+	if strings.EqualFold(filepath.Ext(path), ".mkv") {
+		ct = "video/x-matroska"
 	}
+	if !strings.HasPrefix(ct, "video/") && !strings.HasPrefix(ct, "audio/") {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
 	http.ServeContent(w, r, filepath.Base(path), st.ModTime(), f)
 }
 

@@ -117,3 +117,53 @@ func TestClosedNetwork(t *testing.T) {
 		t.Fatalf("LAN dir browsing: got %d", w.Code)
 	}
 }
+
+func TestCrossSiteRequests(t *testing.T) {
+	s := newTestServer(t)
+	local := "127.0.0.1:5000"
+	set := func(kv ...string) func(r *http.Request) {
+		return func(r *http.Request) {
+			for i := 0; i+1 < len(kv); i += 2 {
+				r.Header.Set(kv[i], kv[i+1])
+			}
+		}
+	}
+
+	// Our own pages work.
+	if w := do(s, "POST", "/api/library/scan", local, "{}", set("Origin", "http://127.0.0.1:43211", "Sec-Fetch-Site", "same-origin")); w.Code == http.StatusForbidden {
+		t.Fatalf("same-origin POST refused: %s", w.Body.String())
+	}
+	// Sandboxed frames / file: pages send Origin: null.
+	if w := do(s, "POST", "/api/library/scan", local, "{}", set("Origin", "null")); w.Code != http.StatusForbidden {
+		t.Fatalf("Origin null POST: got %d", w.Code)
+	}
+	// Another local web app (different port) is a different origin.
+	if w := do(s, "POST", "/api/library/scan", local, "{}", set("Origin", "http://127.0.0.1:8080")); w.Code != http.StatusForbidden {
+		t.Fatalf("other-port POST: got %d", w.Code)
+	}
+	// Websites can't load API resources or navigate to them.
+	if w := do(s, "GET", "/api/settings", local, "", set("Sec-Fetch-Site", "cross-site")); w.Code != http.StatusForbidden {
+		t.Fatalf("cross-site GET: got %d", w.Code)
+	}
+	if w := do(s, "GET", "/api/proxy?u=aHR0cHM6Ly9leGFtcGxlLmNvbS8", local, "", set("Sec-Fetch-Site", "same-site", "Sec-Fetch-Dest", "document")); w.Code != http.StatusForbidden {
+		t.Fatalf("same-site proxy navigation: got %d", w.Code)
+	}
+	// ...but may link to the app itself.
+	if w := do(s, "GET", "/", local, "", set("Sec-Fetch-Site", "cross-site", "Sec-Fetch-Dest", "document")); w.Code != http.StatusOK {
+		t.Fatalf("cross-site link to the app: got %d", w.Code)
+	}
+	// Proxied/cached remote content is never opened as a page on our origin.
+	w := do(s, "GET", "/api/proxy?u=aHR0cHM6Ly9leGFtcGxlLmNvbS8", local, "", set("Sec-Fetch-Site", "same-origin", "Sec-Fetch-Dest", "document"))
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Fatalf("proxy navigation: got %d csp=%q", w.Code, w.Header().Get("Content-Security-Policy"))
+	}
+	// A JSON body sent as text/plain (no CORS preflight) is refused.
+	r := httptest.NewRequest("PUT", "http://127.0.0.1:43211/api/settings", strings.NewReader(`{"ui":{"accentColor":"#000000"}}`))
+	r.RemoteAddr = local
+	r.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	s.middleware(s.mux).ServeHTTP(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("text/plain JSON body: got %d", rec.Code)
+	}
+}

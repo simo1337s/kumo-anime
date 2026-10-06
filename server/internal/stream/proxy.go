@@ -3,7 +3,6 @@ package stream
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -51,8 +50,43 @@ func ProxyURL(target string, headers map[string]string) string {
 
 var reURIAttr = regexp.MustCompile(`URI="([^"]+)"`)
 
+// IsDocumentRequest reports a navigation or frame load. Proxied and cached
+// remote content is only ever loaded as media/images/XHR by the app, never
+// opened as a page on Kumo's origin.
+func IsDocumentRequest(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Dest") {
+	case "document", "iframe", "frame", "embed", "object":
+		return true
+	}
+	return false
+}
+
+// SafeContentType passes through media, image, playlist and subtitle types
+// and turns anything a browser could run as a page (HTML, SVG, XML, JS…)
+// into a plain download.
+func SafeContentType(ct string) string {
+	mt := strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
+	if mt == "" || strings.Contains(mt, "html") || strings.Contains(mt, "xml") || strings.Contains(mt, "svg") || strings.Contains(mt, "script") {
+		return "application/octet-stream"
+	}
+	switch {
+	case strings.HasPrefix(mt, "video/"), strings.HasPrefix(mt, "audio/"), strings.HasPrefix(mt, "image/"):
+		return ct
+	case mt == "application/vnd.apple.mpegurl", mt == "application/x-mpegurl", mt == "application/mp4",
+		mt == "text/vtt", mt == "text/plain", mt == "application/octet-stream":
+		return ct
+	}
+	return "application/octet-stream"
+}
+
 // ServeProxy implements GET /api/proxy.
 func ServeProxy(w http.ResponseWriter, r *http.Request) {
+	// Remote content must never run as a page on Kumo's origin.
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	if IsDocumentRequest(r) {
+		http.Error(w, "not a page", http.StatusForbidden)
+		return
+	}
 	rawU, err := base64.RawURLEncoding.DecodeString(r.URL.Query().Get("u"))
 	if err != nil {
 		http.Error(w, "bad url", http.StatusBadRequest)
@@ -108,7 +142,6 @@ func ServeProxy(w http.ResponseWriter, r *http.Request) {
 		resp.Body = io.NopCloser(peek)
 	}
 
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-store")
 
 	switch {
@@ -130,11 +163,12 @@ func ServeProxy(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
 		_, _ = w.Write(ToVTT(body, path))
 	default:
-		for _, h := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"} {
+		for _, h := range []string{"Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"} {
 			if v := resp.Header.Get(h); v != "" {
 				w.Header().Set(h, v)
 			}
 		}
+		w.Header().Set("Content-Type", SafeContentType(ctype))
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
 	}
@@ -258,9 +292,4 @@ func assToVTT(text string) []byte {
 		out.WriteString(assTime(get("start")) + " --> " + assTime(get("end")) + "\n" + strings.TrimSpace(txt) + "\n\n")
 	}
 	return []byte(out.String())
-}
-
-// FetchText is a helper used by the subtitle endpoint.
-func FetchText(ctx context.Context, u string, headers map[string]string) ([]byte, error) {
-	return util.GetBytes(ctx, u, headers)
 }
