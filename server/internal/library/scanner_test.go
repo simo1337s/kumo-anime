@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/simo1337s/animetest/server/internal/config"
@@ -199,5 +200,107 @@ func TestSaveScannedKeepsConcurrentChanges(t *testing.T) {
 	}
 	if f, _ := s.Store.Get("/lib/x.mkv"); f.Size != 42 {
 		t.Fatalf("scan result not saved: %+v", f)
+	}
+}
+
+func TestFoldersExplainSkippedFolders(t *testing.T) {
+	base := t.TempDir()
+	lib := filepath.Join(base, "Anime")
+	s1 := filepath.Join(lib, "[Lulu] Code Geass")
+	touch(t, filepath.Join(s1, "Code Geass - 01.mkv"))
+	touch(t, filepath.Join(s1, "Code Geass - 02.mkv"))
+	touch(t, filepath.Join(s1, "Scans", "01.jpg")) // extras: not listed
+	// Still downloading in qBittorrent.
+	r2 := filepath.Join(lib, "Code Geass Hangyaku no Lelouch R2")
+	touch(t, filepath.Join(r2, "Code Geass R2 - 01.mkv.!qB"))
+	touch(t, filepath.Join(r2, "Code Geass R2 - 02.mkv.!qB"))
+	touch(t, filepath.Join(lib, "Some Show Sample Clips", "clip.mkv"))
+	touch(t, filepath.Join(lib, "Packed", "show.rar"))
+	touch(t, filepath.Join(lib, "Packed", "show.r00"))
+	touch(t, filepath.Join(lib, "Creditless", "Show NCOP.mkv"))
+	touch(t, filepath.Join(lib, "Artbook", "Scans", "01.jpg"))
+	touch(t, filepath.Join(lib, "Notes", "readme.txt"))
+	touch(t, filepath.Join(lib, "Kumo Download", ".kumo-download-abc", "Show - 01 [SUB].mp4"))
+	if err := os.MkdirAll(filepath.Join(lib, "Empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := newTestScanner(t, lib)
+	scan(t, s)
+
+	byLabel := func() map[string]FolderInfo {
+		t.Helper()
+		fs, err := s.Folders()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]FolderInfo{}
+		for _, f := range fs {
+			out[f.Label] = f
+		}
+		return out
+	}
+	got := byLabel()
+	if f := got["[Lulu] Code Geass"]; f.Videos != 2 || f.NotIndexed != 0 || f.Problem != "" {
+		t.Errorf("season 1: %+v", f)
+	}
+	problems := map[string]string{
+		"Code Geass Hangyaku no Lelouch R2": "Still downloading (2 unfinished files)",
+		"Some Show Sample Clips":            "“*sample*”",
+		"Packed":                            "archives (.rar)",
+		"Creditless":                        "Ignore patterns skip its videos (*NCOP*)",
+		"Artbook":                           "No video files in this folder or its subfolders",
+		"Notes":                             "No video files here (1 .txt)",
+		"Kumo Download":                     "Still downloading (1 unfinished file)",
+		"Empty":                             "The folder is empty",
+	}
+	for label, want := range problems {
+		if f, ok := got[label]; !ok || !strings.Contains(f.Problem, want) {
+			t.Errorf("%s: want problem %q, got %+v (listed: %v)", label, want, f, ok)
+		}
+	}
+	for _, label := range []string{"[Lulu] Code Geass/Scans", "Artbook/Scans", "Kumo Download/.kumo-download-abc"} {
+		if f, ok := got[label]; ok {
+			t.Errorf("%s shouldn't be listed: %+v", label, f)
+		}
+	}
+
+	// The download finished, but no scan ran yet: index it on the spot.
+	for _, n := range []string{"Code Geass R2 - 01.mkv", "Code Geass R2 - 02.mkv"} {
+		if err := os.Rename(filepath.Join(r2, n+".!qB"), filepath.Join(r2, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if f := byLabel()["Code Geass Hangyaku no Lelouch R2"]; f.Videos != 2 || f.NotIndexed != 2 || f.Problem != "" {
+		t.Errorf("finished, not indexed: %+v", f)
+	}
+	files, err := s.IndexFolders([]string{r2})
+	if err != nil || len(files) != 2 || files[0].MediaID != 0 || files[0].Episode != 1 || files[1].Episode != 2 {
+		t.Fatalf("index: %d files %v", len(files), err)
+	}
+	if f := byLabel()["Code Geass Hangyaku no Lelouch R2"]; f.NotIndexed != 0 {
+		t.Errorf("after indexing: %+v", f)
+	}
+	// Indexing again changes nothing.
+	if again, err := s.IndexFolders([]string{r2}); err != nil || len(again) != 2 {
+		t.Fatalf("index again: %d files %v", len(again), err)
+	}
+	for _, dir := range []string{base, filepath.Join(lib, "..", "x"), "Anime"} {
+		if _, err := s.IndexFolders([]string{dir}); err == nil {
+			t.Errorf("indexing %s must be refused", dir)
+		}
+	}
+
+	// Files ignored by hand.
+	all, _ := s.Store.All()
+	for _, f := range all {
+		if f.Dir == s1 {
+			f.Ignored = true
+			if err := s.Store.Save(f); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if f := byLabel()["[Lulu] Code Geass"]; !strings.Contains(f.Problem, "ignore its 2 videos") {
+		t.Errorf("ignored by hand: %+v", f)
 	}
 }

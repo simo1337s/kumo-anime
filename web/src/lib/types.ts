@@ -519,3 +519,12 @@ export type MangaChapter = {
     language?: string
     updatedAt?: string
 }
+
+// A library folder as found on disk (Library tools, manual matching).
+export type FolderInfo = {
+    dir: string
+    label: string // path below its library folder
+    videos: number // video files directly inside
+    notIndexed: number // of those, not in the library index yet
+    problem?: string // why it has nothing to match (still downloading, unreadable…)
+}

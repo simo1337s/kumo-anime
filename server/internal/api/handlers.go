@@ -84,6 +84,29 @@ func (s *Server) scan(r *http.Request) (any, error) {
 	return map[string]bool{"started": true}, nil
 }
 
+// indexFolders adds library folders the scan skipped (or hasn't reached)
+// to the index right away, so they can be matched by hand.
+func (s *Server) indexFolders(r *http.Request) (any, error) {
+	var body struct {
+		Dirs []string `json:"dirs"`
+	}
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	if len(body.Dirs) == 0 {
+		return nil, badRequest("no folders given")
+	}
+	files, err := s.app.Scanner.IndexFolders(body.Dirs)
+	if err != nil {
+		return nil, badRequest(err.Error())
+	}
+	s.app.Hub.Publish("library-updated", nil)
+	if files == nil {
+		files = []*library.LocalFile{}
+	}
+	return files, nil
+}
+
 func (s *Server) unmatched(r *http.Request) (any, error) {
 	files, err := s.app.Files.Unmatched()
 	if err != nil {

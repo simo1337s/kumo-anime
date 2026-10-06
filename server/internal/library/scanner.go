@@ -291,13 +291,18 @@ func (s *Scanner) autoScan() {
 }
 
 func ignored(name string, patterns []string) bool {
+	return ignorePattern(name, patterns) != ""
+}
+
+// ignorePattern returns the ignore pattern name matches, if any.
+func ignorePattern(name string, patterns []string) string {
 	lower := strings.ToLower(name)
 	for _, p := range patterns {
 		if ok, _ := filepath.Match(strings.ToLower(p), lower); ok {
-			return true
+			return p
 		}
 	}
-	return false
+	return ""
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

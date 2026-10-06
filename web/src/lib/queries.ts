@@ -7,6 +7,7 @@ import type {
     DownloadItem,
     EntryView,
     ExtensionInfo,
+    FolderInfo,
     ListEntry,
     LocalFile,
     MangaChapter,
@@ -199,6 +200,10 @@ export function useUnmatched() {
         queryKey: ["library", "unmatched"],
         queryFn: () => api.get<{ dir: string; title: string; files: LocalFile[] }[]>("/api/library/unmatched"),
     })
+}
+
+export function useLibraryFolders(enabled = true) {
+    return useQuery({ queryKey: ["library", "folders"], queryFn: () => api.get<FolderInfo[] | null>("/api/library/folders"), enabled })
 }
 
 export function useLibraryFiles() {
