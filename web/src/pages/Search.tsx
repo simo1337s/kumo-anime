@@ -1,6 +1,7 @@
 import { Search as SearchIcon, SlidersHorizontal, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
+import { ListCardMenu } from "@/components/ListCardMenu"
 import { MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
 import { Button, EmptyState, ErrorState, Input, Select } from "@/components/ui"
 import { useSearch } from "@/lib/queries"
@@ -189,7 +190,7 @@ export default function SearchPage() {
                 <>
                     <MediaGrid>
                         {acc.map(m => (
-                            <MediaCard key={m.id} media={m} listEntry={m.mediaListEntry} />
+                            <MediaCard key={m.id} media={m} listEntry={m.mediaListEntry} menu={<ListCardMenu media={m} />} />
                         ))}
                     </MediaGrid>
                     {error && page > 1 ? (

@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, Compass, Info, Play, RefreshCw, Star } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { ListCardMenu } from "@/components/ListCardMenu"
 import { Carousel, MediaCard, MediaCardSkeleton } from "@/components/MediaCard"
 import { PluginSlot } from "@/components/plugins/PluginSlot"
 import { Button, EmptyState, ErrorState, SectionHeader, Skeleton } from "@/components/ui"
@@ -92,7 +93,7 @@ export default function DiscoverPage() {
                                 ))}
                             </div>
                         ) : (
-                            <Carousel>{((data?.[r.key] as Media[]) ?? []).map(m => <MediaCard key={m.id} media={m} listEntry={m.mediaListEntry} />)}</Carousel>
+                            <Carousel>{((data?.[r.key] as Media[]) ?? []).map(m => <MediaCard key={m.id} media={m} listEntry={m.mediaListEntry} menu={<ListCardMenu media={m} />} />)}</Carousel>
                         )}
                     </section>
                 ))}
