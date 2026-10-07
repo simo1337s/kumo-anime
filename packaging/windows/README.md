@@ -155,10 +155,13 @@ For development, `cd desktop; npm ci; npx electron .` starts the window with
 
 The [Windows release](../../.github/workflows/windows.yml) workflow builds,
 tests and packages everything on a Windows machine, then creates the release
-`windows-v<version>` on the commit it built. Run **Windows release** from the
-repository's **Actions** tab: with **publish** ticked it creates the release
-(running it again on the same commit updates it, replacing files of the same
-name); untick it to only get the files as workflow artifacts.
+`windows-v<version>` on the commit it built. It runs on every push to the
+default branch (pushes that only change docs or the Arch packaging aside), so
+installed copies get every change as an update a few minutes later. It also
+runs from the repository's **Actions** tab (**Windows release**): with
+**publish** ticked it creates the release (running it again on the same
+commit updates it, replacing files of the same name); untick it to only get
+the files as workflow artifacts.
 
 The version is `1.0.<number of commits>`: the first two numbers come from
 `desktop/package.json`, the last one grows with every commit, so there's

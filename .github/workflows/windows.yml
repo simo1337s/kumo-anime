@@ -9,9 +9,11 @@
 # offer it on the Home page (server/internal/update), so the version is also
 # built into kumo.exe, with the commit.
 #
-# Runs by hand from the Actions tab. Running it again on the same commit
-# updates that commit's release. Only the newest 10 Windows releases are
-# kept: older ones are deleted, tags included.
+# Runs on every push to the repository's default branch (except pushes that
+# only change docs or the Arch packaging), so Windows copies get every
+# change, and by hand from the Actions tab. Running it again on the same
+# commit updates that commit's release. Only the newest 10 Windows releases
+# are kept: older ones are deleted, tags included.
 #
 # Windows only: the Arch Linux package is built from source with
 # packaging/arch/PKGBUILD and has nothing to do with this workflow.
@@ -23,6 +25,11 @@
 name: Windows release
 
 on:
+  # Pushes to other branches are skipped (see the job's condition).
+  push:
+    paths-ignore:
+      - "**.md"
+      - "packaging/arch/**"
   workflow_dispatch:
     inputs:
       publish:
@@ -40,6 +47,7 @@ concurrency:
 jobs:
   windows:
     name: Build, test and package (Windows x64)
+    if: github.event_name != 'push' || github.ref_name == github.event.repository.default_branch
     runs-on: windows-latest
     timeout-minutes: 60
     defaults:
@@ -190,7 +198,7 @@ jobs:
       # exist yet), or updates it: new title and notes, and files of the same
       # name replaced.
       - name: Publish the GitHub Release
-        if: inputs.publish
+        if: github.event_name == 'push' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -240,7 +248,7 @@ jobs:
       # releases, by version (numbers compared as numbers: 1.0.10 is newer
       # than 1.0.9), and delete the older ones with their tags.
       - name: Delete old releases
-        if: inputs.publish
+        if: github.event_name == 'push' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
