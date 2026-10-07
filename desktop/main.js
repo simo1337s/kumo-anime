@@ -196,8 +196,17 @@ function isInternal(url) {
     return /^http:\/\/127\.0\.0\.1(:\d+)?\//.test(url)
 }
 
+// The window's own icon. On Linux it's invisible: KDE and other desktops draw
+// it in the window's title bar, where Kumo shows none, while the taskbar and
+// the app menu take Kumo's icon from its desktop entry. On Windows the
+// window's icon is also the taskbar's.
+function windowIcon() {
+    if (process.platform === "linux") return nativeImage.createFromBitmap(Buffer.alloc(32 * 32 * 4), { width: 32, height: 32 })
+    const iconPath = [path.join(__dirname, "icon.png")].find(p => fs.existsSync(p))
+    return iconPath ? nativeImage.createFromPath(iconPath) : undefined
+}
+
 function createWindow() {
-    const iconPath = [path.join(__dirname, "icon.png"), "/usr/share/icons/hicolor/512x512/apps/kumo-anime.png"].find(p => fs.existsSync(p))
     mainWindow = new BrowserWindow({
         width: 1600,
         height: 1000,
@@ -207,7 +216,7 @@ function createWindow() {
         backgroundColor: "#0a0a0b",
         autoHideMenuBar: true,
         show: false,
-        icon: iconPath ? nativeImage.createFromPath(iconPath) : undefined,
+        icon: windowIcon(),
         webPreferences: {
             preload: path.join(__dirname, "preload.js"),
             contextIsolation: true,
