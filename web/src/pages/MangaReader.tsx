@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, ChevronLeft, ChevronRight, Loader2, Maximize, Minimize, RectangleVertical, Rows3 } from "lucide-react"
+import { ArrowLeft, BookOpen, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Maximize, Minimize, RectangleVertical, Rows3, ZoomIn, ZoomOut } from "lucide-react"
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, Tooltip } from "@/components/ui"
 import { api, qs } from "@/lib/api"
+import { usePersisted } from "@/lib/hooks"
 import { useMangaChapters, useStatus } from "@/lib/queries"
 import { toast } from "@/lib/toast"
 import type { MangaPosition, Settings, Status } from "@/lib/types"
@@ -75,6 +76,10 @@ export default function MangaReaderPage() {
     const [wide, setWide] = useState<Record<string, boolean>>({})
     const navigate = useNavigate()
     const marked = useRef<string>("")
+    // How big pages show: 1 fills the space below the buttons, less leaves
+    // more room around them. Remembered by this browser.
+    const [zoom, setZoom] = usePersisted("kumo-manga-zoom", 1)
+    const zoomBy = (d: number) => setZoom(z => Math.round(Math.min(1, Math.max(0.5, z + d)) * 100) / 100)
 
     const { data: chapters } = useMangaChapters(id, provider)
     const list = chapters?.chapters ?? []
@@ -136,6 +141,9 @@ export default function MangaReaderPage() {
         } else if (at > 0) setPos({ chapter: chapterId, page: spreads[at - 1][0] })
         else if (idx > 0) go(idx - 1, END)
     }
+
+    const canBack = at > 0 || idx > 0
+    const canForward = at < spreads.length - 1 || idx < list.length - 1
 
     const markRead = () => {
         if (!chapter || marked.current === chapter.id) return
@@ -209,6 +217,11 @@ export default function MangaReaderPage() {
                 toggleFullscreen()
                 return
             }
+            if (e.key === "-" || e.key === "+" || e.key === "=" || e.key === "0") {
+                if (e.key === "0") setZoom(1)
+                else zoomBy(e.key === "-" ? -0.05 : 0.05)
+                return
+            }
             if (mode === "long-strip") return
             const forward = rtl ? "ArrowLeft" : "ArrowRight"
             const back = rtl ? "ArrowRight" : "ArrowLeft"
@@ -255,7 +268,7 @@ export default function MangaReaderPage() {
                 )}
                 {error && <p className="p-10 pt-24 text-center text-rose-300">{(error as Error).message}</p>}
                 {ready && mode === "long-strip" && (
-                    <div className="mx-auto flex max-w-3xl flex-col">
+                    <div className="mx-auto flex flex-col pt-14" style={{ maxWidth: `${48 * zoom}rem` }}>
                         {pages.map((p, i) => (
                             <img
                                 key={p.index}
@@ -285,7 +298,8 @@ export default function MangaReaderPage() {
                     // first page of a pair is on the right. The sides turn
                     // pages; the middle shows or hides the buttons.
                     <div
-                        className={cn("flex h-full items-center justify-center select-none", rtl && "flex-row-reverse")}
+                        // Room for the buttons above the pages, and some below.
+                        className="flex h-full items-center justify-center px-4 pt-14 pb-6 select-none"
                         onClick={e => {
                             const r = e.currentTarget.getBoundingClientRect()
                             const x = (e.clientX - r.left) / r.width
@@ -297,23 +311,25 @@ export default function MangaReaderPage() {
                             turn(rtl ? x < 0.5 : x >= 0.5)
                         }}
                     >
-                        {near.map((src, k) => {
-                            const slot = spread.indexOf(from + k)
-                            return (
-                                <img
-                                    key={src}
-                                    src={src}
-                                    alt=""
-                                    draggable={false}
-                                    onLoad={e => noteSize(src, e.currentTarget)}
-                                    className={cn(
-                                        "object-contain",
-                                        slot < 0 ? "hidden" : spread.length === 2 ? "h-full w-1/2" : "size-full",
-                                        spread.length === 2 && slot >= 0 && ((slot === 0) !== rtl ? "object-right" : "object-left"),
-                                    )}
-                                />
-                            )
-                        })}
+                        <div className={cn("flex items-center justify-center", rtl && "flex-row-reverse")} style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}>
+                            {near.map((src, k) => {
+                                const slot = spread.indexOf(from + k)
+                                return (
+                                    <img
+                                        key={src}
+                                        src={src}
+                                        alt=""
+                                        draggable={false}
+                                        onLoad={e => noteSize(src, e.currentTarget)}
+                                        className={cn(
+                                            "object-contain",
+                                            slot < 0 ? "hidden" : spread.length === 2 ? "h-full w-1/2" : "size-full",
+                                            spread.length === 2 && slot >= 0 && ((slot === 0) !== rtl ? "object-right" : "object-left"),
+                                        )}
+                                    />
+                                )
+                            })}
+                        </div>
                     </div>
                 )}
             </div>
@@ -345,6 +361,21 @@ export default function MangaReaderPage() {
                         {spread.map(i => i + 1).join("–")} / {total}
                     </span>
                 )}
+                <div className="flex items-center">
+                    <Tooltip content="Zoom out (−)" side="bottom">
+                        <button disabled={zoom <= 0.5} onClick={() => zoomBy(-0.05)} className={bar} aria-label="Zoom out">
+                            <ZoomOut />
+                        </button>
+                    </Tooltip>
+                    <button onClick={() => setZoom(1)} title="Fit (0)" className="min-w-11 pt-0.5 text-center text-[13px] text-white/60 tabular-nums hover:text-white">
+                        {Math.round(zoom * 100)}%
+                    </button>
+                    <Tooltip content="Zoom in (+)" side="bottom">
+                        <button disabled={zoom >= 1} onClick={() => zoomBy(0.05)} className={bar} aria-label="Zoom in">
+                            <ZoomIn />
+                        </button>
+                    </Tooltip>
+                </div>
                 <Dropdown onOpenChange={setMenuOpen}>
                     <Tooltip content="Reading mode" side="bottom">
                         <DropdownTrigger asChild>
@@ -381,15 +412,36 @@ export default function MangaReaderPage() {
                 </Tooltip>
                 <Tooltip content="Previous chapter" side="bottom">
                     <button disabled={idx <= 0} onClick={() => go(idx - 1)} className={bar} aria-label="Previous chapter">
-                        <ChevronLeft />
+                        <ChevronsLeft />
                     </button>
                 </Tooltip>
                 <Tooltip content="Next chapter" side="bottom">
                     <button disabled={idx < 0 || idx >= list.length - 1} onClick={() => go(idx + 1)} className={bar} aria-label="Next chapter">
-                        <ChevronRight />
+                        <ChevronsRight />
                     </button>
                 </Tooltip>
             </div>
+
+            {/* Page arrows on both sides; right to left, the left one goes forward. */}
+            {ready && mode !== "long-strip" &&
+                ([
+                    ["left-3", rtl, <ChevronLeft key="l" />],
+                    ["right-3", !rtl, <ChevronRight key="r" />],
+                ] as const).map(([side, forward, icon]) => (
+                    <button
+                        key={side}
+                        onClick={() => turn(forward)}
+                        disabled={forward ? !canForward : !canBack}
+                        aria-label={forward ? "Next page" : "Previous page"}
+                        className={cn(
+                            "absolute top-1/2 z-10 grid size-12 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white transition-[opacity,background-color] duration-300 hover:bg-black/80 disabled:invisible [&_svg]:size-6",
+                            side,
+                            shown ? "opacity-100" : "pointer-events-none opacity-0",
+                        )}
+                    >
+                        {icon}
+                    </button>
+                ))}
 
             {mode !== "long-strip" && total > 0 && (
                 <div className={cn("absolute inset-x-0 bottom-0 h-0.5 bg-white/10 transition-opacity duration-300", shown ? "opacity-100" : "opacity-0")}>
