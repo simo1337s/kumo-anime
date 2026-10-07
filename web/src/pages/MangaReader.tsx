@@ -25,16 +25,22 @@ function proxied(p: Page) {
     return `/api/proxy?u=${u}${h ? `&h=${h}` : ""}`
 }
 
-// Pairs pages like a printed book: the first one (the cover) alone, then
-// 2–3, 4–5… or, shifted by one, 1–2, 3–4… A page wider than it is tall is a
-// double spread already and stays alone; pairing goes on after it.
-function pairUp(n: number, wide: (i: number) => boolean, cover: boolean) {
+// Pairs pages (their indexes) like a printed book: the first one (the cover)
+// alone, then 2–3, 4–5… or, shifted by one, 1–2, 3–4… A page wider than it is
+// tall is a double spread already and stays alone; pairing goes on after it.
+function pairUp(ids: number[], wide: (i: number) => boolean, cover: boolean) {
     const out: number[][] = []
-    for (let i = 0; i < n; i += out[out.length - 1].length) {
-        out.push((i === 0 && cover) || i === n - 1 || wide(i) || wide(i + 1) ? [i] : [i, i + 1])
+    for (let k = 0; k < ids.length; k += out[out.length - 1].length) {
+        const i = ids[k]
+        const j = ids[k + 1]
+        out.push((k === 0 && cover) || j === undefined || wide(i) || wide(j) ? [i] : [i, j])
     }
     return out
 }
+
+// A strip rather than a page: a slice of one (some sites cut pages up), an
+// ad or credits banner, or a webtoon's long image. Width over height.
+const isStrip = (ratio: number) => ratio > 2.5 || ratio < 0.4
 
 // Two pages side by side get too small on a screen taller than it is wide
 // (phones): they are shown one at a time until it is turned or resized.
@@ -72,8 +78,10 @@ export default function MangaReaderPage() {
     const double = mode === "double" && !narrow
     // The chapter whose pairs are shifted by one.
     const [shifted, setShifted] = useState("")
-    // Pages found to be wider than tall once loaded, by image URL.
-    const [wide, setWide] = useState<Record<string, boolean>>({})
+    // The pages' width over height once loaded, by image URL.
+    const [ratios, setRatios] = useState<Record<string, number>>({})
+    // Chapters found to come in strips.
+    const [stripChapters, setStripChapters] = useState<string[]>([])
     const navigate = useNavigate()
     const marked = useRef<string>("")
     // How big pages show: 1 fills the space below the buttons, less leaves
@@ -107,9 +115,23 @@ export default function MangaReaderPage() {
     const wanted = pos?.chapter === chapterId ? pos.page : (asked ?? resumeAt)
     const page = total ? Math.min(wanted, total - 1) : 0
 
-    // The pages on screen together: one, or two side by side.
-    const spreads = double ? pairUp(total, i => !!wide[srcs[i]], shifted !== chapterId) : srcs.map((_, i) => [i])
-    const at = Math.max(0, spreads.findIndex(s => s.includes(page)))
+    // A chapter that comes in strips (most of its pages loaded so far are)
+    // reads as one long strip, where they join up again, whatever the mode.
+    const known = srcs.filter(src => ratios[src])
+    const strips = known.filter(src => isStrip(ratios[src])).length
+    const inStrips = stripChapters.includes(chapterId) || (known.length > 0 && known.length >= Math.min(3, total) && strips * 2 >= known.length)
+    useEffect(() => {
+        if (inStrips && !stripChapters.includes(chapterId)) setStripChapters(l => [...l, chapterId])
+    }, [inStrips, chapterId, stripChapters])
+    const view: Mode = inStrips ? "long-strip" : mode
+
+    // The pages on screen together: one, or two side by side. Strips in a
+    // chapter of pages (ad and credits banners) are left out.
+    const ids = srcs.map((_, i) => i).filter(i => !isStrip(ratios[srcs[i]] ?? 1))
+    const spreads = double ? pairUp(ids, i => (ratios[srcs[i]] ?? 0) > 1, shifted !== chapterId) : ids.map(i => [i])
+    // The spread with the page, or the next one when it was left out.
+    const found = spreads.findIndex(s => s[s.length - 1] >= page)
+    const at = found < 0 ? Math.max(0, spreads.length - 1) : found
     const spread = spreads[at] ?? []
     const last = spread[spread.length - 1] ?? -1
     // Pages near the ones on screen stay mounted, hidden: the next ones load
@@ -142,6 +164,17 @@ export default function MangaReaderPage() {
         else if (idx > 0) go(idx - 1, END)
     }
 
+    // Opening a chapter puts the manga on the Reading list (the server leaves
+    // it where it is when it's there already, or rereading, or completed).
+    const started = useRef(0)
+    useEffect(() => {
+        if (!(id > 0) || started.current === id) return
+        started.current = id
+        api.post<{ added: boolean }>(`/api/manga/${id}/reading`)
+            .then(r => r?.added && toast.success("Added to Reading"))
+            .catch(() => {})
+    }, [id])
+
     const canBack = at > 0 || idx > 0
     const canForward = at < spreads.length - 1 || idx < list.length - 1
 
@@ -166,7 +199,7 @@ export default function MangaReaderPage() {
     }
 
     const noteSize = (src: string, img: HTMLImageElement) => {
-        if (img.naturalWidth > img.naturalHeight) setWide(w => (w[src] ? w : { ...w, [src]: true }))
+        if (img.naturalHeight > 0) setRatios(r => (r[src] ? r : { ...r, [src]: img.naturalWidth / img.naturalHeight }))
     }
 
     // The buttons show while the mouse moves and fade out while reading.
@@ -187,7 +220,7 @@ export default function MangaReaderPage() {
 
     // Saves where reading is, shortly after it changes, and right away when
     // the reader closes.
-    const current = mode === "long-strip" ? (stripPage ?? page) : (spread[0] ?? 0)
+    const current = view === "long-strip" ? (stripPage ?? page) : (spread[0] ?? 0)
     const pending = useRef<(() => void) | null>(null)
     const lastSaved = useRef("")
     useEffect(() => {
@@ -222,7 +255,7 @@ export default function MangaReaderPage() {
                 else zoomBy(e.key === "-" ? -0.05 : 0.05)
                 return
             }
-            if (mode === "long-strip") return
+            if (view === "long-strip") return
             const forward = rtl ? "ArrowLeft" : "ArrowRight"
             const back = rtl ? "ArrowRight" : "ArrowLeft"
             if (e.key === forward || e.key === "PageDown" || (e.key === " " && !e.shiftKey)) turn(true)
@@ -236,20 +269,20 @@ export default function MangaReaderPage() {
     })
 
     useEffect(() => {
-        if (mode !== "long-strip" && last >= 0 && last === total - 1) markRead()
+        if (view !== "long-strip" && spreads.length > 0 && at === spreads.length - 1) markRead()
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [last, mode, pages])
+    }, [at, spreads.length, view, pages])
 
     const ready = !!pages && !positionPending
     const bar = "grid size-9 place-items-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white disabled:opacity-30 [&_svg]:size-[18px]"
 
     return (
-        <div className={cn("fixed inset-0 z-[70] bg-black text-white", !shown && mode !== "long-strip" && "cursor-none")} onMouseMove={poke}>
+        <div className={cn("fixed inset-0 z-[70] bg-black text-white", !shown && view !== "long-strip" && "cursor-none")} onMouseMove={poke}>
             <div
                 id="reader"
-                className={cn("absolute inset-0", mode === "long-strip" ? "overflow-y-auto" : "overflow-hidden")}
+                className={cn("absolute inset-0", view === "long-strip" ? "overflow-y-auto" : "overflow-hidden")}
                 onScroll={e => {
-                    if (mode !== "long-strip") return
+                    if (view !== "long-strip") return
                     const el = e.currentTarget
                     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 400) markRead()
                     const top = el.getBoundingClientRect().top + 80
@@ -267,7 +300,7 @@ export default function MangaReaderPage() {
                     </div>
                 )}
                 {error && <p className="p-10 pt-24 text-center text-rose-300">{(error as Error).message}</p>}
-                {ready && mode === "long-strip" && (
+                {ready && view === "long-strip" && (
                     <div className="mx-auto flex flex-col pt-14" style={{ maxWidth: `${48 * zoom}rem` }}>
                         {pages.map((p, i) => (
                             <img
@@ -278,6 +311,7 @@ export default function MangaReaderPage() {
                                 loading="lazy"
                                 className="w-full"
                                 onLoad={e => {
+                                    noteSize(srcs[i], e.currentTarget)
                                     // Back where reading stopped, once the page is there.
                                     if (i !== page || page === 0 || restored.current === chapterId) return
                                     restored.current = chapterId
@@ -292,7 +326,7 @@ export default function MangaReaderPage() {
                         )}
                     </div>
                 )}
-                {ready && mode !== "long-strip" && spread.length > 0 && (
+                {ready && view !== "long-strip" && spread.length > 0 && (
                     // The pages fill the window, whole: each of a pair gets
                     // half of it, against the other one. Right to left, the
                     // first page of a pair is on the right. The sides turn
@@ -355,8 +389,9 @@ export default function MangaReaderPage() {
                 </Tooltip>
                 <div className="min-w-0 flex-1 px-2 pt-1.5">
                     <p className="truncate text-sm font-medium">{chapter ? chapter.title || `Chapter ${chapter.chapter}` : "Loading…"}</p>
+                    {view !== mode && <p className="truncate text-xs text-white/50">This chapter comes in strips: they're joined into one long strip</p>}
                 </div>
-                {mode !== "long-strip" && spread.length > 0 && (
+                {view !== "long-strip" && spread.length > 0 && (
                     <span className="px-2 pt-2 text-[13px] text-white/60 tabular-nums">
                         {spread.map(i => i + 1).join("–")} / {total}
                     </span>
@@ -423,7 +458,7 @@ export default function MangaReaderPage() {
             </div>
 
             {/* Page arrows on both sides; right to left, the left one goes forward. */}
-            {ready && mode !== "long-strip" &&
+            {ready && view !== "long-strip" &&
                 ([
                     ["left-3", rtl, <ChevronLeft key="l" />],
                     ["right-3", !rtl, <ChevronRight key="r" />],
@@ -443,7 +478,7 @@ export default function MangaReaderPage() {
                     </button>
                 ))}
 
-            {mode !== "long-strip" && total > 0 && (
+            {view !== "long-strip" && total > 0 && (
                 <div className={cn("absolute inset-x-0 bottom-0 h-0.5 bg-white/10 transition-opacity duration-300", shown ? "opacity-100" : "opacity-0")}>
                     <div className="h-full bg-white/60 transition-[width] duration-300" style={{ width: `${((last + 1) / total) * 100}%` }} />
                 </div>

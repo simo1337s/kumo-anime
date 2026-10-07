@@ -200,6 +200,15 @@ func (s *Service) SetPosition(mediaID int, p Position) error {
 	return s.db.SetKV(positionKey(mediaID), p)
 }
 
+// StartReading puts a manga the user opened a chapter of on the list as
+// reading, unless the list has it there already, as rereading or as
+// completed (the rules of starting an anime: Platform.StartWatching). The
+// progress stays: finishing chapters moves it (MarkRead). It reports
+// whether the list changed.
+func (s *Service) StartReading(ctx context.Context, mediaID int) (bool, error) {
+	return s.platform.StartWatching(ctx, mediaID)
+}
+
 func (s *Service) MarkRead(ctx context.Context, mediaID int, chapter string) error {
 	n, err := strconv.ParseFloat(chapter, 64)
 	if err != nil || n <= 0 {

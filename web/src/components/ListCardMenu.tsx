@@ -3,7 +3,7 @@ import { BookmarkCheck, BookmarkPlus, BookmarkX } from "lucide-react"
 import { toast } from "@/lib/toast"
 import { api } from "@/lib/api"
 import type { Media } from "@/lib/types"
-import { LIST_STATUS, title } from "@/lib/utils"
+import { LIST_STATUS, LIST_STATUS_MANGA, title } from "@/lib/utils"
 import { DropdownItem, DropdownLabel, DropdownSeparator } from "./ui"
 
 type Entry = Media["mediaListEntry"]
@@ -19,8 +19,8 @@ function cacheEntry(qc: QueryClient, mediaId: number, entry: Entry) {
     qc.setQueriesData({ queryKey: ["search"] }, (old: { media?: Media[] | null } | undefined) => (old?.media ? { ...old, media: old.media.map(fix) } : old))
 }
 
-// The right-click (or "⋯") menu of anime cards on Discover and Search: puts
-// an anime on your Planning list, or takes it off it again.
+// The right-click (or "⋯") menu of anime and manga cards (Discover, Search,
+// Manga): puts one on your Planning list, or takes it off it again.
 export function ListCardMenu({ media }: { media: Media }) {
     const qc = useQueryClient()
     const entry = media.mediaListEntry
@@ -63,7 +63,7 @@ export function ListCardMenu({ media }: { media: Media }) {
     const planned = entry?.status === "PLANNING"
     return (
         <>
-            <DropdownLabel>{entry ? `On your list: ${LIST_STATUS[entry.status] ?? entry.status}` : "Not on your list"}</DropdownLabel>
+            <DropdownLabel>{entry ? `On your list: ${(media.type === "MANGA" ? LIST_STATUS_MANGA : LIST_STATUS)[entry.status] ?? entry.status}` : "Not on your list"}</DropdownLabel>
             <DropdownItem icon={planned ? <BookmarkCheck /> : <BookmarkPlus />} disabled={planned} onSelect={plan}>
                 {planned ? "In Planning" : entry ? "Move to Planning" : "Add to Planning"}
             </DropdownItem>

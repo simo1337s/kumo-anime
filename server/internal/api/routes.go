@@ -214,6 +214,7 @@ func (s *Server) routes() {
 	}))
 	m.HandleFunc("POST /api/manga/mapping", h(s.mangaMapping))
 	m.HandleFunc("POST /api/manga/{id}/progress", h(s.mangaProgress))
+	m.HandleFunc("POST /api/manga/{id}/reading", h(s.mangaStartReading))
 	m.HandleFunc("GET /api/manga/{id}/position", h(s.mangaPosition))
 	m.HandleFunc("PUT /api/manga/{id}/position", h(s.saveMangaPosition))
 

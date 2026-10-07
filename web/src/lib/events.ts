@@ -43,7 +43,10 @@ export function connectEvents(qc: QueryClient) {
                 qc.invalidateQueries({ queryKey: ["collection"] })
                 qc.invalidateQueries({ queryKey: ["entry"] })
                 qc.invalidateQueries({ queryKey: ["list"] })
-                qc.invalidateQueries({ queryKey: ["manga"] })
+                // Manga lists and the list entry on a manga's page; not the
+                // chapters or pages, which providers would send again.
+                qc.invalidateQueries({ queryKey: ["manga", "collection"] })
+                qc.invalidateQueries({ queryKey: ["manga", "media"] })
                 break
             case "settings-updated":
                 qc.invalidateQueries({ queryKey: ["status"] })

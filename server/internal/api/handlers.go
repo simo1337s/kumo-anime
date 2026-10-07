@@ -1038,6 +1038,18 @@ func (s *Server) saveMangaPosition(r *http.Request) (any, error) {
 	return nil, nil
 }
 
+func (s *Server) mangaStartReading(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	added, err := s.app.Manga.StartReading(r.Context(), id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]bool{"added": added}, nil
+}
+
 func (s *Server) mangaProgress(r *http.Request) (any, error) {
 	id, err := pathID(r, "id")
 	if err != nil {

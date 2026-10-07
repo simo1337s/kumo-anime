@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { BookOpen, Puzzle } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
+import { ListCardMenu } from "@/components/ListCardMenu"
 import { MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
 import { Button, EmptyState, ErrorState, Tabs } from "@/components/ui"
 import { api } from "@/lib/api"
@@ -62,7 +63,13 @@ export default function MangaPage() {
             ) : (
                 <MediaGrid>
                     {entries.map(e => (
-                        <MediaCard key={e.mediaId} media={e.media} listEntry={e} />
+                        <MediaCard
+                            key={e.mediaId}
+                            media={e.media}
+                            listEntry={e}
+                            // The menu tells the list status from the media's entry.
+                            menu={<ListCardMenu media={{ ...e.media, mediaListEntry: { id: e.id, status: e.status, progress: e.progress, score: e.score, repeat: e.repeat } }} />}
+                        />
                     ))}
                 </MediaGrid>
             )}
