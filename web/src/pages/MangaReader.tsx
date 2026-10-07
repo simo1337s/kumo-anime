@@ -72,7 +72,10 @@ export default function MangaReaderPage() {
     const [picked, setPicked] = useState<Mode>()
     const saved = status?.settings.manga.readingMode
     const mode = picked ?? (saved === "paged" || saved === "long-strip" ? saved : "double")
-    const rtl = status?.settings.manga.direction === "rtl"
+    // Right to left (manga as printed) unless Settings say otherwise; a
+    // direction picked here shows at once and becomes the default too.
+    const [pickedDir, setPickedDir] = useState<"ltr" | "rtl">()
+    const rtl = (pickedDir ?? status?.settings.manga.direction ?? "rtl") !== "ltr"
     const narrow = useSyncExternalStore(onPortraitChange, () => portrait.matches)
     const fullscreen = useSyncExternalStore(onFullscreenChange, () => !!document.fullscreenElement)
     const double = mode === "double" && !narrow
@@ -194,12 +197,18 @@ export default function MangaReaderPage() {
             .catch(() => {})
     }
 
-    const pickMode = (m: Mode) => {
-        setPicked(m)
-        // Only the reading mode: the server keeps the other settings.
-        api.put<Settings>("/api/settings", { manga: { readingMode: m } })
+    // Saves one manga setting: the server keeps the others.
+    const saveManga = (manga: Partial<Settings["manga"]>) =>
+        api.put<Settings>("/api/settings", { manga })
             .then(s => qc.setQueryData<Status>(["status"], old => (old ? { ...old, settings: s } : old)))
             .catch(() => {})
+    const pickMode = (m: Mode) => {
+        setPicked(m)
+        saveManga({ readingMode: m })
+    }
+    const pickDirection = (d: "ltr" | "rtl") => {
+        setPickedDir(d)
+        saveManga({ direction: d })
     }
 
     const noteSize = (src: string, img: HTMLImageElement) => {
@@ -433,6 +442,23 @@ export default function MangaReaderPage() {
                                 {label}
                             </DropdownItem>
                         ))}
+                        {view !== "long-strip" && (
+                            <>
+                                <DropdownSeparator />
+                                <DropdownLabel>Reading direction</DropdownLabel>
+                                {(
+                                    [
+                                        ["rtl", "Right to left (manga)"],
+                                        ["ltr", "Left to right"],
+                                    ] as const
+                                ).map(([d, label]) => (
+                                    <DropdownItem key={d} onSelect={() => pickDirection(d)}>
+                                        {rtl === (d === "rtl") ? "● " : ""}
+                                        {label}
+                                    </DropdownItem>
+                                ))}
+                            </>
+                        )}
                         {mode === "double" && <DropdownSeparator />}
                         {mode === "double" &&
                             (narrow ? (
@@ -485,7 +511,8 @@ export default function MangaReaderPage() {
 
             {view !== "long-strip" && total > 0 && (
                 <div className={cn("absolute inset-x-0 bottom-0 h-0.5 bg-white/10 transition-opacity duration-300", shown ? "opacity-100" : "opacity-0")}>
-                    <div className="h-full bg-white/60 transition-[width] duration-300" style={{ width: `${((last + 1) / total) * 100}%` }} />
+                    {/* Right to left, it fills from the right. */}
+                    <div className="h-full bg-white/60 transition-[width] duration-300" style={{ width: `${((last + 1) / total) * 100}%`, marginLeft: rtl ? "auto" : undefined }} />
                 </div>
             )}
         </div>

@@ -1113,8 +1113,8 @@ function MangaSection({ draft, set }: SectionProps) {
                     value={draft.manga.direction}
                     onChange={v => set("manga", { direction: v })}
                     options={[
+                        { value: "rtl", label: "Right to left (manga)" },
                         { value: "ltr", label: "Left to right" },
-                        { value: "rtl", label: "Right to left" },
                     ]}
                 />
             </Row>

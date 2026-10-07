@@ -80,3 +80,34 @@ func TestMigrateMangaReadingMode(t *testing.T) {
 		t.Error("new installs should read two pages side by side")
 	}
 }
+
+func TestMigrateMangaDirection(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "kumo.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	// Saved by version 3, when left to right was the default.
+	if err := d.SetKV(settingsKey, map[string]any{"schemaVersion": 3, "manga": map[string]any{"enabled": true, "readingMode": "double", "direction": "ltr"}}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewStore(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Get().Manga.Direction; got != "rtl" {
+		t.Fatalf("got %q, want rtl", got)
+	}
+	// Left to right chosen again afterwards sticks.
+	cur := s.Get()
+	cur.Manga.Direction = "ltr"
+	if _, err := s.Save(cur); err != nil {
+		t.Fatal(err)
+	}
+	if s2, err := NewStore(d); err != nil || s2.Get().Manga.Direction != "ltr" {
+		t.Fatalf("left to right lost after restart (%v)", err)
+	}
+	if Defaults().Manga.Direction != "rtl" {
+		t.Error("new installs should read manga right to left")
+	}
+}
