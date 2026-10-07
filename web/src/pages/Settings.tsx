@@ -15,12 +15,14 @@ import {
     FolderOpen,
     Gamepad2,
     HardDrive,
+    Info,
     LibraryBig,
     Magnet,
     MonitorPlay,
     Network,
     Palette,
     Plus,
+    RefreshCw,
     Save,
     Terminal,
     Trash2,
@@ -32,14 +34,15 @@ import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import { LoginDialog } from "@/components/LoginDialog"
 import { Badge, Button, Dialog, Input, Select, Switch, Textarea } from "@/components/ui"
+import { versionName } from "@/components/UpdateBanner"
 import { api } from "@/lib/api"
-import { useOnlineProviders, useSaveSettings, useStatus } from "@/lib/queries"
+import { useCheckUpdate, useOnlineProviders, useSaveSettings, useStatus, useUpdateStatus } from "@/lib/queries"
 import { exampleMpvPath, installHint, installSource, platformName } from "@/lib/platform"
 import type { Tool } from "@/lib/platform"
 import { canInstallPrograms, useInstallPrograms, useWatchSetup } from "@/lib/programs"
 import { accentPreviewStore } from "@/lib/store"
 import type { Settings, Status } from "@/lib/types"
-import { cn, copyText, formatBytes, img } from "@/lib/utils"
+import { cn, copyText, formatBytes, img, relativeTime } from "@/lib/utils"
 
 type SectionId =
     | "app"
@@ -54,6 +57,7 @@ type SectionId =
     | "manga"
     | "discord"
     | "logs"
+    | "about"
 
 const NAV: { items: { id: SectionId; label: string; icon: React.ReactNode }[] }[] = [
     {
@@ -83,7 +87,12 @@ const NAV: { items: { id: SectionId; label: string; icon: React.ReactNode }[] }[
             { id: "discord", label: "Discord", icon: <Gamepad2 /> },
         ],
     },
-    { items: [{ id: "logs", label: "Logs & Cache", icon: <FileClock /> }] },
+    {
+        items: [
+            { id: "logs", label: "Logs & Cache", icon: <FileClock /> },
+            { id: "about", label: "About & updates", icon: <Info /> },
+        ],
+    },
 ]
 
 const ALIASES: Record<string, SectionId> = { "anicli": "streaming", "online-streaming": "streaming" }
@@ -216,8 +225,9 @@ export default function SettingsPage() {
                     {section === "manga" && <MangaSection draft={draft} set={set} />}
                     {section === "discord" && <DiscordSection draft={draft} set={set} />}
                     {section === "logs" && <LogsSection />}
+                    {section === "about" && <AboutSection />}
                 </div>
-                {section !== "logs" && (
+                {section !== "logs" && section !== "about" && (
                     <div className={cn("mt-8 flex items-center gap-3", dirty && "sticky bottom-6 z-20")}>
                         <Button variant="white" className="rounded-full px-5" icon={<Save className="size-4" />} loading={save.isPending} onClick={onSave} disabled={!dirty}>
                             Save
@@ -250,6 +260,7 @@ const SUBTITLES: Record<SectionId, string> = {
     manga: "Read manga with provider extensions",
     discord: "Show what you're watching on Discord",
     logs: "Server logs and cached data",
+    about: "Kumo's version and updates",
 }
 
 type SectionProps = { draft: Settings; set: <K extends keyof Settings>(k: K, v: Partial<Settings[K]>) => void }
@@ -1173,6 +1184,69 @@ function LogsSection() {
                 </div>
                 <pre className="card max-h-[60vh] overflow-auto p-4 text-xs leading-relaxed text-fg/80">{(logs ?? []).slice(-400).join("\n") || "No logs yet."}</pre>
             </div>
+        </>
+    )
+}
+
+// The version, and Kumo's own updates: the Home page offers and installs
+// them, this says where things stand.
+function AboutSection() {
+    const { data: status } = useStatus()
+    const { data: u } = useUpdateStatus()
+    const check = useCheckUpdate()
+    const lan = status?.client === "lan"
+    const commit = u?.current.commit
+    const latest = versionName(u?.latest)
+    const busy = ["downloading", "building", "installing"].includes(u?.state ?? "")
+    let state: { tone: "green" | "brand" | "amber" | "gray"; label: string; help?: string }
+    if (!u || u.checking) state = { tone: "gray", label: "Checking…" }
+    else if (busy) state = { tone: "brand", label: `Updating to ${latest}`, help: u.message }
+    else if (u.state === "ready") state = { tone: "green", label: `${latest} installed`, help: u.message }
+    else if (u.available) state = { tone: "brand", label: `${latest} available`, help: lan ? undefined : u.canApply ? "Update from the Home page." : u.applyNote }
+    else if (u.latest) state = { tone: "green", label: "Up to date", help: u.note }
+    else if (u.error) state = { tone: "amber", label: "Couldn't check" }
+    else state = { tone: "gray", label: "Not checked yet", help: "Kumo checks shortly after it starts, then every 6 hours." }
+    if (u?.state === "failed" && !busy) state.help = [u.message, state.help].filter(Boolean).join(" ")
+    return (
+        <>
+            <Group title="Kumo">
+                <Row label="Version" help={`${platformName(status?.platform)} · ${status?.client === "desktop" ? "Desktop" : status?.client === "lan" ? "LAN" : "Web UI"}`}>
+                    <span className="flex items-center gap-2 text-sm">
+                        {status?.version}
+                        {commit && (
+                            <code className="rounded bg-black/30 px-1.5 py-0.5 text-xs" title={commit}>
+                                {commit.slice(0, 7)}
+                            </code>
+                        )}
+                    </span>
+                </Row>
+            </Group>
+            <Group title="Updates" description="Kumo looks for a newer version on GitHub and shows it on the Home page, where you can install it.">
+                <Row label="Status" help={state.help}>
+                    <Badge tone={state.tone}>{state.label}</Badge>
+                </Row>
+                {u?.latest && (
+                    <Row label="Newest version">
+                        <a href={u.latest.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm hover:underline">
+                            {latest}
+                            {u.latest.commit && u.latest.version && <code className="rounded bg-black/30 px-1.5 py-0.5 text-xs">{u.latest.commit.slice(0, 7)}</code>}
+                        </a>
+                    </Row>
+                )}
+                <Row label="Last check" help={u?.checking ? "Checking now…" : u?.checkedAt ? `${relativeTime(u.checkedAt)}. Kumo checks every 6 hours.` : "Never"}>
+                    {!lan && (
+                        <Button size="sm" icon={<RefreshCw className="size-4" />} loading={check.isPending || u?.checking} onClick={() => check.mutate()}>
+                            Check for updates
+                        </Button>
+                    )}
+                </Row>
+                {u?.error && (
+                    <div className="px-4 py-3.5 text-sm">
+                        <p className="text-rose-300">{u.error}</p>
+                        {u.hint && <p className="mt-1 text-muted">{u.hint}</p>}
+                    </div>
+                )}
+            </Group>
         </>
     )
 }

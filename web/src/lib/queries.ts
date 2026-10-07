@@ -21,6 +21,7 @@ import type {
     StreamEpisodes,
     Torrent,
     TorrentResult,
+    UpdateStatus,
 } from "./types"
 
 export function useStatus() {
@@ -280,5 +281,29 @@ export function useMangaChapters(mediaId: number, provider: string) {
         enabled: mediaId > 0,
         retry: false,
         staleTime: 10 * 60_000,
+    })
+}
+
+// Kumo's own updates. The "update-status" event keeps ["update"] current
+// (lib/events.ts), also while one is being installed.
+export function useUpdateStatus() {
+    return useQuery({ queryKey: ["update"], queryFn: () => api.get<UpdateStatus>("/api/update"), staleTime: 5 * 60_000 })
+}
+
+export function useCheckUpdate() {
+    const qc = useQueryClient()
+    return useMutation({
+        mutationFn: () => api.post<UpdateStatus>("/api/update/check"),
+        onSuccess: s => qc.setQueryData(["update"], s),
+        onError: (e: Error) => toast.error(e.message),
+    })
+}
+
+export function useApplyUpdate() {
+    const qc = useQueryClient()
+    return useMutation({
+        mutationFn: () => api.post<UpdateStatus>("/api/update/apply"),
+        onSuccess: s => qc.setQueryData(["update"], s),
+        onError: (e: Error) => toast.error(e.message),
     })
 }

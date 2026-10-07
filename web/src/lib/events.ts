@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { playbackStore, pluginStore, scanStore, torrentCountStore, trayOpenStore } from "./store"
-import type { DownloadItem, PluginState } from "./types"
+import type { DownloadItem, PluginState, Status, UpdateStatus } from "./types"
 
 type ServerEvent = { type: string; payload: any }
 
@@ -81,6 +81,13 @@ export function connectEvents(qc: QueryClient) {
             case "plugin-ui":
                 handlePluginEvent(p)
                 break
+            case "update-status": {
+                // Only this computer installs updates (GET /api/update says
+                // so to devices on the network too).
+                const lan = qc.getQueryData<Status>(["status"])?.client === "lan"
+                qc.setQueryData<UpdateStatus>(["update"], lan ? { ...p, canApply: false, applyNote: "", manualCommand: "" } : p)
+                break
+            }
         }
     }
 
@@ -88,8 +95,10 @@ export function connectEvents(qc: QueryClient) {
         if (closed) return
         es = new EventSource("/api/events")
         // Events sent while disconnected are lost: re-sync the scan state so
-        // a missed "scan-done" can't leave the scan indicator spinning.
+        // a missed "scan-done" can't leave the scan indicator spinning, and
+        // the update's.
         es.onopen = () => {
+            qc.invalidateQueries({ queryKey: ["update"] })
             fetch("/api/status", { credentials: "same-origin" })
                 .then(r => (r.ok ? r.json() : null))
                 .then(st => {

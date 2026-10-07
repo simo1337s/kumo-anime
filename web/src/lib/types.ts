@@ -531,3 +531,28 @@ export type FolderInfo = {
     notIndexed: number // of those, not in the library index yet
     problem?: string // why it has nothing to match (still downloading, unreadable…)
 }
+
+// Kumo's own updates (GET /api/update, and the "update-status" event).
+export type UpdateVersion = { version: string; commit: string; date?: string; url?: string }
+
+export type UpdateState = "idle" | "downloading" | "building" | "installing" | "ready" | "failed"
+
+export type UpdateStatus = {
+    current: UpdateVersion
+    latest: UpdateVersion | null // once a check found it
+    available: boolean
+    changes: string[] | null // commit subjects, newest first
+    changesTotal: number
+    note?: string
+    checkedAt: number // unix seconds, 0 before the first check
+    checking: boolean
+    error?: string // the last check failed
+    hint?: string
+    canApply: boolean // this copy installs updates itself (applyNote: how, or why not)
+    applyNote?: string
+    state: UpdateState
+    progress: number // 0-100, -1 when unknown
+    message?: string
+    log: string[] | null // the last output lines
+    manualCommand?: string // a command to run in a terminal
+}

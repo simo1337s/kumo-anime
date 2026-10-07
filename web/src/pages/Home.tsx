@@ -8,6 +8,7 @@ import { useLibraryCardMenu } from "@/components/library/LibraryCardMenu"
 import { PluginSlot } from "@/components/plugins/PluginSlot"
 import { ProgramsNotice } from "@/components/ProgramsNotice"
 import { Button, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, EmptyState, IconButton, Skeleton } from "@/components/ui"
+import { UpdateBanner } from "@/components/UpdateBanner"
 import { api } from "@/lib/api"
 import { usePersisted } from "@/lib/hooks"
 import { usePlay } from "@/lib/play"
@@ -98,6 +99,7 @@ export default function HomePage() {
 
     return (
         <div className="relative min-h-full pb-24">
+            <UpdateBanner />
             <Hero
                 item={hero}
                 count={continueItems.length}
