@@ -197,7 +197,7 @@ function isInternal(url) {
 }
 
 function createWindow() {
-    const iconPath = [path.join(__dirname, "icon.png"), "/usr/share/icons/hicolor/512x512/apps/kumo.png"].find(p => fs.existsSync(p))
+    const iconPath = [path.join(__dirname, "icon.png"), "/usr/share/icons/hicolor/512x512/apps/kumo-anime.png"].find(p => fs.existsSync(p))
     mainWindow = new BrowserWindow({
         width: 1600,
         height: 1000,
