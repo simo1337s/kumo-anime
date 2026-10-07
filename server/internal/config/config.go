@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"sync"
 
@@ -11,13 +12,43 @@ import (
 )
 
 const (
-	AppName    = "Kumo"
-	AppVersion = "1.0.0"
+	AppName = "Kumo"
 
 	DefaultPort           = 43211
 	DefaultAnilistClient  = "13985"
 	DefaultMarketplaceURL = "https://raw.githubusercontent.com/Bas1874/Seanime-Marketplace/refs/heads/main/Marketplace/Main.json"
+
+	// UpdateRepo is the GitHub repository Kumo looks for updates in
+	// ($KUMO_UPDATE_REPO overrides it).
+	UpdateRepo = "simo1337s/animetest"
 )
+
+// Set when building, with -ldflags "-X <module>/internal/config.AppVersion=…
+// -X <module>/internal/config.Commit=…": packaging/arch/PKGBUILD and the
+// Windows release workflow do, from the commit they build.
+var (
+	// AppVersion is 1.0.<number of commits> in those builds.
+	AppVersion = "1.0.0"
+	// Commit is the git commit Kumo was built from; see BuildCommit.
+	Commit = ""
+)
+
+// BuildCommit is the commit Kumo was built from: Commit, or else the one Go
+// stamps into builds made inside a git checkout, or "" when unknown (e.g.
+// built from a source zip).
+func BuildCommit() string {
+	if Commit != "" {
+		return Commit
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" {
+				return s.Value
+			}
+		}
+	}
+	return ""
+}
 
 // Settings is the whole user configuration. It is persisted as a single JSON
 // document in the kv table and edited from the Settings pages of the UI.

@@ -27,11 +27,33 @@ install=kumo.install
 
 _root="$(realpath "${startdir}/../..")"
 
+# The version and commit go into the server, which compares them with
+# GitHub's to offer updates (Home page). Kumo's updater builds a downloaded
+# source, which has no .git: it passes them in KUMO_COMMIT and KUMO_VERSION.
+# In a git checkout they come from git (version 1.0.<number of commits>);
+# otherwise, e.g. in an extracted source zip, the defaults stay. pkgver
+# stays 1.0.0 on purpose: a pkgver() function would make makepkg rewrite
+# this file in your checkout, and git pull would then stop on it.
 build() {
     cd "${_root}"
     export GOFLAGS="-trimpath -mod=readonly -modcacherw"
     export CGO_ENABLED=0
-    make server
+    local commit="${KUMO_COMMIT:-}" version="${KUMO_VERSION:-}" count
+    if [[ ! -e "${_root}/.git" ]]; then
+        # Not a checkout: Go mustn't stamp a git repository it's inside of
+        # (e.g. a home folder kept in git).
+        GOFLAGS+=" -buildvcs=false"
+    elif command -v git >/dev/null; then
+        [[ -n ${commit} ]] || commit="$(git -C "${_root}" rev-parse HEAD 2>/dev/null)" || commit=""
+        if [[ -z ${version} ]] && count="$(git -C "${_root}" rev-list --count HEAD 2>/dev/null)"; then
+            version="1.0.${count}"
+        fi
+    fi
+    local config=github.com/simo1337s/animetest/server/internal/config
+    local ldflags="-s -w"
+    [[ -z ${commit} ]] || ldflags+=" -X ${config}.Commit=${commit}"
+    [[ -z ${version} ]] || ldflags+=" -X ${config}.AppVersion=${version}"
+    make server GO_LDFLAGS="${ldflags}"
 }
 
 check() {
