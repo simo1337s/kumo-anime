@@ -74,12 +74,17 @@ package() {
     ln -s /usr/lib/kumo/kumo "${pkgdir}/usr/bin/kumo-server"
 
     install -Dm644 packaging/kumo.desktop "${pkgdir}/usr/share/applications/kumo.desktop"
-    # The icon is named kumo-anime since the new logo: desktops cache icons
-    # by name, and kept showing the old one under the old name.
-    for s in 16 32 48 64 128 256 512; do
-        install -Dm644 "packaging/icons/kumo-${s}.png" "${pkgdir}/usr/share/icons/hicolor/${s}x${s}/apps/kumo-anime.png"
+    # The icon, by two names: kumo-anime, the menu entry's since the new logo
+    # (desktops cache icons by name, and kept showing the old one), and
+    # kumo, which desktop shortcuts made before ask for (the app moves them
+    # to kumo-anime when it starts).
+    local s n
+    for n in kumo-anime kumo; do
+        for s in 16 32 48 64 128 256 512; do
+            install -Dm644 "packaging/icons/kumo-${s}.png" "${pkgdir}/usr/share/icons/hicolor/${s}x${s}/apps/${n}.png"
+        done
+        install -Dm644 packaging/icons/kumo.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/${n}.svg"
     done
-    install -Dm644 packaging/icons/kumo.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/kumo-anime.svg"
     install -Dm644 packaging/kumo-server.service "${pkgdir}/usr/lib/systemd/user/kumo-server.service"
     install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

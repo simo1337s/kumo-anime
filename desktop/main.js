@@ -293,6 +293,34 @@ ipcMain.on("kumo:open-external", (_e, url) => {
     if (typeof url === "string" && /^https?:\/\//.test(url)) shell.openExternal(url)
 })
 
+// Desktop shortcuts are copies of kumo.desktop: those made before the icon
+// was renamed kumo-anime (with the new logo) ask for "kumo", which desktops
+// keep showing as the old logo. Point them at the new icon, in place, so
+// they keep their permissions and the desktop's trust.
+function updateDesktopShortcuts() {
+    if (process.platform !== "linux") return
+    let dir, names
+    try {
+        dir = app.getPath("desktop")
+        names = fs.readdirSync(dir)
+    } catch {
+        return
+    }
+    for (const name of names) {
+        if (!name.endsWith(".desktop")) continue
+        const file = path.join(dir, name)
+        try {
+            if (!fs.lstatSync(file).isFile()) continue // never through a link
+            const text = fs.readFileSync(file, "utf8")
+            const icon = /^Icon=kumo[ \t]*\r?$/m
+            if (!/^Exec=(\/usr\/bin\/)?kumo(\s|$)/m.test(text) || !icon.test(text)) continue
+            fs.writeFileSync(file, text.replace(icon, "Icon=kumo-anime"))
+        } catch {
+            // someone else's file, or one we can't write: leave it
+        }
+    }
+}
+
 async function boot() {
     try {
         baseUrl = (await existingServer()) || (await startServer())
@@ -305,6 +333,7 @@ async function boot() {
     for (let i = 0; i < 50 && !readToken(); i++) await new Promise(r => setTimeout(r, 100))
     installShellHeader()
     createWindow()
+    updateDesktopShortcuts()
 }
 
 if (!app.requestSingleInstanceLock()) {
