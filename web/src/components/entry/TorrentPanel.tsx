@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { ArrowDownToLine, Copy, ExternalLink, Magnet, Search, ShieldCheck, Users } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { api } from "@/lib/api"
 import { useStatus, useTorrentSearch } from "@/lib/queries"
 import type { EntryView, TorrentResult } from "@/lib/types"

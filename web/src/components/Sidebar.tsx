@@ -1,4 +1,6 @@
 import {
+    Bell,
+    BellOff,
     BookOpen,
     CalendarDays,
     Compass,
@@ -21,13 +23,14 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom"
 import { api } from "@/lib/api"
 import { useMediaQuery } from "@/lib/hooks"
 import { useCollection, useDownloads, useStatus } from "@/lib/queries"
-import { searchOpenStore, torrentCountStore, useStore } from "@/lib/store"
+import { notificationsMutedStore, searchOpenStore, torrentCountStore, useStore } from "@/lib/store"
 import { cn, img } from "@/lib/utils"
 import { LoginDialog } from "./LoginDialog"
 import { PluginTrays } from "./plugins/PluginTrays"
 import { Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, Tooltip } from "./ui"
 import { useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
+import { toast as sonner } from "sonner"
+import { toast } from "@/lib/toast"
 
 // Kumo's logo: a rounded k on an off-white tile. The same drawing is the
 // app icon (packaging/icons/kumo.svg) and the favicon (public/kumo.svg).
@@ -158,7 +161,10 @@ export function Sidebar() {
 
             <div className={cn("flex flex-col gap-0.5 pt-3", !wide && "items-center")}>
                 <PluginTrays />
-                {link({ to: "/settings", label: "Settings", icon: <SettingsIcon /> })}
+                <div className={cn("flex gap-0.5", wide ? "items-center" : "flex-col-reverse items-center")}>
+                    <div className={wide ? "min-w-0 flex-1" : undefined}>{link({ to: "/settings", label: "Settings", icon: <SettingsIcon /> })}</div>
+                    <MuteButton side={wide ? "top" : "right"} />
+                </div>
                 <Dropdown>
                     <DropdownTrigger asChild>
                         <button
@@ -205,5 +211,33 @@ export function Sidebar() {
             </div>
             <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
         </aside>
+    )
+}
+
+// Mutes notifications (toasts), all but errors (lib/toast.ts), or turns them
+// back on.
+function MuteButton({ side }: { side: "top" | "right" }) {
+    const muted = useStore(notificationsMutedStore)
+    const label = muted ? "Unmute notifications" : "Mute notifications"
+    const toggle = () => {
+        if (!muted) sonner.dismiss() // what's on screen goes too
+        notificationsMutedStore.set(!muted)
+        // Shown past the mute: it says what just happened.
+        sonner.message(muted ? "Notifications on" : "Notifications muted. Errors still show.", { duration: 2500 })
+    }
+    return (
+        <Tooltip content={label} side={side}>
+            <button
+                onClick={toggle}
+                aria-label={label}
+                aria-pressed={muted}
+                className={cn(
+                    "focus-ring grid size-9 shrink-0 place-items-center rounded-md transition-colors hover:bg-white/[0.04] [&>svg]:size-[18px] [&>svg]:stroke-[1.75]",
+                    muted ? "text-amber-300" : "text-muted hover:text-fg",
+                )}
+            >
+                {muted ? <BellOff /> : <Bell />}
+            </button>
+        </Tooltip>
     )
 }

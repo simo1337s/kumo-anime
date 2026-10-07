@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { ExternalLink, KeyRound } from "lucide-react"
 import { useEffect, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { api, desktop } from "@/lib/api"
 import { useStatus } from "@/lib/queries"
 import { Button, Dialog, Field, Input } from "./ui"

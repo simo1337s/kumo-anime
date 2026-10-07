@@ -3,7 +3,7 @@
 // PowerShell window).
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { api } from "./api"
 import type { Status } from "./types"
 

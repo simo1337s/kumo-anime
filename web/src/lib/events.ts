@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { playbackStore, pluginStore, scanStore, torrentCountStore, trayOpenStore } from "./store"
 import type { DownloadItem, PluginState, Status, UpdateStatus } from "./types"
 

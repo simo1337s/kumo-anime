@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowUpCircle, Check, ChevronDown, Copy, Download, ExternalLink, Loader2, RefreshCw, RotateCcw } from "lucide-react"
 import { useEffect, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Button, Progress } from "@/components/ui"
 import { api, ApiError } from "@/lib/api"
 import { usePersisted } from "@/lib/hooks"

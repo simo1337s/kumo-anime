@@ -1,6 +1,6 @@
 import { CheckCircle2, Download, Loader2, RotateCcw, Trash2, X, XCircle } from "lucide-react"
 import { Link } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Badge, Button, EmptyState, IconButton, Progress } from "@/components/ui"
 import { api } from "@/lib/api"
 import { useDownloads, useStatus } from "@/lib/queries"

@@ -17,7 +17,7 @@ import { scanStore, useStore } from "@/lib/store"
 import type { CollectionItem, CollectionView, ContinueItem } from "@/lib/types"
 import { banner, cn, cover, img as imgUrl, title } from "@/lib/utils"
 import { useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 type SortKey = "activity" | "title" | "score" | "progress" | "airing"
 

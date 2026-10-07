@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Button, EmptyState, Spinner } from "@/components/ui"
 import { api } from "@/lib/api"
 

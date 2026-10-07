@@ -1,4 +1,4 @@
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { api } from "./api"
 import { useStatus } from "./queries"
 import { playerStore } from "./store"

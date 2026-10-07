@@ -22,7 +22,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Badge, Button, Dialog, EmptyState, Field, IconButton, Input, Select, Switch, Tabs } from "@/components/ui"
 import { api } from "@/lib/api"
 import { useExtensions, useMarketplace, useStatus } from "@/lib/queries"

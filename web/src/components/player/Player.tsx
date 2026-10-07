@@ -19,7 +19,7 @@ import {
     VolumeX,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { api, qs } from "@/lib/api"
 import { prefersHls, randomId, videoCaps } from "@/lib/playback"
 import { useSettings } from "@/lib/queries"

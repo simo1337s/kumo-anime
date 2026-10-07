@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { ArrowRight, Link2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { api } from "@/lib/api"
 import type { LocalFile, Media } from "@/lib/types"
 import { cn, cover, formatLabel, title } from "@/lib/utils"

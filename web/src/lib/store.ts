@@ -55,3 +55,23 @@ export const searchOpenStore = createStore<boolean>(false)
 
 // Accent color picked in Settings but not saved yet (null: use the saved one).
 export const accentPreviewStore = createStore<string | null>(null)
+
+// Notifications muted with the bell in the sidebar (lib/toast.ts): only
+// errors show. Remembered by this browser.
+const MUTED_KEY = "kumo-notifications-muted"
+export const notificationsMutedStore = createStore<boolean>(
+    (() => {
+        try {
+            return localStorage.getItem(MUTED_KEY) === "1"
+        } catch {
+            return false
+        }
+    })(),
+)
+notificationsMutedStore.subscribe(() => {
+    try {
+        localStorage.setItem(MUTED_KEY, notificationsMutedStore.get() ? "1" : "0")
+    } catch {
+        /* storage unavailable: muted until reload */
+    }
+})

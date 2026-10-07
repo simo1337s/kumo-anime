@@ -18,7 +18,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { EpisodeCard, WatchedToggle } from "@/components/EpisodeCard"
 import { AddFromLibraryDialog, EntryFilesMenu } from "@/components/library/EntryFileTools"
 import { ListStatusButton, ProgressEditor, ScoreEditor } from "@/components/entry/ListEditor"

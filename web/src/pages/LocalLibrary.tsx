@@ -1,7 +1,7 @@
 import { Check, CheckCheck, ChevronDown, FolderOpen, FolderSearch, FolderSync, HardDrive, Info, LayoutGrid, List as ListIcon, Play, Search, Settings2 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { EpisodeCard } from "@/components/EpisodeCard"
 import { Carousel, MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
 import { useLibraryCardMenu } from "@/components/library/LibraryCardMenu"

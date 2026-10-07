@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle, Download, MonitorPlay, Play, RefreshCw, Search, Terminal, Wand2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { api, qs } from "@/lib/api"
 import { usePlay } from "@/lib/play"
 import { installHint, installSource } from "@/lib/platform"

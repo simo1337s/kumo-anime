@@ -1,6 +1,6 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query"
 import { BookmarkCheck, BookmarkPlus, BookmarkX } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { api } from "@/lib/api"
 import type { Media } from "@/lib/types"
 import { LIST_STATUS, title } from "@/lib/utils"
