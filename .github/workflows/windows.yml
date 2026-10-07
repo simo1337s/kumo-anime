@@ -109,6 +109,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ffmpeg -hide_banner -version
 
+      # The setup that installs the programs Kumo uses (Scoop, Git, ani-cli,
+      # ffmpeg...) only runs on users' computers, in Windows PowerShell 5.1:
+      # check here that it parses there.
+      - name: Check the programs setup script
+        shell: powershell
+        run: |
+          $script = "server/internal/winsetup/install-tools.ps1"
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script).Path, [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) {
+            $errors | ForEach-Object { "::error file=$script,line=$($_.Extent.StartLineNumber)::$($_.Message)" }
+            exit 1
+          }
+          "$script parses in Windows PowerShell $($PSVersionTable.PSVersion)"
+
       - name: go vet
         working-directory: server
         run: go vet ./...
