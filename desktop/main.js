@@ -14,6 +14,11 @@ const http = require("node:http")
 
 const isWindows = process.platform === "win32"
 
+// Exit codes of the server (server/internal/lifecycle): restart the app into
+// a new version, or quit for the installer that updates it.
+const EXIT_RESTART = 75
+const EXIT_INSTALLING = 76
+
 // On Windows this is the AppUserModelID, which must match "appId" in
 // electron-builder.yml: the installer's shortcuts carry it, and the taskbar
 // groups the window with them.
@@ -151,6 +156,17 @@ function startServer() {
         serverProc.stdout.on("data", onData)
         serverProc.stderr.on("data", onData)
         serverProc.on("exit", code => {
+            // The server stopped for an update: no error box. After an
+            // update was installed, the whole app starts again, so that its
+            // window loads the new main.js too. On Windows an installer is
+            // replacing Kumo, and starts it when it's done.
+            if (code === EXIT_RESTART || code === EXIT_INSTALLING) {
+                serverProc = null
+                app.isQuitting = true
+                if (code === EXIT_RESTART) app.relaunch()
+                app.exit(0)
+                return
+            }
             if (!resolved) reject(new Error(`The Kumo server exited (code ${code}).`))
             serverProc = null
             if (resolved && !app.isQuitting) {
