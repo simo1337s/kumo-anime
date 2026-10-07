@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -1009,6 +1010,31 @@ func (s *Server) mangaMapping(r *http.Request) (any, error) {
 		return nil, badRequest("provider, mediaId and id are required")
 	}
 	s.app.Manga.SetMapping(body.Provider, body.MediaID, manga.Mapping{ID: body.ID, Title: body.Title, Score: 1})
+	return nil, nil
+}
+
+func (s *Server) mangaPosition(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	return s.app.Manga.Position(id), nil
+}
+
+func (s *Server) saveMangaPosition(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	var p manga.Position
+	if err := decode(r, &p); err != nil {
+		return nil, err
+	}
+	if err := s.app.Manga.SetPosition(id, p); errors.Is(err, manga.ErrBadPosition) {
+		return nil, badRequest(err.Error())
+	} else if err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 

@@ -512,6 +512,16 @@ export type AutoRule = {
     provider: string
 }
 
+// Where reading a manga stopped (GET /api/manga/{id}/position).
+export type MangaPosition = {
+    provider: string
+    chapterId: string
+    chapter: string
+    page: number // from 0
+    pages: number
+    updatedAt: number
+}
+
 export type MangaChapter = {
     id: string
     url: string

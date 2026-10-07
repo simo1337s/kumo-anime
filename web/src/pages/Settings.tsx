@@ -31,7 +31,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { LoginDialog } from "@/components/LoginDialog"
 import { Badge, Button, Dialog, Input, Select, Switch, Textarea } from "@/components/ui"
 import { versionName } from "@/components/UpdateBanner"
@@ -1101,9 +1101,9 @@ function MangaSection({ draft, set }: SectionProps) {
                     value={draft.manga.readingMode}
                     onChange={v => set("manga", { readingMode: v as "double" })}
                     options={[
-                        { value: "long-strip", label: "Long strip" },
-                        { value: "paged", label: "Single page" },
                         { value: "double", label: "Two pages" },
+                        { value: "paged", label: "Single page" },
+                        { value: "long-strip", label: "Long strip" },
                     ]}
                 />
             </Row>

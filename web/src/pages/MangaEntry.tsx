@@ -2,13 +2,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { BookOpen, RefreshCw, Search, Wand2 } from "lucide-react"
 import { useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { ListStatusButton, ProgressEditor, ScoreEditor } from "@/components/entry/ListEditor"
 import { PluginSlot } from "@/components/plugins/PluginSlot"
 import { Badge, Button, Dialog, EmptyState, ErrorState, Input, Select, Skeleton } from "@/components/ui"
 import { api, qs } from "@/lib/api"
 import { useMangaChapters, useStatus } from "@/lib/queries"
-import type { Media } from "@/lib/types"
+import type { MangaPosition, Media } from "@/lib/types"
 import { banner, cleanDescription, cn, cover, formatLabel, statusLabel, title } from "@/lib/utils"
 
 export default function MangaEntryPage() {
@@ -20,6 +20,11 @@ export default function MangaEntryPage() {
     const [provider, setProvider] = useState<string>(() => localStorage.getItem(`kumo-manga-provider-${id}`) || status?.settings.manga.defaultProvider || "")
     const effective = provider || providers?.[0]?.id || ""
     const { data: ch, isLoading: chLoading, error, refetch, isFetching } = useMangaChapters(id, effective)
+    const { data: position } = useQuery({
+        queryKey: ["manga", "position", id],
+        queryFn: () => api.get<MangaPosition | null>(`/api/manga/${id}/position`),
+        enabled: id > 0,
+    })
     const [matchOpen, setMatchOpen] = useState(false)
     const navigate = useNavigate()
     const qc = useQueryClient()
@@ -49,8 +54,16 @@ export default function MangaEntryPage() {
     if (isLoading || !media) return <Skeleton className="m-10 h-96" />
     const progress = media.mediaListEntry?.progress ?? 0
     const chapters = ch?.chapters ?? []
-    const next = chapters.find(c => parseFloat(c.chapter) > progress) ?? chapters[0]
-    const read = (chapterId: string) => navigate(`/manga/read${qs({ id, provider: effective, chapter: chapterId })}`)
+    // Where reading stopped (the reader saves it): that chapter at that page,
+    // or the next chapter once it was read to the end. Continue goes there
+    // unless the list's progress is further.
+    const stoppedAt = position?.provider === effective ? chapters.findIndex(c => c.id === position.chapterId) : -1
+    const finished = !!position && position.pages > 0 && position.page >= position.pages - 1
+    const stopped = stoppedAt < 0 ? undefined : chapters[finished ? stoppedAt + 1 : stoppedAt]
+    const resume = stopped && parseFloat(stopped.chapter) > progress ? stopped : undefined
+    const resumePage = resume && !finished ? position!.page : 0
+    const next = resume ?? chapters.find(c => parseFloat(c.chapter) > progress) ?? chapters[0]
+    const read = (chapterId: string, page?: number) => navigate(`/manga/read${qs({ id, provider: effective, chapter: chapterId, page: page ? String(page) : undefined })}`)
 
     return (
         <div className="min-h-full pb-24">
@@ -76,8 +89,9 @@ export default function MangaEntryPage() {
                         <p className="line-clamp-3 max-w-4xl text-white/70">{cleanDescription(media.description)}</p>
                         <div className="flex flex-wrap gap-2.5">
                             {next && (
-                                <Button variant="white" size="lg" icon={<BookOpen className="size-5" />} onClick={() => read(next.id)}>
-                                    {progress ? "Continue" : "Start"} · Ch {next.chapter}
+                                <Button variant="white" size="lg" icon={<BookOpen className="size-5" />} onClick={() => read(next.id, resumePage)}>
+                                    {progress || resume ? "Continue" : "Start"} · Ch {next.chapter}
+                                    {resumePage > 0 && ` · p. ${resumePage + 1}`}
                                 </Button>
                             )}
                             <ListStatusButton media={media} entry={media.mediaListEntry} />

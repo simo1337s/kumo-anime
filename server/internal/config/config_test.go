@@ -47,3 +47,36 @@ func TestMigrateDefaultPlayer(t *testing.T) {
 		t.Fatal("defaults should use the in-app player")
 	}
 }
+
+func TestMigrateMangaReadingMode(t *testing.T) {
+	for mode, want := range map[string]string{"long-strip": "double", "paged": "paged", "double": "double"} {
+		d, err := db.Open(filepath.Join(t.TempDir(), "kumo.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Saved by version 2, when the long strip was the default.
+		if err := d.SetKV(settingsKey, map[string]any{"schemaVersion": 2, "manga": map[string]any{"enabled": true, "readingMode": mode}}); err != nil {
+			t.Fatal(err)
+		}
+		s, err := NewStore(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := s.Get().Manga.ReadingMode; got != want {
+			t.Errorf("%s: got %q, want %q", mode, got, want)
+		}
+		// The long strip chosen again afterwards sticks.
+		cur := s.Get()
+		cur.Manga.ReadingMode = "long-strip"
+		if _, err := s.Save(cur); err != nil {
+			t.Fatal(err)
+		}
+		if s2, err := NewStore(d); err != nil || s2.Get().Manga.ReadingMode != "long-strip" {
+			t.Errorf("%s: long strip lost after restart (%v)", mode, err)
+		}
+		d.Close()
+	}
+	if Defaults().Manga.ReadingMode != "double" {
+		t.Error("new installs should read two pages side by side")
+	}
+}

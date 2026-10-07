@@ -164,6 +164,42 @@ func (s *Service) Pages(ctx context.Context, provider, chapterID string) ([]exte
 }
 
 // MarkRead updates the AniList progress after finishing a chapter.
+// Position is where reading a manga stopped: a provider's chapter, and the
+// page in it (from 0). The reader saves it as pages turn; the manga's page
+// continues from it.
+type Position struct {
+	Provider  string `json:"provider"`
+	ChapterID string `json:"chapterId"`
+	Chapter   string `json:"chapter"` // its number, e.g. "12" or "12.5"
+	Page      int    `json:"page"`
+	Pages     int    `json:"pages"` // in the chapter
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+func positionKey(mediaID int) string { return fmt.Sprintf("manga-position:%d", mediaID) }
+
+// Position returns where reading the manga stopped, or nil.
+func (s *Service) Position(mediaID int) *Position {
+	var p Position
+	if ok, err := s.db.GetKV(positionKey(mediaID), &p); !ok || err != nil {
+		return nil
+	}
+	return &p
+}
+
+// ErrBadPosition: a position without its chapter, or an impossible page.
+var ErrBadPosition = errors.New("invalid reading position")
+
+// SetPosition saves where reading the manga stopped.
+func (s *Service) SetPosition(mediaID int, p Position) error {
+	if mediaID <= 0 || p.Provider == "" || p.ChapterID == "" || p.Page < 0 || p.Pages < 0 ||
+		len(p.Provider) > 256 || len(p.ChapterID) > 2048 || len(p.Chapter) > 64 {
+		return ErrBadPosition
+	}
+	p.UpdatedAt = time.Now().Unix()
+	return s.db.SetKV(positionKey(mediaID), p)
+}
+
 func (s *Service) MarkRead(ctx context.Context, mediaID int, chapter string) error {
 	n, err := strconv.ParseFloat(chapter, 64)
 	if err != nil || n <= 0 {

@@ -257,7 +257,7 @@ func Defaults() Settings {
 		},
 		Qbittorrent:  TorrentClientConfig{Host: "127.0.0.1", Port: 8081, Username: "admin", Executable: findQbittorrent(home)},
 		Transmission: TorrentClientConfig{Host: "127.0.0.1", Port: 9091, Executable: defaultTransmission()},
-		Manga:        MangaSettings{Enabled: true, ReadingMode: "long-strip", Direction: "ltr"},
+		Manga:        MangaSettings{Enabled: true, ReadingMode: "double", Direction: "ltr"},
 		Anilist:      AnilistSettings{ClientID: DefaultAnilistClient, HideAdult: true},
 		Server:       ServerSettings{Host: "127.0.0.1", Port: DefaultPort, WebUI: true},
 		UI: UISettings{
@@ -349,7 +349,7 @@ func (s *Store) OnChange(fn func(old, new Settings)) {
 
 // schemaVersion is the current settings version; add a step to migrate when
 // changing a default that existing installs should pick up too.
-const schemaVersion = 2
+const schemaVersion = 3
 
 func migrate(s *Settings) bool {
 	if s.SchemaVersion >= schemaVersion {
@@ -359,6 +359,11 @@ func migrate(s *Settings) bool {
 		// v2: the in-app player is the default for files and streams.
 		s.Playback.DefaultPlayer = "builtin"
 		s.AniCli.Player = "builtin"
+	}
+	if s.SchemaVersion < 3 && s.Manga.ReadingMode == "long-strip" {
+		// v3: manga reads two pages side by side, rather than the long
+		// strip that was the default.
+		s.Manga.ReadingMode = "double"
 	}
 	s.SchemaVersion = schemaVersion
 	return true
