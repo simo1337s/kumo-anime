@@ -173,19 +173,34 @@
     animation: slow-zoom 24s ease-in-out infinite alternate;
 }
 
+/* Reduced motion (the system's setting, e.g. Windows' "Animation effects"
+   off, or Settings > User Interface): animations finish at once, and run
+   only once. Repeated with a near-zero duration, an endless animation
+   flickers: the banners' slow zoom zoomed in and out many times a second.
+   Spinners keep turning: they show that something is happening. */
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
     *::after {
         animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
         transition-duration: 0.001ms !important;
+    }
+    html .animate-spin {
+        animation-duration: 1s !important;
+        animation-iteration-count: infinite !important;
     }
 }
 html.reduce-motion *,
 html.reduce-motion *::before,
 html.reduce-motion *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+}
+html.reduce-motion .animate-spin {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
 }
 
 /* In-app player subtitles */
