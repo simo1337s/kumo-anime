@@ -35,6 +35,8 @@ import { Badge, Button, Dialog, Input, Select, Switch, Textarea } from "@/compon
 import { api } from "@/lib/api"
 import { useOnlineProviders, useSaveSettings, useStatus } from "@/lib/queries"
 import { exampleMpvPath, installHint, installSource, platformName } from "@/lib/platform"
+import type { Tool } from "@/lib/platform"
+import { canInstallPrograms, useInstallPrograms, useWatchSetup } from "@/lib/programs"
 import { accentPreviewStore } from "@/lib/store"
 import type { Settings, Status } from "@/lib/types"
 import { cn, copyText, formatBytes, img } from "@/lib/utils"
@@ -533,6 +535,8 @@ function AppSection({ draft, set }: SectionProps) {
                 {!isDesktop && !lan && <p className="px-4 py-3 text-xs text-amber-200/80">Turning the Web UI off is only possible from the desktop app, so you can't lock yourself out.</p>}
             </Group>
 
+            <ProgramsGroup />
+
             <Group title="Extensions">
                 <Stack label="Marketplace URL" help="Any Seanime-compatible extension index works.">
                     <Input value={draft.extensions.marketplaceUrl} onChange={e => set("extensions", { marketplaceUrl: e.target.value })} />
@@ -548,6 +552,60 @@ function AppSection({ draft, set }: SectionProps) {
             </Group>
             <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
         </>
+    )
+}
+
+function InstallProgramsButton() {
+    const { data: status } = useStatus()
+    const install = useInstallPrograms()
+    return (
+        <Button variant="primary" size="sm" loading={install.isPending} disabled={status?.setupRunning} onClick={() => install.mutate()}>
+            {status?.setupRunning ? "Installing…" : "Install"}
+        </Button>
+    )
+}
+
+// What Kumo found of the programs it uses and, on Windows, the setup that
+// installs them.
+function ProgramsGroup() {
+    const { data: status } = useStatus()
+    useWatchSetup(status)
+    const f = status?.features
+    const windows = status?.platform === "windows"
+    const programs: { tool: Tool; ok?: boolean; use: string }[] = [
+        { tool: "ffmpeg", ok: f?.ffmpeg, use: "The in-app player (most files) and episode downloads" },
+        { tool: "ani-cli", ok: f?.aniCli, use: windows ? "Sub/dub streaming and downloads (it runs in Git's bash)" : "Sub/dub streaming and downloads" },
+        { tool: "mpv", ok: f?.mpv, use: "The external player" },
+        { tool: "yt-dlp", ok: f?.ytDlp, use: "Faster, more reliable episode downloads" },
+    ]
+    return (
+        <Group title="Programs" description="Kumo uses these programs for some of what it does.">
+            {programs.map(p => (
+                <Row
+                    key={p.tool}
+                    label={p.tool}
+                    help={
+                        p.ok || canInstallPrograms(status) ? (
+                            p.use
+                        ) : (
+                            <>
+                                {p.use}. {installSource(status?.platform, p.tool)} <code className="rounded bg-black/30 px-1.5 py-0.5">{installHint(status?.platform, p.tool)}</code>
+                            </>
+                        )
+                    }
+                >
+                    <Badge tone={p.ok ? "green" : "red"}>{p.ok ? "Found" : "Not found"}</Badge>
+                </Row>
+            ))}
+            {canInstallPrograms(status) && (
+                <Row
+                    label="Install missing programs"
+                    help="Installs Git, ani-cli, ffmpeg, mpv, yt-dlp and the rest of what Kumo uses with Scoop, for your Windows user (no administrator rights), in a PowerShell window. Programs you already have are skipped. It also offers to sign you in to GitHub, for Kumo's updates."
+                >
+                    <InstallProgramsButton />
+                </Row>
+            )}
+        </Group>
     )
 }
 
@@ -964,10 +1022,15 @@ function StreamingSection({ draft, set }: SectionProps) {
                         <Badge tone={ani?.ffmpeg ? "green" : "gray"}>ffmpeg {ani?.ffmpeg ? "✓" : "✗"}</Badge>
                     </div>
                 </Row>
-                {!ani?.installed && (
+                {!ani?.installed && !canInstallPrograms(status) && (
                     <p className="px-4 py-3 text-sm text-muted">
                         {installSource(status?.platform, "ani-cli")}: <code className="rounded bg-black/30 px-1.5 py-0.5">{installHint(status?.platform, "ani-cli")}</code>
                     </p>
+                )}
+                {!ani?.installed && canInstallPrograms(status) && (
+                    <Row label="Install ani-cli" help="With Git, whose bash runs it, and the other programs Kumo uses: Settings › App › Programs.">
+                        <InstallProgramsButton />
+                    </Row>
                 )}
                 <Stack label="Executable">
                     <Input value={a.path} onChange={e => set("aniCli", { path: e.target.value })} icon={<Terminal className="size-4" />} />

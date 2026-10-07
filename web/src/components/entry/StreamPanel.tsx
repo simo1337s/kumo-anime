@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { api, qs } from "@/lib/api"
 import { usePlay } from "@/lib/play"
 import { installHint, installSource } from "@/lib/platform"
+import { canInstallPrograms, useInstallPrograms } from "@/lib/programs"
 import { useEpisodeMarker, useLanguageMode, useOnlineProviders, useStatus, useStreamEpisodes } from "@/lib/queries"
 import type { EntryView } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -114,12 +115,17 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
                     <Terminal className="mt-0.5 size-5 text-amber-300" />
                     <div className="text-sm">
                         <p className="font-semibold text-amber-200">ani-cli isn’t installed</p>
-                        <p className="mt-1 text-muted">
-                            {installSource(status?.platform, "ani-cli")} <code className="rounded bg-black/40 px-1.5 py-0.5">{installHint(status?.platform, "ani-cli")}</code> (it also
-                            needs <code className="rounded bg-black/40 px-1.5 py-0.5">mpv</code>, <code className="rounded bg-black/40 px-1.5 py-0.5">yt-dlp</code> or{" "}
-                            <code className="rounded bg-black/40 px-1.5 py-0.5">ffmpeg</code>), or pick an extension provider from the marketplace.
-                        </p>
+                        {canInstallPrograms(status) ? (
+                            <p className="mt-1 text-muted">Kumo can install it, with the programs it needs, or pick an extension provider from the marketplace.</p>
+                        ) : (
+                            <p className="mt-1 text-muted">
+                                {installSource(status?.platform, "ani-cli")} <code className="rounded bg-black/40 px-1.5 py-0.5">{installHint(status?.platform, "ani-cli")}</code> (it also
+                                needs <code className="rounded bg-black/40 px-1.5 py-0.5">mpv</code>, <code className="rounded bg-black/40 px-1.5 py-0.5">yt-dlp</code> or{" "}
+                                <code className="rounded bg-black/40 px-1.5 py-0.5">ffmpeg</code>), or pick an extension provider from the marketplace.
+                            </p>
+                        )}
                     </div>
+                    {canInstallPrograms(status) && <InstallAniCli running={!!status?.setupRunning} />}
                 </div>
             )}
 
@@ -315,5 +321,15 @@ function DownloadDialog({ open, onOpenChange, provider, mediaId, dub, episodes, 
                 </Field>
             </div>
         </Dialog>
+    )
+}
+
+// Windows: Kumo's setup installs ani-cli with Git (whose bash runs it).
+function InstallAniCli({ running }: { running: boolean }) {
+    const install = useInstallPrograms()
+    return (
+        <Button variant="primary" size="sm" className="ml-auto" icon={<Download className="size-4" />} loading={install.isPending} disabled={running} onClick={() => install.mutate()}>
+            {running ? "Installing…" : "Install"}
+        </Button>
     )
 }

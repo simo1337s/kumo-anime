@@ -252,6 +252,7 @@ export type Status = {
     listenAddr: string
     lanUrls?: string[] | null // where devices on the home network open Kumo
     webUiForced: boolean
+    setupRunning?: boolean // Windows: the window installing Kumo's programs is open
     settings: Settings
 }
 

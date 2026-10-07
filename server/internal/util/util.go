@@ -202,8 +202,7 @@ func LookPath(p string) (string, bool) {
 	if strings.ContainsRune(p, os.PathSeparator) || strings.ContainsRune(p, '/') {
 		return lookAbs(p)
 	}
-	found, err := exec.LookPath(p)
-	return found, err == nil
+	return lookBare(p)
 }
 
 // SanitizeFilename replaces characters that are invalid in file names.

@@ -160,6 +160,16 @@ func (r *run) cleanup() { _ = os.RemoveAll(r.dir) }
 
 var ErrNotInstalled = errors.New("ani-cli is not installed (" + util.InstallHint("ani-cli") + ") or set its path in Settings › Online Streaming")
 
+// Ready reports whether ani-cli can run: its script is found at path (a
+// name or a full path) and, on Windows, so is the bash that runs it.
+func Ready(path string) bool {
+	if _, ok := findScript(path); !ok {
+		return false
+	}
+	_, err := scriptCommand(context.Background(), path)
+	return err == nil
+}
+
 func (d *Driver) exec(ctx context.Context, args ...string) (*run, error) {
 	if err := d.init(); err != nil {
 		return nil, err

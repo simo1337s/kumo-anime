@@ -6,6 +6,7 @@ import { LoginDialog } from "@/components/LoginDialog"
 import { MediaCard, MediaCardSkeleton, MediaGrid } from "@/components/MediaCard"
 import { useLibraryCardMenu } from "@/components/library/LibraryCardMenu"
 import { PluginSlot } from "@/components/plugins/PluginSlot"
+import { ProgramsNotice } from "@/components/ProgramsNotice"
 import { Button, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, EmptyState, IconButton, Skeleton } from "@/components/ui"
 import { api } from "@/lib/api"
 import { usePersisted } from "@/lib/hooks"
@@ -179,6 +180,7 @@ export default function HomePage() {
 
             <div className="relative z-10 -mt-24 flex flex-col gap-12 px-6 md:px-10 xl:px-14">
                 <PluginSlot slot="after-home-screen-toolbar" />
+                <ProgramsNotice />
 
                 {continueItems.length > 0 && <ContinueRow items={continueItems} onFocus={setHeroIdx} />}
                 {isLoading && (

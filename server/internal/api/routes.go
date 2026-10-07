@@ -13,10 +13,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/simo1337s/animetest/server/internal/anicli"
 	"github.com/simo1337s/animetest/server/internal/anilist"
 	"github.com/simo1337s/animetest/server/internal/config"
 	"github.com/simo1337s/animetest/server/internal/stream"
 	"github.com/simo1337s/animetest/server/internal/util"
+	"github.com/simo1337s/animetest/server/internal/winsetup"
 )
 
 func (s *Server) routes() {
@@ -32,6 +34,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/auth/server-login", s.serverLogin)
 	m.HandleFunc("GET /api/fs/dirs", h(s.listDirs))
 	m.HandleFunc("POST /api/open", h(s.openPath))
+	m.HandleFunc("POST /api/setup/programs", h(s.installPrograms))
 	m.HandleFunc("GET /api/logs", h(func(r *http.Request) (any, error) { return s.app.Logs.Lines(), nil }))
 	m.HandleFunc("POST /api/cache/clear", h(func(r *http.Request) (any, error) { return nil, s.app.DB.ClearCache() }))
 	m.HandleFunc("GET /api/cache/size", h(func(r *http.Request) (any, error) {
@@ -275,7 +278,7 @@ func (s *Server) status(r *http.Request) (any, error) {
 	_, feat.Mpv = util.LookPath(cfg.Mpv.Path)
 	_, feat.Ffmpeg = util.LookPath(cfg.Transcode.FfmpegPath)
 	_, feat.Ffprobe = util.LookPath(cfg.Transcode.FfprobePath)
-	_, feat.AniCli = util.LookPath(cfg.AniCli.Path)
+	feat.AniCli = anicli.Ready(cfg.AniCli.Path)
 	_, feat.YtDlp = util.LookPath("yt-dlp")
 	_, feat.XdgOpen = util.LookPath("xdg-open")
 	feat.XdgOpen = feat.XdgOpen || runtime.GOOS == "windows" // Explorer
@@ -300,6 +303,7 @@ func (s *Server) status(r *http.Request) (any, error) {
 		"listenAddr":     s.Addr(),
 		"lanUrls":        lan,
 		"webUiForced":    s.ForceWebUI,
+		"setupRunning":   winsetup.Running(),
 		"settings":       settingsFor(r, cfg),
 	}, nil
 }

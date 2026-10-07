@@ -439,3 +439,18 @@ func TestPlayed(t *testing.T) {
 		t.Error("played() without a player run")
 	}
 }
+
+// Ready needs the script and, on Windows, the bash that runs it.
+func TestReady(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "ani-cli")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, noBash := scriptCommand(context.Background(), script)
+	if got := Ready(script); got != (noBash == nil) {
+		t.Errorf("Ready(%s) = %v, bash: %v", script, got, noBash)
+	}
+	if Ready(filepath.Join(t.TempDir(), "missing")) {
+		t.Error("a missing script is ready")
+	}
+}

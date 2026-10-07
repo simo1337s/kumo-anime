@@ -20,9 +20,27 @@ PC": click **More info**, then **Run anyway**.
 
 ## Programs Kumo uses
 
-Some features use other programs. Install them from a terminal (PowerShell or
-Windows Terminal), then restart Kumo so it finds them. **Settings** shows what
-Kumo found; for a program that isn't on your `PATH`, enter its full path there.
+Some features use other programs. **Kumo installs them for you**: at the end of
+the install, the installer asks whether to install them (also later from
+**Settings › App › Programs › Install**, or the Install button Kumo shows on
+the Home page while ffmpeg or ani-cli is missing). A PowerShell window then
+installs, with [Scoop](https://scoop.sh) and for your Windows user only (no
+administrator rights):
+
+- Scoop itself and its extras bucket
+- Git for Windows (its bash runs ani-cli) and ani-cli
+- ffmpeg, mpv, yt-dlp, aria2 and fzf
+- the GitHub CLI (`gh`). The repository is private, so the setup offers to
+  sign you in to GitHub, which Kumo's update checks need.
+
+Programs you already have are skipped, so you can run it again whenever
+something is missing. Kumo picks newly installed programs up by itself. The
+script is
+[`server/internal/winsetup/install-tools.ps1`](../../server/internal/winsetup/install-tools.ps1).
+
+To install them yourself instead, from a terminal (PowerShell or Windows
+Terminal): **Settings** shows what Kumo found; for a program that isn't on
+your `PATH`, enter its full path there.
 
 | For | Install |
 |---|---|
