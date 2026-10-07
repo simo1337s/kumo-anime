@@ -712,7 +712,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
             )}
             {error && (
                 <div className="absolute inset-0 grid place-items-center p-6">
-                    <div className="max-w-md rounded-2xl border border-line-strong bg-surface-1 p-6 text-center">
+                    <div className="max-w-md rounded-xl border border-line-strong bg-surface-1 p-6 text-center">
                         <p className="text-lg font-semibold">Playback failed</p>
                         <p className="mt-2 text-sm text-muted">{error}</p>
                         <div className="mt-5 flex justify-center gap-2">

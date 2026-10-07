@@ -24,10 +24,10 @@ export default function LibraryPage() {
     const scan = useScan()
     const scanning = useStore(scanStore, s => s.running)
     return (
-        <div className="min-h-full px-6 pt-10 pb-24 md:px-10 xl:px-14">
+        <div className="min-h-full px-6 pt-8 pb-24 md:px-8 xl:px-10">
             <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">Library tools</h1>
+                    <h1 className="text-[1.75rem] font-semibold tracking-tight">Library tools</h1>
                     <p className="mt-1 text-muted">Fix matches, episode numbers and ignored files.</p>
                 </div>
                 <div className="flex gap-2">

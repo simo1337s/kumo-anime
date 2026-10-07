@@ -48,14 +48,14 @@ export function PluginTrays() {
     )
     if (trays.length === 0 && pages.length === 0) return null
     return (
-        <div className="mb-1 flex flex-col items-center gap-1.5 border-b border-line pb-2">
+        <div className="mb-1 flex flex-wrap items-center justify-center gap-1 border-b border-line pb-2 lg:justify-start">
             {pages.map(({ plugin, view }) => (
                 <Tooltip key={plugin.id + view.id} content={view.options.sidebar?.label || plugin.name} side="right">
                     <NavLink
                         to={`/webview?plugin=${encodeURIComponent(plugin.id)}&id=${encodeURIComponent(view.id)}`}
-                        className={({ isActive }) => cn("grid size-10 place-items-center rounded-xl transition hover:bg-white/[0.06]", isActive && "bg-white/[0.08]")}
+                        className={({ isActive }) => cn("grid size-9 place-items-center rounded-lg transition-colors hover:bg-white/[0.06]", isActive && "bg-white/[0.08]")}
                     >
-                        {plugin.icon ? <img src={plugin.icon} alt="" className="size-6 rounded-md object-contain" /> : <Puzzle className="size-5 text-muted" />}
+                        {plugin.icon ? <img src={plugin.icon} alt="" className="size-5 rounded object-contain" /> : <Puzzle className="size-[18px] stroke-[1.75] text-muted" />}
                     </NavLink>
                 </Tooltip>
             ))}
@@ -64,7 +64,7 @@ export function PluginTrays() {
                 const icon = (
                     <button
                         className={cn(
-                            "focus-ring relative grid size-10 place-items-center rounded-xl transition hover:bg-white/[0.06]",
+                            "focus-ring relative grid size-9 place-items-center rounded-lg transition-colors hover:bg-white/[0.06]",
                             isOpen && "bg-white/[0.08]",
                         )}
                         onClick={() => {
@@ -73,9 +73,9 @@ export function PluginTrays() {
                         }}
                     >
                         {tray.iconUrl ? (
-                            <img src={tray.iconUrl} alt="" className="size-6 rounded-md object-contain" />
+                            <img src={tray.iconUrl} alt="" className="size-5 rounded object-contain" />
                         ) : (
-                            <Puzzle className="size-5 text-muted" />
+                            <Puzzle className="size-[18px] stroke-[1.75] text-muted" />
                         )}
                         {!!tray.badge?.number && (
                             <span className="absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-brand px-1 text-[9px] font-bold text-white">

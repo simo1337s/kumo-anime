@@ -94,7 +94,7 @@ export function TorrentPanel({ entry }: { entry: EntryView }) {
             </div>
 
             {chosen.length > 0 && (
-                <div className="glass sticky top-3 z-20 flex items-center justify-between rounded-2xl px-4 py-3 rise-in">
+                <div className="sticky top-3 z-20 flex items-center justify-between rounded-xl border border-line-strong bg-surface-2/95 px-4 py-3 shadow-lg shadow-black/40 backdrop-blur rise-in">
                     <span className="text-sm">{chosen.length} selected</span>
                     <Button variant="primary" size="sm" loading={sending} icon={<ArrowDownToLine className="size-4" />} onClick={() => download(chosen)}>
                         Send to {settings?.torrent.defaultClient === "transmission" ? "Transmission" : "qBittorrent"}

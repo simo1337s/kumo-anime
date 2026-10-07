@@ -43,10 +43,10 @@ export default function ExtensionsPage() {
     const { data: installed } = useExtensions()
     const [manualOpen, setManualOpen] = useState(false)
     return (
-        <div className="min-h-full px-6 pt-10 pb-24 md:px-10 xl:px-14">
+        <div className="min-h-full px-6 pt-8 pb-24 md:px-8 xl:px-10">
             <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">Extensions</h1>
+                    <h1 className="text-[1.75rem] font-semibold tracking-tight">Extensions</h1>
                     <p className="mt-1 max-w-2xl text-muted">Streaming, torrent and manga providers plus plugins, from the extension marketplace.</p>
                 </div>
                 <Button icon={<Link2 className="size-4" />} onClick={() => setManualOpen(true)}>
@@ -72,11 +72,11 @@ function ExtIcon({ src, className }: { src?: string; className?: string }) {
     const [err, setErr] = useState(false)
     if (!src || err)
         return (
-            <span className={cn("grid shrink-0 place-items-center rounded-xl bg-gradient-to-br from-brand/30 to-brand/5 text-brand-strong", className)}>
+            <span className={cn("grid shrink-0 place-items-center rounded-lg bg-white/[0.06] text-muted", className)}>
                 <Puzzle className="size-5" />
             </span>
         )
-    return <img src={src} alt="" onError={() => setErr(true)} className={cn("shrink-0 rounded-xl bg-white/5 object-cover", className)} />
+    return <img src={src} alt="" onError={() => setErr(true)} className={cn("shrink-0 rounded-lg bg-white/5 object-cover", className)} />
 }
 
 // ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ function Installed() {
             </div>
             {groups.map(g => (
                 <section key={g.type}>
-                    <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
+                    <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold tracking-tight">
                         {TYPES[g.type].icon} {TYPES[g.type].label}
                     </h2>
                     <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">

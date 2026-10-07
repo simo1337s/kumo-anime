@@ -16,10 +16,10 @@ export default function DownloadsPage() {
     const call = (p: Promise<unknown>) => p.catch((e: Error) => toast.error(e.message))
 
     return (
-        <div className="min-h-full px-6 pt-10 pb-24 md:px-10 xl:px-14">
+        <div className="min-h-full px-6 pt-8 pb-24 md:px-8 xl:px-10">
             <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">Downloads</h1>
+                    <h1 className="text-[1.75rem] font-semibold tracking-tight">Downloads</h1>
                     <p className="mt-1 text-muted">
                         Episodes downloaded with ani-cli or streaming extensions, saved to{" "}
                         <span className="font-medium text-fg">{status?.settings.aniCli.downloadDir || status?.settings.library.dir || "your library"}</span>.
@@ -38,7 +38,7 @@ export default function DownloadsPage() {
             )}
             {active.length > 0 && (
                 <section className="mb-10">
-                    <h2 className="mb-4 text-lg font-bold">In progress</h2>
+                    <h2 className="mb-4 text-lg font-semibold tracking-tight">In progress</h2>
                     <div className="flex flex-col gap-3">
                         {active.map(i => (
                             <Row key={i.id} item={i} onCancel={() => call(api.post(`/api/downloads/${i.id}/cancel`))} />
@@ -48,7 +48,7 @@ export default function DownloadsPage() {
             )}
             {done.length > 0 && (
                 <section>
-                    <h2 className="mb-4 text-lg font-bold">History</h2>
+                    <h2 className="mb-4 text-lg font-semibold tracking-tight">History</h2>
                     <div className="flex flex-col gap-3">
                         {done.map(i => (
                             <Row key={i.id} item={i} onRetry={() => call(api.post(`/api/downloads/${i.id}/retry`))} onRemove={() => call(api.del(`/api/downloads/${i.id}`))} />

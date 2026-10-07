@@ -224,12 +224,12 @@ export function UpdateBanner() {
 
 function Panel({ icon, title, text, actions, children }: { icon: React.ReactNode; title: React.ReactNode; text?: React.ReactNode; actions?: React.ReactNode; children?: React.ReactNode }) {
     return (
-        <div className="px-6 pt-6 md:px-10 xl:px-14">
+        <div className="px-6 pt-6 md:px-8 xl:px-10">
             <div className="card overflow-hidden rise-in">
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4">
                     {icon}
                     <div className="min-w-0 flex-1">
-                        <p className="font-semibold">{title}</p>
+                        <p className="font-medium">{title}</p>
                         {text && <div className="mt-0.5 text-sm text-muted">{text}</div>}
                     </div>
                     {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -247,7 +247,7 @@ function Icon({ children, tone = "brand" }: { children: React.ReactNode; tone?: 
         amber: "bg-amber-500/15 text-amber-300",
         red: "bg-rose-500/15 text-rose-300",
     }
-    return <span className={cn("grid size-10 shrink-0 place-items-center rounded-xl [&>svg]:size-5", tones[tone])}>{children}</span>
+    return <span className={cn("grid size-9 shrink-0 place-items-center rounded-lg [&>svg]:size-[18px]", tones[tone])}>{children}</span>
 }
 
 function Spin() {
@@ -262,7 +262,7 @@ function Spin() {
 function Command({ command }: { command: string }) {
     const copy = () => copyText(command).then(ok => (ok ? toast.success("Command copied") : toast.error("Couldn't copy it")))
     return (
-        <div className="flex w-full items-center gap-2 rounded-xl bg-black/30 py-1.5 pr-1.5 pl-3">
+        <div className="flex w-full items-center gap-2 rounded-lg bg-black/30 py-1.5 pr-1.5 pl-3">
             <code className="min-w-0 flex-1 overflow-x-auto font-mono text-xs whitespace-nowrap">{command}</code>
             <Button size="xs" variant="ghost" icon={<Copy className="size-3.5" />} onClick={copy}>
                 Copy
@@ -281,7 +281,7 @@ function Changes({ u }: { u: UpdateStatus }) {
                 <ul className="flex flex-col gap-1.5 text-sm">
                     {changes.map((c, i) => (
                         <li key={i} className="flex gap-2">
-                            <span className="text-brand-strong">•</span>
+                            <span className="text-subtle">•</span>
                             <span className="min-w-0">{c}</span>
                         </li>
                     ))}

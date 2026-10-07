@@ -54,7 +54,7 @@ export function LoginDialog({ open, onOpenChange }: { open: boolean; onOpenChang
             description="Sync your lists, progress and scores with your AniList account."
         >
             <div className="flex flex-col gap-5">
-                <div className="rounded-2xl border border-line bg-gradient-to-br from-brand/15 to-transparent p-5">
+                <div className="rounded-lg bg-white/[0.03] p-5">
                     <p className="text-sm text-muted">
                         {desktop()
                             ? "A login window will open. After you authorize Kumo, the token is captured automatically."

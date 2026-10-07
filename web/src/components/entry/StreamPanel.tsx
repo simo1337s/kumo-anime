@@ -72,12 +72,12 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
             <div className="flex flex-wrap items-center gap-3">
                 <Select value={provider} onChange={setProvider} options={providerOptions} className="w-60" />
                 {(prov?.supportsDub ?? true) && (
-                    <div className="flex rounded-xl border border-line bg-surface-1 p-1">
+                    <div className="flex rounded-lg bg-white/[0.04] p-0.5">
                         {(["sub", "dub"] as const).map(m => (
                             <button
                                 key={m}
                                 onClick={() => setDub(m === "dub")}
-                                className={cn("h-8 rounded-lg px-4 text-sm font-semibold uppercase transition", (m === "dub") === dub ? "bg-brand text-white" : "text-muted hover:text-fg")}
+                                className={cn("h-8 rounded-md px-3.5 text-[13px] font-medium uppercase transition-colors", (m === "dub") === dub ? "bg-white/[0.1] text-fg" : "text-muted hover:text-fg")}
                             >
                                 {m}
                             </button>
@@ -111,7 +111,7 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
             </div>
 
             {aniMissing && (
-                <div className="flex items-start gap-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5">
+                <div className="flex items-start gap-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-5">
                     <Terminal className="mt-0.5 size-5 text-amber-300" />
                     <div className="text-sm">
                         <p className="font-semibold text-amber-200">ani-cli isn’t installed</p>

@@ -280,7 +280,7 @@ function FolderRow({
                     ) : primary || f.matches.length === 1 ? (
                         <Link to={`/entry?id=${f.matches[0].mediaId}`} className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-white/[0.05]">
                             {primary && <img src={cover(primary)} alt="" className="h-9 w-6 rounded object-cover" />}
-                            <span className="max-w-64 truncate text-sm text-brand-strong">{primary ? title(primary) : `AniList #${f.matches[0].mediaId}`}</span>
+                            <span className="max-w-64 truncate text-sm text-fg/85">{primary ? title(primary) : `AniList #${f.matches[0].mediaId}`}</span>
                         </Link>
                     ) : (
                         <div className="flex flex-wrap gap-1.5">

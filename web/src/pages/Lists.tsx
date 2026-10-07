@@ -41,10 +41,10 @@ export default function ListsPage() {
     }, [byStatus, status, q, sort])
 
     return (
-        <div className="min-h-full px-6 pt-10 pb-24 md:px-10 xl:px-14">
+        <div className="min-h-full px-6 pt-8 pb-24 md:px-8 xl:px-10">
             <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">My lists</h1>
+                    <h1 className="text-[1.75rem] font-semibold tracking-tight">My lists</h1>
                     <p className="mt-1 text-muted">Everything on your {type === "ANIME" ? "anime" : "manga"} list.</p>
                 </div>
                 <Tabs value={type} onChange={setType} tabs={[{ value: "ANIME", label: "Anime" }, { value: "MANGA", label: "Manga" }]} />

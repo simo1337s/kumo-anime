@@ -107,26 +107,26 @@ export default function HomePage() {
                 onIndex={setHeroIdx}
                 loading={isLoading}
                 toolbar={
-                    <div className="flex items-center gap-1.5">
-                        <Button size="sm" variant="subtle" className="glass" icon={<HardDrive className="size-4" />} onClick={() => navigate("/local")}>
+                    <div className="glass flex items-center gap-0.5 rounded-lg p-1 [&_button]:text-white/80 [&_button:hover]:bg-white/10 [&_button:hover]:text-white [&_button[data-state=open]]:bg-white/10">
+                        <Button size="sm" variant="ghost" icon={<HardDrive className="size-4" />} onClick={() => navigate("/local")}>
                             Local library
                         </Button>
-                        <IconButton label="Library tools" variant="subtle" size="sm" className="glass" onClick={() => navigate("/library")}>
+                        <IconButton label="Library tools" size="sm" onClick={() => navigate("/library")}>
                             <LibraryBig className="size-4" />
                         </IconButton>
-                        <IconButton label={`Unmatched files (${data?.unmatchedCount ?? 0})`} variant="subtle" size="sm" className="glass relative" onClick={() => navigate("/library?tab=unmatched")}>
+                        <IconButton label={`Unmatched files (${data?.unmatchedCount ?? 0})`} size="sm" className="relative" onClick={() => navigate("/library?tab=unmatched")}>
                             <FolderSearch className="size-4" />
-                            {!!data?.unmatchedCount && <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-amber-400 ring-2 ring-black" />}
+                            {!!data?.unmatchedCount && <span className="absolute top-1 right-1 size-2 rounded-full bg-amber-400" />}
                         </IconButton>
-                        <IconButton label="Downloads" variant="subtle" size="sm" className="glass" onClick={() => navigate("/downloads")}>
+                        <IconButton label="Downloads" size="sm" onClick={() => navigate("/downloads")}>
                             <Download className="size-4" />
                         </IconButton>
-                        <Button size="sm" variant="subtle" className="glass" loading={scanning || scan.isPending} icon={<FolderSync className="size-4" />} onClick={() => scan.mutate(false)}>
+                        <Button size="sm" variant="ghost" loading={scanning || scan.isPending} icon={<FolderSync className="size-4" />} onClick={() => scan.mutate(false)}>
                             Refresh
                         </Button>
                         <Dropdown>
                             <DropdownTrigger asChild>
-                                <IconButton label="Display" variant="subtle" size="sm" className="glass">
+                                <IconButton label="Display" size="sm">
                                     <Settings2 className="size-4" />
                                 </IconButton>
                             </DropdownTrigger>
@@ -158,7 +158,7 @@ export default function HomePage() {
                         </Dropdown>
                         <Dropdown>
                             <DropdownTrigger asChild>
-                                <IconButton label="More" variant="subtle" size="sm" className="glass">
+                                <IconButton label="More" size="sm">
                                     <MoreVertical className="size-4" />
                                 </IconButton>
                             </DropdownTrigger>
@@ -180,7 +180,7 @@ export default function HomePage() {
                 }
             />
 
-            <div className="relative z-10 -mt-24 flex flex-col gap-12 px-6 md:px-10 xl:px-14">
+            <div className="relative z-10 -mt-20 flex flex-col gap-10 px-6 md:px-8 xl:px-10">
                 <PluginSlot slot="after-home-screen-toolbar" />
                 <ProgramsNotice />
 
@@ -188,7 +188,7 @@ export default function HomePage() {
                 {isLoading && (
                     <div className="flex gap-5">
                         {Array.from({ length: 3 }).map((_, i) => (
-                            <Skeleton key={i} className="aspect-video w-[440px]" />
+                            <Skeleton key={i} className="aspect-video w-[400px]" />
                         ))}
                     </div>
                 )}
@@ -231,11 +231,10 @@ export default function HomePage() {
                 )}
 
                 {lists.map(l => (
-                    <section key={l.key} className="rise-in">
-                        <div className="mb-5 flex items-center justify-between">
-                            <h2 className="text-[1.65rem] font-bold tracking-tight">
-                                {l.name} <span className="ml-1 text-base font-medium text-subtle">{l.items.length}</span>
-                            </h2>
+                    <section key={l.key} className="fade-in">
+                        <div className="mb-4 flex items-baseline gap-2.5">
+                            <h2 className="text-xl font-semibold tracking-tight">{l.name}</h2>
+                            <span className="text-sm text-subtle tabular-nums">{l.items.length}</span>
                         </div>
                         <MediaGrid size={status?.settings.ui.cardSize}>
                             {l.items.map(it => (
@@ -266,45 +265,52 @@ function Hero({ item, count, index, onIndex, loading, toolbar }: { item: Continu
     // often small, blurry screenshots.
     const img = !item ? "" : item.media.bannerImage ? banner(item.media) : imgUrl(item.image) || cover(item.media)
     return (
-        <div className="relative h-[clamp(320px,46vh,520px)] w-full overflow-hidden">
+        <div className="relative h-[clamp(300px,44vh,480px)] w-full overflow-hidden">
             {img ? (
-                <img key={img} src={img} alt="" className="absolute inset-0 size-full object-cover fade-in animate-slow-zoom" />
+                <img key={img} src={img} alt="" className="absolute inset-0 size-full object-cover fade-in" />
             ) : (
-                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_0%,color-mix(in_oklab,var(--brand)_35%,transparent),transparent_60%),radial-gradient(ellipse_at_90%_30%,color-mix(in_oklab,var(--brand)_18%,transparent),transparent_55%)]" />
+                <div className="absolute inset-0 bg-surface-1" />
             )}
-            <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/55 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-r from-bg/70 via-transparent to-transparent" />
-            <div className="absolute top-5 right-6 z-20">{toolbar}</div>
-            <div className="absolute inset-x-0 bottom-32 px-6 md:px-10 xl:px-14">
+            <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/60 to-bg/5" />
+            <div className="absolute inset-0 bg-gradient-to-r from-bg/80 via-bg/25 to-transparent" />
+            <div className="absolute top-4 right-4 z-20">{toolbar}</div>
+            <div className="absolute inset-x-0 bottom-28 px-6 md:px-8 xl:px-10">
                 {loading ? (
-                    <Skeleton className="h-12 w-96" />
+                    <Skeleton className="h-11 w-96" />
                 ) : item ? (
-                    <div key={item.media.id} className="rise-in">
-                        <p className="text-2xl font-semibold text-white/85 drop-shadow md:text-3xl">Continue watching</p>
-                        <Link to={`/entry?id=${item.media.id}`} className="mt-1 block max-w-4xl text-4xl leading-tight font-extrabold text-white drop-shadow-xl hover:underline md:text-5xl">
+                    <div key={item.media.id} className="max-w-3xl rise-in">
+                        <p className="text-sm font-medium text-white/65">Continue watching</p>
+                        <Link to={`/entry?id=${item.media.id}`} className="mt-1.5 block text-4xl leading-[1.1] font-semibold tracking-tight text-white transition-colors hover:text-white/85 md:text-[2.75rem]">
                             {title(item.media)}
                         </Link>
                     </div>
                 ) : (
                     <div className="rise-in">
-                        <p className="text-2xl font-semibold text-white/80">Welcome to</p>
-                        <h1 className="text-gradient text-5xl font-extrabold">Kumo</h1>
+                        <p className="text-sm font-medium text-white/65">Welcome to</p>
+                        <h1 className="mt-1 text-4xl font-semibold tracking-tight">Kumo</h1>
                     </div>
                 )}
             </div>
             {count > 1 && (
-                <div className="absolute right-6 bottom-32 z-20 flex items-center gap-2">
-                    <button className="glass grid size-8 place-items-center rounded-full" onClick={() => onIndex((index - 1 + count) % count)}>
-                        <ChevronLeft className="size-4" />
-                    </button>
-                    <div className="flex gap-1">
+                <div className="absolute right-4 bottom-28 z-20 flex items-center gap-3 md:right-8 xl:right-10">
+                    <div className="flex gap-1.5">
                         {Array.from({ length: Math.min(count, 8) }).map((_, i) => (
-                            <span key={i} className={cn("h-1.5 rounded-full transition-all", i === index ? "w-5 bg-white" : "w-1.5 bg-white/35")} />
+                            <button
+                                key={i}
+                                aria-label={`Show ${i + 1}`}
+                                onClick={() => onIndex(i)}
+                                className={cn("h-1 rounded-full transition-all duration-300", i === index ? "w-5 bg-white" : "w-2.5 bg-white/30 hover:bg-white/50")}
+                            />
                         ))}
                     </div>
-                    <button className="glass grid size-8 place-items-center rounded-full" onClick={() => onIndex((index + 1) % count)}>
-                        <ChevronRight className="size-4" />
-                    </button>
+                    <div className="flex gap-1">
+                        <button aria-label="Previous" className="glass grid size-8 place-items-center rounded-full transition-colors hover:bg-black/70" onClick={() => onIndex((index - 1 + count) % count)}>
+                            <ChevronLeft className="size-4" />
+                        </button>
+                        <button aria-label="Next" className="glass grid size-8 place-items-center rounded-full transition-colors hover:bg-black/70" onClick={() => onIndex((index + 1) % count)}>
+                            <ChevronRight className="size-4" />
+                        </button>
+                    </div>
                 </div>
             )}
         </div>
@@ -352,9 +358,9 @@ function ContinueRow({ items, onFocus }: { items: ContinueItem[]; onFocus: (i: n
         })
     }
     return (
-        <div ref={ref} className="no-scrollbar -mx-2 flex snap-x gap-6 overflow-x-auto px-2 pb-2">
+        <div ref={ref} className="no-scrollbar -mx-2 flex snap-x scroll-px-2 gap-5 overflow-x-auto px-2 pb-2">
             {items.map((it, i) => (
-                <div key={it.media.id} className="w-[min(82vw,440px)] shrink-0 snap-start" onMouseEnter={() => onFocus(i)}>
+                <div key={it.media.id} className="w-[min(82vw,400px)] shrink-0 snap-start" onMouseEnter={() => onFocus(i)}>
                     <EpisodeCard
                         large
                         image={it.image}
@@ -362,9 +368,9 @@ function ContinueRow({ items, onFocus }: { items: ContinueItem[]; onFocus: (i: n
                         title={it.title || (it.media.format === "MOVIE" ? title(it.media) : `Episode ${it.episode}`)}
                         subtitle={
                             <span>
-                                <span className="font-semibold text-fg/90">Episode {it.episode}</span>
-                                {it.total > 0 && <span className="text-subtle"> / {it.total}</span>}
-                                <span className="text-subtle"> - {title(it.media)}</span>
+                                <span className="text-fg/80">Episode {it.episode}</span>
+                                {it.total > 0 && <span className="text-subtle"> of {it.total}</span>}
+                                <span className="text-subtle"> · {title(it.media)}</span>
                             </span>
                         }
                         runtime={it.runtime}
@@ -387,7 +393,7 @@ function GenreBar({ genres, value, onChange }: { genres: string[]; value: string
             <div ref={ref} className="no-scrollbar flex flex-1 gap-2 overflow-x-auto scroll-smooth py-1">
                 <button
                     onClick={() => onChange(null)}
-                    className={cn("h-9 shrink-0 rounded-full px-4 text-[15px] font-medium transition", !value ? "bg-white text-black" : "text-muted hover:bg-white/[0.06] hover:text-fg")}
+                    className={cn("h-8 shrink-0 rounded-full px-3.5 text-[13px] font-medium transition-colors", !value ? "bg-white text-neutral-950" : "bg-white/[0.05] text-muted hover:bg-white/[0.09] hover:text-fg")}
                 >
                     All
                 </button>
@@ -395,14 +401,14 @@ function GenreBar({ genres, value, onChange }: { genres: string[]; value: string
                     <button
                         key={g}
                         onClick={() => onChange(value === g ? null : g)}
-                        className={cn("h-9 shrink-0 rounded-full px-4 text-[15px] font-medium transition", value === g ? "bg-white text-black" : "text-muted hover:bg-white/[0.06] hover:text-fg")}
+                        className={cn("h-8 shrink-0 rounded-full px-3.5 text-[13px] font-medium transition-colors", value === g ? "bg-white text-neutral-950" : "bg-white/[0.05] text-muted hover:bg-white/[0.09] hover:text-fg")}
                     >
                         {g}
                     </button>
                 ))}
             </div>
-            <button onClick={() => ref.current?.scrollBy({ left: 400, behavior: "smooth" })} className="ml-2 grid size-9 shrink-0 place-items-center rounded-full text-muted hover:bg-white/[0.06] hover:text-fg">
-                <ChevronRight className="size-5" />
+            <button onClick={() => ref.current?.scrollBy({ left: 400, behavior: "smooth" })} className="ml-2 grid size-8 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-white/[0.06] hover:text-fg">
+                <ChevronRight className="size-4" />
             </button>
         </div>
     )
@@ -416,17 +422,17 @@ function Welcome({ loggedIn, hasDir, onLogin }: { loggedIn: boolean; hasDir: boo
     ]
     return (
         <div className="card overflow-hidden rise-in">
-            <div className="bg-[radial-gradient(ellipse_at_top_left,color-mix(in_oklab,var(--brand)_22%,transparent),transparent_60%)] p-8">
-                <h2 className="text-3xl font-extrabold">Let’s set things up</h2>
-                <p className="mt-1 text-muted">Three quick steps and your anime library is ready.</p>
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
+            <div className="p-7">
+                <h2 className="text-xl font-semibold tracking-tight">Let’s set things up</h2>
+                <p className="mt-1 text-sm text-muted">Three quick steps and your anime library is ready.</p>
+                <div className="mt-6 grid gap-3 md:grid-cols-3">
                     {steps.map((s, i) => (
-                        <div key={i} className={cn("flex flex-col gap-3 rounded-2xl border border-line bg-surface-2/70 p-5", s.done && "opacity-60")}>
+                        <div key={i} className={cn("flex flex-col gap-3 rounded-lg bg-white/[0.03] p-5", s.done && "opacity-60")}>
                             <div className="flex items-center gap-3">
-                                <span className={cn("grid size-10 place-items-center rounded-xl", s.done ? "bg-emerald-500/15 text-emerald-300" : "bg-brand-soft text-brand-strong")}>{s.icon}</span>
-                                <span className="text-xs font-semibold tracking-wider text-subtle uppercase">Step {i + 1}{s.done ? " · done" : ""}</span>
+                                <span className={cn("grid size-9 place-items-center rounded-lg [&_svg]:size-[18px]", s.done ? "bg-emerald-500/15 text-emerald-300" : "bg-white/[0.06] text-fg/80")}>{s.icon}</span>
+                                <span className="text-xs text-subtle">Step {i + 1}{s.done ? " · done" : ""}</span>
                             </div>
-                            <p className="font-semibold">{s.title}</p>
+                            <p className="font-medium">{s.title}</p>
                             <p className="flex-1 text-sm text-muted">{s.text}</p>
                             {!s.done && <div>{s.action}</div>}
                         </div>

@@ -27,11 +27,11 @@ export default function SchedulePage() {
     const now = Date.now() / 1000
 
     return (
-        <div className="min-h-full px-6 pt-10 pb-24 md:px-10 xl:px-14">
+        <div className="min-h-full px-6 pt-8 pb-24 md:px-8 xl:px-10">
             <PluginSlot slot="schedule-screen-top" className="mb-8" />
             <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">Schedule</h1>
+                    <h1 className="text-[1.75rem] font-semibold tracking-tight">Schedule</h1>
                     <p className="mt-1 text-muted">Airing times in your local timezone.</p>
                 </div>
                 <Tabs
@@ -64,7 +64,7 @@ export default function SchedulePage() {
                     const isToday = d.date.toDateString() === today
                     return (
                         <section key={d.date.toISOString()}>
-                            <h2 className={cn("mb-4 flex items-center gap-3 text-xl font-bold", isToday && "text-brand-strong")}>
+                            <h2 className="mb-4 flex items-center gap-2.5 text-lg font-semibold tracking-tight">
                                 {d.date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
                                 {isToday && <Badge tone="brand">Today</Badge>}
                             </h2>
@@ -83,7 +83,7 @@ export default function SchedulePage() {
                                                 {it.listStatus && <p className="mt-1 text-xs text-brand-strong">{LIST_STATUS[it.listStatus]}</p>}
                                             </div>
                                             <div className="pr-4 text-right">
-                                                <p className="text-lg font-bold tabular-nums">{new Date(it.airingAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+                                                <p className="text-base font-semibold tabular-nums">{new Date(it.airingAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
                                                 <p className="flex items-center justify-end gap-1 text-xs text-subtle">
                                                     <Clock className="size-3" /> {aired ? "aired" : `in ${timeUntil(it.airingAt - now)}`}
                                                 </p>

@@ -14,7 +14,7 @@ export function ListStatusButton({ media, entry }: { media: Media; entry: Entry 
     return (
         <Dropdown>
             <DropdownTrigger asChild>
-                <Button variant="subtle" size="lg" className="glass" loading={update.isPending || del.isPending}>
+                <Button variant="subtle" size="lg" loading={update.isPending || del.isPending}>
                     {entry ? (
                         <>
                             <Check className="size-4 text-brand-strong" />
@@ -63,11 +63,11 @@ export function ProgressEditor({ media, entry }: { media: Media; entry: Entry })
         update.mutate(body)
     }
     return (
-        <div className="glass flex h-12 items-center gap-1 rounded-xl px-1.5">
-            <button className="grid size-9 place-items-center rounded-lg text-muted hover:bg-white/10 hover:text-fg" onClick={() => commit(value - 1)} aria-label="Decrease progress">
+        <div className="flex h-11 items-center gap-1 rounded-lg bg-white/[0.07] px-1">
+            <button className="grid size-9 place-items-center rounded-md text-muted transition-colors hover:bg-white/10 hover:text-fg" onClick={() => commit(value - 1)} aria-label="Decrease progress">
                 <Minus className="size-4" />
             </button>
-            <div className="min-w-16 text-center text-sm">
+            <div className="min-w-16 text-center text-sm tabular-nums">
                 <input
                     value={value}
                     onChange={e => setValue(Number(e.target.value.replace(/\D/g, "")) || 0)}
@@ -77,7 +77,7 @@ export function ProgressEditor({ media, entry }: { media: Media; entry: Entry })
                 />
                 <span className="text-subtle"> / {total || "?"}</span>
             </div>
-            <button className="grid size-9 place-items-center rounded-lg text-muted hover:bg-white/10 hover:text-fg" onClick={() => commit(value + 1)} aria-label="Increase progress">
+            <button className="grid size-9 place-items-center rounded-md text-muted transition-colors hover:bg-white/10 hover:text-fg" onClick={() => commit(value + 1)} aria-label="Increase progress">
                 <Plus className="size-4" />
             </button>
         </div>
@@ -90,7 +90,7 @@ export function ScoreEditor({ media, entry }: { media: Media; entry: Entry }) {
     return (
         <Dropdown>
             <DropdownTrigger asChild>
-                <button className="glass flex h-12 items-center gap-2 rounded-xl px-4 text-sm font-semibold transition hover:bg-white/10">
+                <button className="focus-ring flex h-11 items-center gap-2 rounded-lg bg-white/[0.07] px-4 text-[15px] font-medium transition-colors hover:bg-white/[0.11] data-[state=open]:bg-white/[0.11]">
                     <Star className={cn("size-4", score ? "fill-amber-300 text-amber-300" : "text-muted")} />
                     {score ? (score / 10).toFixed(score % 10 ? 1 : 0) : "Rate"}
                 </button>

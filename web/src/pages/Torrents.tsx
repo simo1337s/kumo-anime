@@ -62,10 +62,10 @@ export default function TorrentsPage() {
     const up = (list ?? []).reduce((a, t) => a + t.upSpeed, 0)
 
     return (
-        <div className="min-h-full px-6 pt-10 pb-24 md:px-10 xl:px-14">
+        <div className="min-h-full px-6 pt-8 pb-24 md:px-8 xl:px-10">
             <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">Torrents</h1>
+                    <h1 className="text-[1.75rem] font-semibold tracking-tight">Torrents</h1>
                     <p className="mt-1 flex items-center gap-2 text-muted">
                         <span className={cn("size-2 rounded-full", clientStatus?.connected ? "bg-emerald-400" : "bg-rose-400")} />
                         {clientName === "none" || !clientName
@@ -110,7 +110,7 @@ export default function TorrentsPage() {
                 </EmptyState>
             )}
             {clientName && clientName !== "none" && !clientStatus?.connected && clientStatus?.error && (
-                <div className="mb-6 rounded-2xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200">{clientStatus.error}</div>
+                <div className="mb-6 rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200">{clientStatus.error}</div>
             )}
 
             {clientStatus?.connected && (

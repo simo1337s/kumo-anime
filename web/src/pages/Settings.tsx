@@ -176,19 +176,19 @@ export default function SettingsPage() {
     }
 
     return (
-        <div className="flex min-h-full flex-col gap-8 px-6 pt-10 pb-24 md:px-10 lg:flex-row xl:px-14">
-            <aside className="w-full shrink-0 lg:sticky lg:top-10 lg:w-[300px] lg:self-start">
-                <h1 className="mb-5 text-center text-2xl font-bold">Settings</h1>
-                <div className="flex flex-col gap-3">
+        <div className="flex min-h-full flex-col gap-8 px-6 pt-8 pb-24 md:px-8 lg:flex-row lg:gap-12 xl:px-10">
+            <aside className="w-full shrink-0 lg:sticky lg:top-8 lg:w-56 lg:self-start">
+                <h1 className="mb-5 px-2.5 text-[1.75rem] font-semibold tracking-tight">Settings</h1>
+                <div className="flex flex-col gap-4">
                     {NAV.map((g, i) => (
-                        <div key={i} className="card flex flex-col gap-0.5 p-1.5">
+                        <div key={i} className="flex flex-col gap-0.5">
                             {g.items.map(it => (
                                 <button
                                     key={it.id}
                                     onClick={() => setParams({ tab: it.id }, { replace: true })}
                                     className={cn(
-                                        "flex h-10 items-center gap-3 rounded-xl px-3 text-[15px] transition [&>svg]:size-4 [&>svg]:stroke-[1.75]",
-                                        section === it.id ? "bg-white/[0.06] font-medium text-fg ring-1 ring-line-strong" : "text-muted hover:bg-white/[0.04] hover:text-fg",
+                                        "focus-ring flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-medium transition-colors [&>svg]:size-4 [&>svg]:stroke-[1.75]",
+                                        section === it.id ? "bg-white/[0.08] text-fg" : "text-muted hover:bg-white/[0.04] hover:text-fg",
                                     )}
                                 >
                                     {it.icon}
@@ -198,19 +198,15 @@ export default function SettingsPage() {
                         </div>
                     ))}
                 </div>
-                <p className="mt-5 text-center text-xs text-subtle">
-                    {status.version} <span className="font-semibold text-muted">Kumo</span> • {platformName(status.platform)} •{" "}
-                    {status.client === "desktop" ? "Desktop" : status.client === "lan" ? "LAN" : "Web UI"}
+                <p className="mt-6 px-2.5 text-xs text-subtle">
+                    Kumo {status.version} · {platformName(status.platform)} · {status.client === "desktop" ? "Desktop" : status.client === "lan" ? "LAN" : "Web UI"}
                 </p>
             </aside>
 
-            <section className="min-w-0 flex-1">
-                <div className="mb-8 flex items-center gap-4">
-                    <span className="grid size-12 place-items-center rounded-xl border border-line bg-surface-1 text-brand-strong [&>svg]:size-5">{current.icon}</span>
-                    <div>
-                        <h2 className="text-xl font-semibold">{current.label}</h2>
-                        <p className="text-sm text-muted">{SUBTITLES[current.id]}</p>
-                    </div>
+            <section className="min-w-0 flex-1 lg:max-w-4xl">
+                <div className="mb-7 border-b border-line pb-5 lg:mt-[3.25rem]">
+                    <h2 className="text-xl font-semibold tracking-tight">{current.label}</h2>
+                    <p className="mt-0.5 text-sm text-muted">{SUBTITLES[current.id]}</p>
                 </div>
                 <div key={section} className="flex flex-col gap-8 fade-in">
                     {section === "app" && <AppSection draft={draft} set={set} />}
@@ -229,12 +225,12 @@ export default function SettingsPage() {
                 </div>
                 {section !== "logs" && section !== "about" && (
                     <div className={cn("mt-8 flex items-center gap-3", dirty && "sticky bottom-6 z-20")}>
-                        <Button variant="white" className="rounded-full px-5" icon={<Save className="size-4" />} loading={save.isPending} onClick={onSave} disabled={!dirty}>
+                        <Button variant="white" icon={<Save className="size-4" />} loading={save.isPending} onClick={onSave} disabled={!dirty}>
                             Save
                         </Button>
                         {dirty && (
                             <>
-                                <span className="glass rounded-full px-3 py-1.5 text-sm text-muted">Unsaved changes</span>
+                                <span className="rounded-md border border-line-strong bg-surface-2 px-2.5 py-1.5 text-[13px] text-muted shadow-lg shadow-black/30">Unsaved changes</span>
                                 <Button variant="ghost" size="sm" onClick={() => reset(status.settings)}>
                                     Discard
                                 </Button>
@@ -271,8 +267,8 @@ type SectionProps = { draft: Settings; set: <K extends keyof Settings>(k: K, v: 
 function Group({ title, children, description }: { title?: string; description?: string; children: React.ReactNode }) {
     return (
         <div>
-            {title && <h3 className="mb-1 font-semibold">{title}</h3>}
-            {description && <p className="mb-3 text-sm text-muted">{description}</p>}
+            {title && <h3 className="mb-1 text-[15px] font-semibold">{title}</h3>}
+            {description && <p className="mb-3 text-[13px] text-muted">{description}</p>}
             {!description && title && <div className="mb-3" />}
             <div className="card divide-y divide-line">{children}</div>
         </div>
@@ -319,9 +315,9 @@ function Collapsible({ title, children }: { title: string; children: React.React
     const [open, setOpen] = useState(false)
     return (
         <div className="card">
-            <button onClick={() => setOpen(o => !o)} className="flex w-full items-center justify-between px-4 py-3.5 text-lg font-medium">
+            <button onClick={() => setOpen(o => !o)} className="flex w-full items-center justify-between px-4 py-3.5 text-[15px] font-medium">
                 {title}
-                <ChevronDown className={cn("size-5 text-muted transition-transform", open && "rotate-180")} />
+                <ChevronDown className={cn("size-4 text-muted transition-transform duration-200", open && "rotate-180")} />
             </button>
             {open && <div className="divide-y divide-line border-t border-line">{children}</div>}
         </div>
@@ -1047,9 +1043,9 @@ function StreamingSection({ draft, set }: SectionProps) {
                     <Input value={a.path} onChange={e => set("aniCli", { path: e.target.value })} icon={<Terminal className="size-4" />} />
                 </Stack>
                 <Row label="Default audio">
-                    <div className="flex rounded-xl border border-line bg-surface-2 p-1">
+                    <div className="flex rounded-lg bg-white/[0.04] p-0.5">
                         {(["sub", "dub"] as const).map(m => (
-                            <button key={m} onClick={() => set("aniCli", { defaultMode: m })} className={cn("h-8 rounded-lg px-4 text-sm font-semibold uppercase", a.defaultMode === m ? "bg-brand text-white" : "text-muted")}>
+                            <button key={m} onClick={() => set("aniCli", { defaultMode: m })} className={cn("h-7 rounded-md px-3 text-xs font-medium uppercase transition-colors", a.defaultMode === m ? "bg-white/[0.1] text-fg" : "text-muted hover:text-fg")}>
                                 {m}
                             </button>
                         ))}

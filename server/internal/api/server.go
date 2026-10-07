@@ -298,7 +298,7 @@ func kindOf(r *http.Request) clientKind {
 func isTrusted(r *http.Request) bool { return kindOf(r) != clientLAN }
 
 const webUIDisabledPage = `<!doctype html><html><head><meta charset="utf-8"><title>Kumo</title>
-<style>body{margin:0;height:100vh;display:grid;place-items:center;background:#0b0b10;color:#e8e8f0;font-family:system-ui,sans-serif}
+<style>body{margin:0;height:100vh;display:grid;place-items:center;background:#0a0a0b;color:#ececee;font-family:system-ui,sans-serif}
 .c{max-width:440px;padding:32px;border:1px solid #23232e;border-radius:16px;background:#12121a;text-align:center}
 h1{font-size:20px;margin:0 0 8px}p{color:#9a9ab0;line-height:1.5}</style></head>
 <body><div class="c"><h1>The Kumo Web UI is turned off</h1>

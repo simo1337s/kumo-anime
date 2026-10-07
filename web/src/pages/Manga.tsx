@@ -23,10 +23,10 @@ export default function MangaPage() {
     const entries = byStatus[status] ?? []
 
     return (
-        <div className="min-h-full px-6 pt-10 pb-24 md:px-10 xl:px-14">
+        <div className="min-h-full px-6 pt-8 pb-24 md:px-8 xl:px-10">
             <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">Manga</h1>
+                    <h1 className="text-[1.75rem] font-semibold tracking-tight">Manga</h1>
                     <p className="mt-1 text-muted">Read with manga provider extensions. Progress syncs to your list.</p>
                 </div>
                 <Link to="/search?type=MANGA">
@@ -34,9 +34,9 @@ export default function MangaPage() {
                 </Link>
             </div>
             {providers && providers.length === 0 && (
-                <div className="mb-8 flex items-center justify-between gap-4 rounded-2xl border border-brand/25 bg-brand-soft p-5">
+                <div className="mb-8 flex items-center justify-between gap-4 rounded-xl bg-white/[0.03] p-5">
                     <div className="flex items-center gap-3">
-                        <Puzzle className="size-5 text-brand-strong" />
+                        <Puzzle className="size-5 text-muted" />
                         <p className="text-sm">Install a manga provider extension to start reading.</p>
                     </div>
                     <Link to="/extensions?tab=marketplace">

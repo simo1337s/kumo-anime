@@ -56,13 +56,13 @@ export default function MangaEntryPage() {
         <div className="min-h-full pb-24">
             <div className="relative">
                 <div className="absolute inset-x-0 top-0 h-[440px] overflow-hidden">
-                    {banner(media) && <img src={banner(media)} alt="" className="size-full object-cover opacity-60" />}
+                    {banner(media) && <img src={banner(media)} alt="" className="size-full object-cover opacity-60 fade-in" />}
                     <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/70 to-bg/10" />
                 </div>
-                <div className="relative z-10 flex flex-col gap-8 px-6 pt-[180px] pb-10 md:flex-row md:px-10 xl:px-14">
-                    <img src={cover(media)} alt="" className="aspect-[2/3] w-44 shrink-0 rounded-2xl object-cover shadow-2xl ring-1 ring-white/10 md:w-52" />
+                <div className="relative z-10 flex flex-col gap-8 px-6 pt-[180px] pb-10 md:flex-row md:px-8 xl:px-10">
+                    <img src={cover(media)} alt="" className="aspect-[2/3] w-40 shrink-0 rounded-lg object-cover shadow-2xl shadow-black/60 ring-1 ring-white/10 md:w-52" />
                     <div className="flex min-w-0 flex-1 flex-col justify-end gap-4">
-                        <h1 className="text-3xl font-extrabold md:text-5xl">{title(media)}</h1>
+                        <h1 className="text-3xl leading-[1.1] font-semibold tracking-tight md:text-[2.75rem]">{title(media)}</h1>
                         <div className="flex flex-wrap items-center gap-3 text-sm text-white/80">
                             <span>{formatLabel(media.format)}</span>
                             {media.chapters && <span>{media.chapters} chapters</span>}
@@ -87,7 +87,7 @@ export default function MangaEntryPage() {
                     </div>
                 </div>
             </div>
-            <div className="flex flex-col gap-6 px-6 md:px-10 xl:px-14">
+            <div className="flex flex-col gap-6 px-6 md:px-8 xl:px-10">
                 <div className="flex flex-wrap items-center gap-3">
                     <Select
                         className="w-60"

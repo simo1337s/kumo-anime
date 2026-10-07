@@ -69,39 +69,42 @@ export default function App() {
 
     return (
         <TooltipProvider>
-            <div className="flex h-full">
+            <div className="flex h-full bg-frame">
                 <Sidebar />
-                <main id="main-scroll" className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
-                    <Suspense
-                        fallback={
-                            <div className="grid h-full place-items-center">
-                                <Spinner className="size-7" />
-                            </div>
-                        }
-                    >
-                        <Routes>
-                            <Route path="/" element={<HomePage />} />
-                            <Route path="/entry" element={<EntryPage />} />
-                            <Route path="/discover" element={<DiscoverPage />} />
-                            <Route path="/search" element={<SearchPage />} />
-                            <Route path="/schedule" element={<SchedulePage />} />
-                            <Route path="/lists" element={<ListsPage />} />
-                            <Route path="/torrent-list" element={<TorrentsPage />} />
-                            <Route path="/downloads" element={<DownloadsPage />} />
-                            <Route path="/auto-downloader" element={<AutoDownloaderPage />} />
-                            <Route path="/library" element={<LibraryPage />} />
-                            <Route path="/local" element={<LocalLibraryPage />} />
-                            <Route path="/auth/callback" element={<AuthCallbackPage />} />
-                            <Route path="/extensions" element={<ExtensionsPage />} />
-                            <Route path="/settings" element={<SettingsPage />} />
-                            <Route path="/manga" element={<MangaPage />} />
-                            <Route path="/manga/entry" element={<MangaEntryPage />} />
-                            <Route path="/manga/read" element={<MangaReaderPage />} />
-                            <Route path="/webview" element={<WebviewPage />} />
-                            <Route path="*" element={<HomePage />} />
-                        </Routes>
-                    </Suspense>
-                </main>
+                {/* The pages: a panel inset in the window, next to the sidebar. */}
+                <div className="min-w-0 flex-1 py-2 pr-2">
+                    <main id="main-scroll" className="relative h-full overflow-x-hidden overflow-y-auto rounded-xl border border-line bg-bg">
+                        <Suspense
+                            fallback={
+                                <div className="grid h-full place-items-center">
+                                    <Spinner className="size-7" />
+                                </div>
+                            }
+                        >
+                            <Routes>
+                                <Route path="/" element={<HomePage />} />
+                                <Route path="/entry" element={<EntryPage />} />
+                                <Route path="/discover" element={<DiscoverPage />} />
+                                <Route path="/search" element={<SearchPage />} />
+                                <Route path="/schedule" element={<SchedulePage />} />
+                                <Route path="/lists" element={<ListsPage />} />
+                                <Route path="/torrent-list" element={<TorrentsPage />} />
+                                <Route path="/downloads" element={<DownloadsPage />} />
+                                <Route path="/auto-downloader" element={<AutoDownloaderPage />} />
+                                <Route path="/library" element={<LibraryPage />} />
+                                <Route path="/local" element={<LocalLibraryPage />} />
+                                <Route path="/auth/callback" element={<AuthCallbackPage />} />
+                                <Route path="/extensions" element={<ExtensionsPage />} />
+                                <Route path="/settings" element={<SettingsPage />} />
+                                <Route path="/manga" element={<MangaPage />} />
+                                <Route path="/manga/entry" element={<MangaEntryPage />} />
+                                <Route path="/manga/read" element={<MangaReaderPage />} />
+                                <Route path="/webview" element={<WebviewPage />} />
+                                <Route path="*" element={<HomePage />} />
+                            </Routes>
+                        </Suspense>
+                    </main>
+                </div>
             </div>
             <NowPlaying />
             <ScanIndicator />
@@ -112,7 +115,7 @@ export default function App() {
                 position="top-right"
                 richColors
                 closeButton
-                toastOptions={{ style: { background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 14 } }}
+                toastOptions={{ style: { background: "var(--surface-2)", border: "1px solid var(--line-strong)", borderRadius: 10 } }}
             />
         </TooltipProvider>
     )
@@ -137,10 +140,10 @@ function PasswordGate() {
         }
     }
     return (
-        <div className="grid h-full place-items-center bg-[radial-gradient(ellipse_at_top,color-mix(in_oklab,var(--brand)_18%,transparent),transparent_60%)] p-6">
+        <div className="grid h-full place-items-center bg-bg p-6">
             <div className="card w-full max-w-sm p-8 text-center rise-in">
-                <KumoLogo className="mx-auto size-14" />
-                <h1 className="mt-5 text-2xl font-bold">Kumo</h1>
+                <KumoLogo className="mx-auto size-11" />
+                <h1 className="mt-4 text-xl font-semibold">Kumo</h1>
                 <p className="mt-1 text-sm text-muted">This server is password protected.</p>
                 <div className="mt-6 flex flex-col gap-3">
                     <Input type="password" autoFocus icon={<Lock className="size-4" />} placeholder="Password" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />

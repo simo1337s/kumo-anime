@@ -34,10 +34,10 @@ export default function AutoDownloaderPage() {
     }
 
     return (
-        <div className="min-h-full px-6 pt-10 pb-24 md:px-10 xl:px-14">
+        <div className="min-h-full px-6 pt-8 pb-24 md:px-8 xl:px-10">
             <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">Auto downloader</h1>
+                    <h1 className="text-[1.75rem] font-semibold tracking-tight">Auto downloader</h1>
                     <p className="mt-1 max-w-2xl text-muted">Automatically grab new episodes of airing shows from torrent RSS feeds and send them to your torrent client.</p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -62,7 +62,7 @@ export default function AutoDownloaderPage() {
                 </div>
             </div>
             {settings?.torrent.defaultClient === "none" && (
-                <div className="mb-6 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-200">
+                <div className="mb-6 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-200">
                     No torrent client is configured — <Link to="/settings?tab=torrent-client" className="underline">set one up</Link> first.
                 </div>
             )}
@@ -78,7 +78,7 @@ export default function AutoDownloaderPage() {
             </div>
             {(items ?? []).length > 0 && (
                 <section className="mt-12">
-                    <h2 className="mb-4 text-lg font-bold">Recently grabbed</h2>
+                    <h2 className="mb-4 text-lg font-semibold tracking-tight">Recently grabbed</h2>
                     <div className="card divide-y divide-line">
                         {items!.slice(0, 30).map(i => (
                             <div key={i.key} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">

@@ -55,7 +55,7 @@ export function QuickSearch() {
                 <DialogPrimitive.Overlay className="fixed inset-0 z-[85] bg-black/60 backdrop-blur-sm fade-in" />
                 <DialogPrimitive.Content
                     aria-describedby={undefined}
-                    className="fixed top-[12vh] left-1/2 z-[85] w-[min(94vw,640px)] -translate-x-1/2 overflow-hidden rounded-2xl border border-line-strong bg-surface-1 shadow-2xl rise-in outline-none"
+                    className="fixed top-[12vh] left-1/2 z-[85] w-[min(94vw,640px)] -translate-x-1/2 overflow-hidden rounded-xl border border-line-strong bg-surface-1 shadow-2xl rise-in outline-none"
                 >
                     <DialogPrimitive.Title className="sr-only">Search</DialogPrimitive.Title>
                     <div className="flex items-center gap-3 border-b border-line px-5">

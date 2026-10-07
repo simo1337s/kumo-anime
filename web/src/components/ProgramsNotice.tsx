@@ -19,7 +19,7 @@ export function ProgramsNotice() {
     const running = !!status?.setupRunning
     if (!canInstallPrograms(status) || !(missing.includes("ffmpeg") || missing.includes("ani-cli")) || hidden === key) return null
     return (
-        <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-5 py-4">
+        <div className="flex flex-wrap items-center gap-4 rounded-xl border border-amber-500/25 bg-amber-500/10 px-5 py-4">
             <Wrench className="size-5 shrink-0 text-amber-300" />
             <div className="min-w-0 flex-1 text-sm">
                 <p className="font-semibold text-amber-200">{running ? "Installing the programs Kumo uses…" : `Kumo needs ${list(missing)}`}</p>

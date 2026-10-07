@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Ellipsis, HardDrive, Play, Star } from "lucide-react"
+import { ChevronLeft, ChevronRight, Ellipsis, HardDrive, Star } from "lucide-react"
 import { useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import type { ListEntry, Media } from "@/lib/types"
@@ -38,29 +38,24 @@ export function MediaCard({ media, listEntry, localCount, downloaded, className,
     const score = media.meanScore ?? media.averageScore
 
     const card = (
-        <Link to={entryUrl(media)} className={cn("group/card focus-ring relative flex flex-col gap-2.5 rounded-2xl outline-none", !menu && className)}>
-            <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-surface-2 ring-1 ring-line transition-all duration-300 group-hover/card:-translate-y-1 group-hover/card:shadow-[0_18px_40px_-12px_rgb(0_0_0/0.8)] group-hover/card:ring-line-strong">
+        <Link to={entryUrl(media)} className={cn("group/card focus-ring relative flex flex-col gap-2.5 rounded-lg outline-none", !menu && className)}>
+            <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-surface-2">
                 {cover(media) && (
                     <img
                         src={cover(media)}
                         alt=""
                         loading="lazy"
-                        className="size-full object-cover transition-transform duration-500 group-hover/card:scale-[1.06]"
+                        className="size-full object-cover transition-[filter] duration-300 group-hover/card:brightness-110"
                         style={{ backgroundColor: media.coverImage?.color || undefined }}
                     />
                 )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent opacity-80 transition-opacity group-hover/card:opacity-100" />
+                {/* A hairline, so dark covers don't melt into the page. */}
+                <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-white/[0.07] transition-[box-shadow] duration-300 ring-inset group-hover/card:ring-white/20" />
 
-                {showProgress && listEntry && total > 0 && progress > 0 && (
-                    <div className="absolute inset-x-0 top-0 h-1 bg-black/40">
-                        <div className="h-full bg-brand" style={{ width: `${Math.min(100, (progress / total) * 100)}%` }} />
-                    </div>
-                )}
-
-                <div className="absolute top-2.5 left-2.5 flex flex-col items-start gap-1.5">
-                    {behind > 0 && <span className="rounded-md bg-brand px-1.5 py-0.5 text-[11px] font-bold text-white shadow-lg">{behind} new</span>}
+                <div className="absolute top-2 left-2 flex flex-col items-start gap-1">
+                    {behind > 0 && <span className="rounded bg-brand px-1.5 py-0.5 text-[11px] font-semibold text-white">{behind} new</span>}
                     {!!localCount && localCount > 0 && (
-                        <span className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold text-white backdrop-blur">
+                        <span className="flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white tabular-nums">
                             <HardDrive className="size-3" />
                             {downloaded?.length ?? localCount}
                         </span>
@@ -69,41 +64,40 @@ export function MediaCard({ media, listEntry, localCount, downloaded, className,
                 {score ? (
                     <span
                         className={cn(
-                            "absolute top-2.5 right-2.5 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold text-white opacity-0 backdrop-blur transition-opacity group-hover/card:opacity-100",
-                            menu && "right-11", // next to the menu button
+                            "absolute top-2 right-2 flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white tabular-nums opacity-0 transition-opacity group-hover/card:opacity-100",
+                            menu && "right-10", // next to the menu button
                         )}
                     >
                         <Star className="size-3 fill-amber-300 text-amber-300" />
                         {score}%
                     </span>
                 ) : null}
-
-                <div className="absolute inset-x-0 bottom-0 p-3">
-                    {nextAir && (
-                        <p className="mb-1 text-[11px] font-semibold text-white/90">
-                            Ep {nextAir.episode} in {timeUntil(nextAir.timeUntilAiring)}
-                        </p>
-                    )}
-                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-white/70">
-                        {listEntry && <span className={cn("size-1.5 rounded-full", statusDot[listEntry.status] ?? "bg-white/50")} />}
-                        <span>{formatLabel(media.format)}</span>
-                        {media.seasonYear && <span>· {media.seasonYear}</span>}
-                    </div>
-                </div>
-
-                <div className="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-300 group-hover/card:opacity-100">
-                    <span className="grid size-12 scale-90 place-items-center rounded-full bg-white/15 text-white backdrop-blur-md transition-transform duration-300 group-hover/card:scale-100">
-                        <Play className="ml-0.5 size-5 fill-white" />
+                {nextAir && (
+                    <span className="absolute bottom-2.5 left-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white">
+                        Ep {nextAir.episode} in {timeUntil(nextAir.timeUntilAiring)}
                     </span>
-                </div>
+                )}
+
+                {showProgress && listEntry && total > 0 && progress > 0 && progress < total && (
+                    <div className="absolute inset-x-0 bottom-0 h-[3px] bg-black/50">
+                        <div className="h-full bg-brand" style={{ width: `${Math.min(100, (progress / total) * 100)}%` }} />
+                    </div>
+                )}
             </div>
             <div className="px-0.5">
-                <p className="line-clamp-2 text-[13.5px] leading-snug font-semibold text-fg/95 transition-colors group-hover/card:text-white">{title(media)}</p>
-                {listEntry && total > 0 && (
-                    <p className="mt-0.5 text-xs text-subtle">
-                        {progress} / {total} {media.type === "MANGA" ? "ch" : "ep"}
-                    </p>
-                )}
+                <p className="line-clamp-2 text-[13px] leading-snug font-medium text-fg/90 transition-colors group-hover/card:text-fg">{title(media)}</p>
+                <div className="mt-1 flex items-center gap-1.5 text-xs text-subtle">
+                    {listEntry && <span className={cn("size-1.5 shrink-0 rounded-full", statusDot[listEntry.status] ?? "bg-white/50")} />}
+                    <span className="truncate">
+                        {formatLabel(media.format)}
+                        {media.seasonYear ? ` · ${media.seasonYear}` : ""}
+                    </span>
+                    {listEntry && total > 0 && (
+                        <span className="ml-auto shrink-0 tabular-nums">
+                            {progress}/{total}
+                        </span>
+                    )}
+                </div>
             </div>
         </Link>
     )
@@ -161,8 +155,7 @@ function CardMenu({ menu, className, children }: { menu: React.ReactNode; classN
                     <IconButton
                         label="More options"
                         size="xs"
-                        // Lifts with the cover on hover.
-                        className="absolute top-2 right-2 rounded-full bg-black/60 text-white opacity-0 backdrop-blur duration-300 group-hover/card:-translate-y-1 group-hover/card:opacity-100 hover:bg-black/80 hover:text-white focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
+                        className="absolute top-1.5 right-1.5 rounded-md bg-black/70 text-white opacity-0 group-hover/card:opacity-100 hover:bg-black/85 hover:text-white focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
                     >
                         <Ellipsis className="size-4" />
                     </IconButton>
@@ -180,14 +173,14 @@ export function MediaGrid({ children, className, size = "md" }: { children: Reac
             : size === "lg"
               ? "grid-cols-[repeat(auto-fill,minmax(200px,1fr))]"
               : "grid-cols-[repeat(auto-fill,minmax(160px,1fr))]"
-    return <div className={cn("grid gap-x-5 gap-y-7", cols, className)}>{children}</div>
+    return <div className={cn("grid gap-x-4 gap-y-6", cols, className)}>{children}</div>
 }
 
 export function MediaCardSkeleton() {
     return (
         <div className="flex flex-col gap-2.5">
-            <div className="shimmer aspect-[2/3] rounded-2xl" />
-            <div className="shimmer h-4 w-3/4 rounded-md" />
+            <div className="shimmer aspect-[2/3] rounded-lg" />
+            <div className="shimmer h-3.5 w-3/4 rounded" />
         </div>
     )
 }
@@ -203,7 +196,7 @@ export function Carousel({ children, className, itemClassName }: { children: Rea
     const scroll = (dir: number) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.85, behavior: "smooth" })
     return (
         <div className={cn("group/carousel relative", className)}>
-            <div ref={ref} onScroll={update} className="no-scrollbar -mx-2 flex snap-x gap-5 overflow-x-auto scroll-smooth px-2 pt-1 pb-3">
+            <div ref={ref} onScroll={update} className="no-scrollbar -mx-2 flex snap-x scroll-px-2 gap-4 overflow-x-auto scroll-smooth px-2 pt-1 pb-3">
                 {children.map((c, i) => (
                     <div key={i} className={cn("w-[160px] shrink-0 snap-start", itemClassName)}>
                         {c}
@@ -213,7 +206,7 @@ export function Carousel({ children, className, itemClassName }: { children: Rea
             {edges.left && (
                 <button
                     onClick={() => scroll(-1)}
-                    className="absolute top-[38%] -left-4 grid size-10 -translate-y-1/2 place-items-center rounded-full border border-line-strong bg-surface-2/90 text-fg opacity-0 shadow-xl backdrop-blur transition group-hover/carousel:opacity-100 hover:bg-surface-3"
+                    className="absolute top-[38%] -left-3 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-surface-3 text-fg opacity-0 shadow-lg shadow-black/50 transition group-hover/carousel:opacity-100 hover:bg-surface-4"
                 >
                     <ChevronLeft className="size-5" />
                 </button>
@@ -221,7 +214,7 @@ export function Carousel({ children, className, itemClassName }: { children: Rea
             {edges.right && children.length > 4 && (
                 <button
                     onClick={() => scroll(1)}
-                    className="absolute top-[38%] -right-4 grid size-10 -translate-y-1/2 place-items-center rounded-full border border-line-strong bg-surface-2/90 text-fg opacity-0 shadow-xl backdrop-blur transition group-hover/carousel:opacity-100 hover:bg-surface-3"
+                    className="absolute top-[38%] -right-3 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-surface-3 text-fg opacity-0 shadow-lg shadow-black/50 transition group-hover/carousel:opacity-100 hover:bg-surface-4"
                 >
                     <ChevronRight className="size-5" />
                 </button>

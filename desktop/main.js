@@ -204,7 +204,7 @@ function createWindow() {
         minWidth: 960,
         minHeight: 620,
         title: "Kumo",
-        backgroundColor: "#09090d",
+        backgroundColor: "#0a0a0b",
         autoHideMenuBar: true,
         show: false,
         icon: iconPath ? nativeImage.createFromPath(iconPath) : undefined,

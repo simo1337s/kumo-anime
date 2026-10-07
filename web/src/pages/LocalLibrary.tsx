@@ -190,17 +190,11 @@ export default function LocalLibraryPage() {
 
     return (
         <div className="min-h-full pb-24">
-            <header className="relative overflow-hidden border-b border-line px-6 pt-10 pb-8 md:px-10 xl:px-14">
-                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_10%_-20%,color-mix(in_oklab,var(--brand)_26%,transparent),transparent_60%)]" />
-                <div className="relative flex flex-wrap items-end justify-between gap-6">
-                    <div className="flex items-center gap-4">
-                        <span className="grid size-14 place-items-center rounded-2xl bg-brand-soft text-brand-strong ring-1 ring-brand/25">
-                            <HardDrive className="size-7" />
-                        </span>
-                        <div>
-                            <h1 className="text-4xl font-extrabold tracking-tight">Local library</h1>
-                            <p className="mt-1 text-muted">Only anime you have downloaded on this computer.</p>
-                        </div>
+            <header className="border-b border-line px-6 pt-8 pb-7 md:px-8 xl:px-10">
+                <div className="flex flex-wrap items-end justify-between gap-6">
+                    <div>
+                        <h1 className="text-[1.75rem] font-semibold tracking-tight">Local library</h1>
+                        <p className="mt-1 text-muted">Only anime you have downloaded on this computer.</p>
                     </div>
                     <div className="flex items-center gap-2">
                         {trusted && libraryDir && (
@@ -216,12 +210,12 @@ export default function LocalLibraryPage() {
                         </Button>
                     </div>
                 </div>
-                <div className="relative mt-6 flex flex-wrap gap-3">
+                <div className="mt-6 flex flex-wrap items-center gap-x-8 gap-y-3">
                     <Stat label="Anime" value={loading ? "…" : String(groups.length)} />
                     <Stat label="Episodes" value={loading ? "…" : String(totals.episodes)} />
                     <Stat label="On disk" value={loading ? "…" : formatBytes(totals.size)} />
                     {!!coll?.unmatchedCount && (
-                        <Link to="/library?tab=unmatched" className="flex items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-2 text-sm text-amber-200 transition hover:bg-amber-400/15">
+                        <Link to="/library?tab=unmatched" className="flex items-center gap-2 rounded-lg bg-amber-400/10 px-3 py-2 text-sm text-amber-200 transition-colors hover:bg-amber-400/15">
                             <FolderSearch className="size-4" />
                             {coll.unmatchedCount} unmatched {coll.unmatchedCount === 1 ? "file" : "files"} — fix
                         </Link>
@@ -229,7 +223,7 @@ export default function LocalLibraryPage() {
                 </div>
             </header>
 
-            <div className="flex flex-col gap-10 px-6 pt-8 md:px-10 xl:px-14">
+            <div className="flex flex-col gap-10 px-6 pt-8 md:px-8 xl:px-10">
                 {error && <EmptyState title="Couldn't load your library">{(error as Error).message}</EmptyState>}
 
                 {scanning && groups.length === 0 && (
@@ -276,7 +270,7 @@ export default function LocalLibraryPage() {
 
                 {recent.length > 0 && !q && (
                     <section className="rise-in">
-                        <h2 className="mb-4 text-[1.65rem] font-bold tracking-tight">Recently added</h2>
+                        <h2 className="mb-4 text-xl font-semibold tracking-tight">Recently added</h2>
                         <Carousel itemClassName="w-[300px]">
                             {recent.map(({ group, files: batch, latest, play, allWatched }) => {
                                 const m = group.item.media
@@ -292,7 +286,7 @@ export default function LocalLibraryPage() {
                                         watched={allWatched}
                                         onClick={() => playLocal(play.path, m.id, play.episode)}
                                         actions={
-                                            <IconButton label="Open anime page" variant="subtle" size="xs" className="glass" onClick={e => (e.stopPropagation(), navigate(entryUrl(m)))}>
+                                            <IconButton label="Open anime page" variant="ghost" size="xs" className="bg-black/70 text-white hover:bg-black/85 hover:text-white" onClick={e => (e.stopPropagation(), navigate(entryUrl(m)))}>
                                                 <Info className="size-3.5" />
                                             </IconButton>
                                         }
@@ -374,9 +368,9 @@ export default function LocalLibraryPage() {
 
 function Stat({ label, value }: { label: string; value: string }) {
     return (
-        <div className="rounded-xl border border-line bg-surface-1/70 px-4 py-2 backdrop-blur">
-            <p className="text-[11px] font-semibold tracking-wider text-subtle uppercase">{label}</p>
-            <p className="text-lg font-bold tabular-nums">{value}</p>
+        <div>
+            <p className="text-xs text-subtle">{label}</p>
+            <p className="text-lg font-semibold tabular-nums">{value}</p>
         </div>
     )
 }

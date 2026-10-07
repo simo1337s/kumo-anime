@@ -49,13 +49,13 @@ export default function DiscoverPage() {
 
     return (
         <div className="min-h-full pb-24">
-            {isLoading ? <Skeleton className="h-[460px] rounded-none" /> : featured[i] && <Featured media={featured[i]} index={i} count={featured.length} onIndex={setI} />}
+            {isLoading ? <Skeleton className="h-[440px] rounded-none" /> : featured[i] && <Featured media={featured[i]} index={i} count={featured.length} onIndex={setI} />}
             {/* Without a hero banner there is nothing to overlap. */}
-            <div className={cn("relative z-10 flex flex-col gap-12 px-6 md:px-10 xl:px-14", hero ? "-mt-16" : "pt-10")}>
+            <div className={cn("relative z-10 flex flex-col gap-10 px-6 md:px-8 xl:px-10", hero ? "-mt-14" : "pt-8")}>
                 <PluginSlot slot="after-discover-screen-header" />
                 <div className="no-scrollbar flex gap-2 overflow-x-auto">
                     {GENRES.map(g => (
-                        <Link key={g} to={`/search?genre=${encodeURIComponent(g)}`} className="glass shrink-0 rounded-full px-4 py-2 text-sm font-medium text-fg/85 transition hover:text-white">
+                        <Link key={g} to={`/search?genre=${encodeURIComponent(g)}`} className="flex h-8 shrink-0 items-center rounded-full bg-white/[0.06] px-3.5 text-[13px] font-medium text-fg/80 transition-colors hover:bg-white/[0.1] hover:text-fg">
                             {g}
                         </Link>
                     ))}
@@ -79,13 +79,13 @@ export default function DiscoverPage() {
                             title={r.title}
                             subtitle={r.subtitle}
                             action={
-                                <Link to={r.more} className="text-sm font-medium text-muted hover:text-fg">
+                                <Link to={r.more} className="text-[13px] font-medium text-muted transition-colors hover:text-fg">
                                     See more
                                 </Link>
                             }
                         />
                         {isLoading ? (
-                            <div className="flex gap-5">
+                            <div className="flex gap-4">
                                 {Array.from({ length: 7 }).map((_, k) => (
                                     <div key={k} className="w-[160px] shrink-0">
                                         <MediaCardSkeleton />
@@ -105,52 +105,62 @@ export default function DiscoverPage() {
 function Featured({ media, index, count, onIndex }: { media: Media; index: number; count: number; onIndex: (i: number) => void }) {
     const desc = cleanDescription(media.description)
     return (
-        <div className="relative h-[480px] overflow-hidden">
-            <img key={media.id} src={banner(media)} alt="" className="absolute inset-0 size-full object-cover fade-in animate-slow-zoom" />
-            <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/50 to-transparent" />
+        <div className="relative h-[440px] overflow-hidden">
+            <img key={media.id} src={banner(media)} alt="" className="absolute inset-0 size-full object-cover fade-in" />
+            <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/50 to-bg/5" />
             <div className="absolute inset-0 bg-gradient-to-r from-bg/90 via-bg/40 to-transparent" />
-            <div key={media.id + "t"} className="absolute bottom-24 left-6 max-w-2xl rise-in md:left-10 xl:left-14">
-                <p className="text-sm font-semibold tracking-wider text-brand-strong uppercase">Trending #{index + 1}</p>
-                <h1 className="mt-2 text-4xl leading-tight font-extrabold drop-shadow-xl md:text-5xl">{title(media)}</h1>
-                <div className="mt-3 flex items-center gap-3 text-sm text-white/80">
+            <div key={media.id + "t"} className="absolute bottom-24 left-6 max-w-2xl rise-in md:left-8 xl:left-10">
+                <p className="text-sm font-medium text-white/65">Trending #{index + 1}</p>
+                <h1 className="mt-1.5 text-4xl leading-[1.1] font-semibold tracking-tight text-white md:text-[2.75rem]">{title(media)}</h1>
+                <div className="mt-3 flex flex-wrap items-center gap-x-2 text-sm text-white/75">
                     {media.meanScore && (
-                        <span className="flex items-center gap-1 font-semibold">
-                            <Star className="size-4 fill-amber-300 text-amber-300" /> {media.meanScore}%
-                        </span>
+                        <>
+                            <span className="flex items-center gap-1 font-medium text-white">
+                                <Star className="size-3.5 fill-amber-300 text-amber-300" /> {media.meanScore}%
+                            </span>
+                            <span className="text-white/30">·</span>
+                        </>
                     )}
                     <span>{formatLabel(media.format)}</span>
+                    <span className="text-white/30">·</span>
                     <span>{seasonLabel(media.season, media.seasonYear)}</span>
-                    {media.genres?.slice(0, 3).map(g => (
-                        <span key={g} className="text-white/60">
-                            {g}
-                        </span>
-                    ))}
+                    {!!media.genres?.length && <span className="text-white/30">·</span>}
+                    <span className="text-white/55">{media.genres?.slice(0, 3).join(", ")}</span>
                 </div>
-                {desc && <p className="mt-3 line-clamp-3 text-white/70">{desc}</p>}
-                <div className="mt-5 flex gap-3">
+                {desc && <p className="mt-3 line-clamp-2 max-w-xl text-[15px] leading-relaxed text-white/65">{desc}</p>}
+                <div className="mt-5 flex gap-2.5">
                     <Link to={`/entry?id=${media.id}`}>
-                        <Button variant="white" size="lg" icon={<Play className="size-5 fill-black" />}>
+                        <Button variant="white" size="lg" icon={<Play className="size-4 fill-current" />}>
                             Watch now
                         </Button>
                     </Link>
                     <Link to={`/entry?id=${media.id}&tab=details`}>
-                        <Button variant="subtle" size="lg" className="glass" icon={<Info className="size-5" />}>
+                        <Button variant="ghost" size="lg" className="glass text-white hover:bg-black/70 hover:text-white" icon={<Info className="size-4" />}>
                             Details
                         </Button>
                     </Link>
                 </div>
             </div>
             {count > 1 && (
-                <div className="absolute right-6 bottom-24 flex items-center gap-2 md:right-14">
-                    <button className="glass grid size-9 place-items-center rounded-full" onClick={() => onIndex((index - 1 + count) % count)}>
-                        <ChevronLeft className="size-4" />
-                    </button>
-                    {Array.from({ length: count }).map((_, k) => (
-                        <button key={k} onClick={() => onIndex(k)} className={cn("h-1.5 rounded-full transition-all", k === index ? "w-6 bg-white" : "w-1.5 bg-white/40")} />
-                    ))}
-                    <button className="glass grid size-9 place-items-center rounded-full" onClick={() => onIndex((index + 1) % count)}>
-                        <ChevronRight className="size-4" />
-                    </button>
+                <div className="absolute right-6 bottom-24 flex items-center gap-3 md:right-8 xl:right-10">
+                    <div className="flex gap-1.5">
+                        {Array.from({ length: count }).map((_, k) => (
+                            <button
+                                key={k}
+                                aria-label={`Show ${k + 1}`}
+                                onClick={() => onIndex(k)}
+                                className={cn("h-1 rounded-full transition-all duration-300", k === index ? "w-5 bg-white" : "w-2.5 bg-white/30 hover:bg-white/50")}
+                            />
+                        ))}
+                    </div>
+                    <div className="flex gap-1">
+                        <button aria-label="Previous" className="glass grid size-8 place-items-center rounded-full transition-colors hover:bg-black/70" onClick={() => onIndex((index - 1 + count) % count)}>
+                            <ChevronLeft className="size-4" />
+                        </button>
+                        <button aria-label="Next" className="glass grid size-8 place-items-center rounded-full transition-colors hover:bg-black/70" onClick={() => onIndex((index + 1) % count)}>
+                            <ChevronRight className="size-4" />
+                        </button>
+                    </div>
                 </div>
             )}
         </div>

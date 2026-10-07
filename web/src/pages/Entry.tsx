@@ -78,9 +78,9 @@ export default function EntryPage() {
     return (
         <div className="relative min-h-full pb-24">
             <EntryHero entry={entry} onTab={setTab} />
-            <div className="relative z-10 flex flex-col gap-8 px-6 md:px-10 xl:px-14">
+            <div className="relative z-10 flex flex-col gap-8 px-6 md:px-8 xl:px-10">
                 <PluginSlot slot="before-anime-entry-episode-list" />
-                <Tabs value={tab} onChange={setTab} tabs={tabs} className="self-start" />
+                <Tabs variant="underline" value={tab} onChange={setTab} tabs={tabs} />
                 {/* Keyed by anime too: panels keep per-anime state (dub, search results). */}
                 <div key={`${entry.media.id}-${tab}`} className="fade-in">
                     {tab === "episodes" && <EpisodesTab entry={entry} onStream={() => setTab("stream")} onTorrents={() => setTab("torrents")} />}
@@ -127,46 +127,57 @@ function EntryHero({ entry, onTab }: { entry: EntryView; onTab: (t: Tab) => void
 
     return (
         <div className="relative">
-            <div className="absolute inset-x-0 top-0 h-[520px] overflow-hidden">
-                {bannerImg && <img src={bannerImg} alt="" className="size-full object-cover opacity-70 fade-in" />}
-                <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/70 to-bg/10" />
+            <div className="absolute inset-x-0 top-0 h-[500px] overflow-hidden">
+                {bannerImg && <img src={bannerImg} alt="" className="size-full object-cover opacity-60 fade-in" />}
+                <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/75 to-bg/10" />
                 <div className="absolute inset-0 bg-gradient-to-r from-bg/90 via-bg/30 to-transparent" />
             </div>
-            <div className="relative z-10 flex flex-col gap-8 px-6 pt-[220px] pb-10 md:flex-row md:px-10 xl:px-14">
-                <div className="w-44 shrink-0 md:w-56">
-                    <img src={cover(media)} alt="" className="aspect-[2/3] w-full rounded-2xl object-cover shadow-[0_30px_60px_-20px_rgb(0_0_0/0.9)] ring-1 ring-white/10 rise-in" />
+            <div className="relative z-10 flex flex-col gap-8 px-6 pt-[200px] pb-8 md:flex-row md:px-8 xl:px-10">
+                <div className="w-40 shrink-0 md:w-52">
+                    <img src={cover(media)} alt="" className="aspect-[2/3] w-full rounded-lg object-cover shadow-2xl shadow-black/60 ring-1 ring-white/10 fade-in" />
                 </div>
-                <div className="flex min-w-0 flex-1 flex-col justify-end gap-4 rise-in">
+                <div className="flex min-w-0 flex-1 flex-col justify-end gap-4 fade-in">
                     <div>
-                        <h1 className="text-3xl leading-tight font-extrabold text-white drop-shadow-xl md:text-5xl">{title(media)}</h1>
-                        {media.title.english && media.title.english !== title(media) && <p className="mt-1.5 text-lg text-white/70">{media.title.english}</p>}
+                        <h1 className="text-3xl leading-[1.1] font-semibold tracking-tight text-white md:text-[2.75rem]">{title(media)}</h1>
+                        {media.title.english && media.title.english !== title(media) && <p className="mt-2 text-base text-white/60">{media.title.english}</p>}
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/80">
-                        {score ? <span className={cn("text-base font-bold", scoreColor(score))}>{score}%</span> : null}
-                        <span>{formatLabel(media.format)}</span>
-                        {media.season && <span>{seasonLabel(media.season, media.seasonYear)}</span>}
-                        {total > 0 && <span>{total} episodes</span>}
-                        {media.duration && <span>{media.duration} min</span>}
-                        <Badge tone={media.status === "RELEASING" ? "green" : "gray"}>{statusLabel(media.status)}</Badge>
-                        {media.studios?.nodes?.[0] && <span className="text-white/60">{media.studios.nodes.map(s => s.name).join(", ")}</span>}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-2 text-sm text-white/75">
+                        {[
+                            score ? <span className={cn("font-semibold", scoreColor(score))}>{score}%</span> : null,
+                            <span>{formatLabel(media.format)}</span>,
+                            media.season ? <span>{seasonLabel(media.season, media.seasonYear)}</span> : null,
+                            total > 0 ? <span>{total} episodes</span> : null,
+                            media.duration ? <span>{media.duration} min</span> : null,
+                            media.studios?.nodes?.[0] ? <span className="text-white/55">{media.studios.nodes.map(s => s.name).join(", ")}</span> : null,
+                        ]
+                            .filter(Boolean)
+                            .map((el, k) => (
+                                <span key={k} className="flex items-center gap-2">
+                                    {k > 0 && <span className="text-white/25">·</span>}
+                                    {el}
+                                </span>
+                            ))}
+                        <Badge tone={media.status === "RELEASING" ? "green" : "gray"} className="ml-1">
+                            {statusLabel(media.status)}
+                        </Badge>
                     </div>
                     {media.nextAiringEpisode && (
-                        <div className="flex items-center gap-2 text-sm font-medium text-brand-strong">
+                        <div className="flex items-center gap-2 text-[13px] font-medium text-brand-strong">
                             <CalendarClock className="size-4" /> Episode {media.nextAiringEpisode.episode} airs in {timeUntil(media.nextAiringEpisode.timeUntilAiring)}
                         </div>
                     )}
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-1.5">
                         {media.genres?.map(g => (
-                            <Link key={g} to={`/search?genre=${encodeURIComponent(g)}`} className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs font-medium text-white/85 backdrop-blur hover:bg-white/[0.12]">
+                            <Link key={g} to={`/search?genre=${encodeURIComponent(g)}`} className="rounded-md bg-white/[0.07] px-2.5 py-1 text-xs font-medium text-white/75 transition-colors hover:bg-white/[0.12] hover:text-white">
                                 {g}
                             </Link>
                         ))}
                     </div>
                     {desc && (
-                        <div className="max-w-4xl">
-                            <p className={cn("text-[15px] leading-relaxed whitespace-pre-line text-white/75", !expanded && "line-clamp-3")}>{desc}</p>
+                        <div className="max-w-3xl">
+                            <p className={cn("text-[15px] leading-relaxed whitespace-pre-line text-white/70", !expanded && "line-clamp-3")}>{desc}</p>
                             {desc.length > 260 && (
-                                <button onClick={() => setExpanded(e => !e)} className="mt-1 text-sm font-medium text-brand-strong hover:underline">
+                                <button onClick={() => setExpanded(e => !e)} className="mt-1 text-sm font-medium text-fg/80 transition-colors hover:text-fg">
                                     {expanded ? "Show less" : "Read more"}
                                 </button>
                             )}
@@ -174,7 +185,7 @@ function EntryHero({ entry, onTab }: { entry: EntryView; onTab: (t: Tab) => void
                     )}
                     <div className="mt-1 flex flex-wrap items-center gap-2.5">
                         {next && (
-                            <Button variant="white" size="lg" icon={<Play className="size-5 fill-black" />} onClick={watch}>
+                            <Button variant="white" size="lg" icon={<Play className="size-4 fill-current" />} onClick={watch}>
                                 {next.resumeAt > 0 ? "Resume" : entry.listEntry?.progress ? "Continue" : "Watch"} · Ep {next.number}
                             </Button>
                         )}
@@ -184,7 +195,7 @@ function EntryHero({ entry, onTab }: { entry: EntryView; onTab: (t: Tab) => void
                         <PluginActions kind="anime-page-button" mediaId={media.id} />
                         <Dropdown>
                             <DropdownTrigger asChild>
-                                <Button variant="subtle" size="lg" className="glass w-12 px-0" aria-label="More">
+                                <Button variant="subtle" size="lg" className="w-11 px-0" aria-label="More">
                                     <MoreHorizontal className="size-5" />
                                 </Button>
                             </DropdownTrigger>
@@ -270,14 +281,14 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
                 </div>
                 <div className="flex items-center gap-3">
                     {entry.episodes.length > withFiles.length && (
-                        <button onClick={() => setShowAll(s => !s)} className="text-sm font-medium text-brand-strong hover:underline">
+                        <button onClick={() => setShowAll(s => !s)} className="text-sm font-medium text-muted transition-colors hover:text-fg">
                             {showAll ? "Show downloaded only" : "Show all episodes"}
                         </button>
                     )}
                     <EntryFilesMenu entry={entry} />
                 </div>
             </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-x-6 gap-y-8">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-x-5 gap-y-7">
                 {list.map(ep => (
                     <EpisodeCard
                         key={ep.number}
@@ -298,7 +309,7 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
                                 {(ep.aired || ep.hasFile) && <WatchedToggle watched={ep.watched} disabled={marker.pending} onToggle={() => marker.mark(ep.number, !ep.watched)} />}
                                 <Dropdown>
                                     <DropdownTrigger asChild>
-                                        <button onClick={e => e.stopPropagation()} className="grid size-8 place-items-center rounded-lg bg-black/60 text-white backdrop-blur hover:bg-black/80">
+                                        <button onClick={e => e.stopPropagation()} className="grid size-7 place-items-center rounded-md bg-black/70 text-white transition-colors hover:bg-black/85">
                                             <MoreHorizontal className="size-4" />
                                         </button>
                                     </DropdownTrigger>
@@ -325,7 +336,7 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
             </div>
             {specials.length > 0 && (
                 <div>
-                    <h3 className="mb-4 text-xl font-bold">Specials & extras</h3>
+                    <h3 className="mb-4 text-lg font-semibold tracking-tight">Specials & extras</h3>
                     <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-5 gap-y-6">
                         {specials.map(sp => (
                             <EpisodeCard
@@ -366,7 +377,7 @@ function LocalLanguageSwitch({ mediaId, samplePath }: { mediaId: number; sampleP
     return (
         <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-subtle">Audio</span>
-            <div className="flex rounded-xl border border-line bg-surface-1 p-1">
+            <div className="flex rounded-lg bg-white/[0.04] p-0.5">
                 {(["sub", "dub"] as const).map(m => (
                     <Tooltip key={m} content={m === "dub" ? `English audio${names(true) ? ` (${names(true)})` : ""}, signs & songs subtitles` : `Original audio${names(false) ? ` (${names(false)})` : ""} with full subtitles`}>
                         <button
@@ -374,7 +385,7 @@ function LocalLanguageSwitch({ mediaId, samplePath }: { mediaId: number; sampleP
                                 language.set(m)
                                 toast.success(m === "dub" ? "Dub: English audio from now on" : "Sub: original audio with subtitles from now on")
                             }}
-                            className={cn("h-7 rounded-lg px-3.5 text-xs font-semibold uppercase transition", mode === m ? "bg-brand text-white" : "text-muted hover:text-fg")}
+                            className={cn("h-7 rounded-md px-3 text-xs font-medium uppercase transition-colors", mode === m ? "bg-white/[0.1] text-fg" : "text-muted hover:text-fg")}
                         >
                             {m}
                         </button>
@@ -418,7 +429,7 @@ function DetailsTab({ entry }: { entry: EntryView }) {
             )}
             {tags.length > 0 && (
                 <div>
-                    <h3 className="mb-3 text-lg font-bold">Tags</h3>
+                    <h3 className="mb-3 text-lg font-semibold tracking-tight">Tags</h3>
                     <div className="flex flex-wrap gap-2">
                         {tags.map(t => (
                             <span key={t.name} className="rounded-lg border border-line bg-surface-1 px-3 py-1.5 text-sm">
@@ -430,7 +441,7 @@ function DetailsTab({ entry }: { entry: EntryView }) {
             )}
             {chars.length > 0 && (
                 <div>
-                    <h3 className="mb-4 text-lg font-bold">Characters</h3>
+                    <h3 className="mb-4 text-lg font-semibold tracking-tight">Characters</h3>
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                         {chars.map(c => (
                             <div key={c.node.id} className="card flex items-center justify-between gap-3 overflow-hidden p-0">
@@ -457,11 +468,11 @@ function DetailsTab({ entry }: { entry: EntryView }) {
             )}
             {relations.length > 0 && (
                 <div>
-                    <h3 className="mb-4 text-lg font-bold">Related</h3>
+                    <h3 className="mb-4 text-lg font-semibold tracking-tight">Related</h3>
                     <Carousel>
                         {relations.map(r => (
                             <div key={r.node.id}>
-                                <p className="mb-2 text-xs font-semibold tracking-wider text-brand-strong uppercase">{r.relationType.replace(/_/g, " ")}</p>
+                                <p className="mb-2 text-xs font-medium text-subtle capitalize">{r.relationType.replace(/_/g, " ").toLowerCase()}</p>
                                 <MediaCard media={r.node} />
                             </div>
                         ))}
@@ -470,16 +481,16 @@ function DetailsTab({ entry }: { entry: EntryView }) {
             )}
             {recs.length > 0 && (
                 <div>
-                    <h3 className="mb-4 text-lg font-bold">Recommendations</h3>
+                    <h3 className="mb-4 text-lg font-semibold tracking-tight">Recommendations</h3>
                     <Carousel>{recs.map(m => <MediaCard key={m!.id} media={m!} />)}</Carousel>
                 </div>
             )}
             {media.trailer?.site === "youtube" && (
-                <a href={`https://www.youtube.com/watch?v=${media.trailer.id}`} target="_blank" rel="noopener noreferrer" className="group relative block w-full max-w-xl overflow-hidden rounded-2xl">
-                    <img src={img(media.trailer.thumbnail)} alt="" className="aspect-video w-full object-cover transition group-hover:scale-105" />
+                <a href={`https://www.youtube.com/watch?v=${media.trailer.id}`} target="_blank" rel="noopener noreferrer" className="group relative block w-full max-w-xl overflow-hidden rounded-lg">
+                    <img src={img(media.trailer.thumbnail)} alt="" className="aspect-video w-full object-cover transition-[filter] duration-300 group-hover:brightness-110" />
                     <span className="absolute inset-0 grid place-items-center bg-black/40">
-                        <span className="flex items-center gap-2 rounded-full bg-white px-5 py-2.5 font-semibold text-black">
-                            <Play className="size-4 fill-black" /> Watch trailer
+                        <span className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-medium text-neutral-950">
+                            <Play className="size-4 fill-current" /> Watch trailer
                         </span>
                     </span>
                 </a>
@@ -491,10 +502,10 @@ function DetailsTab({ entry }: { entry: EntryView }) {
 function InfoCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
     return (
         <div className="card flex items-center gap-4 p-4">
-            <span className="grid size-10 place-items-center rounded-xl bg-white/[0.05] text-muted">{icon}</span>
+            <span className="grid size-9 place-items-center rounded-lg bg-white/[0.05] text-muted [&_svg]:size-[18px]">{icon}</span>
             <div>
-                <p className="text-xs font-medium text-subtle">{label}</p>
-                <p className="font-semibold capitalize">{value || "—"}</p>
+                <p className="text-xs text-subtle">{label}</p>
+                <p className="font-medium capitalize">{value || "—"}</p>
             </div>
         </div>
     )
@@ -502,7 +513,7 @@ function InfoCard({ label, value, icon }: { label: string; value: string; icon: 
 
 function EntrySkeleton() {
     return (
-        <div className="px-6 pt-[220px] md:px-14">
+        <div className="px-6 pt-[200px] md:px-8 xl:px-10">
             <div className="flex gap-8">
                 <Skeleton className="aspect-[2/3] w-56" />
                 <div className="flex flex-1 flex-col justify-end gap-4">

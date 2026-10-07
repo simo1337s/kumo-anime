@@ -105,11 +105,11 @@ export default function SearchPage() {
     const active = genres.length + (season ? 1 : 0) + (year ? 1 : 0) + (format ? 1 : 0) + (status ? 1 : 0)
 
     return (
-        <div className="min-h-full px-6 pt-10 pb-24 md:px-10 xl:px-14">
+        <div className="min-h-full px-6 pt-8 pb-24 md:px-8 xl:px-10">
             <div className="mb-8 flex flex-col gap-6">
                 <div className="flex items-center justify-between gap-4">
-                    <h1 className="text-4xl font-extrabold tracking-tight">Search</h1>
-                    <div className="flex rounded-xl border border-line bg-surface-1 p-1">
+                    <h1 className="text-[1.75rem] font-semibold tracking-tight">Search</h1>
+                    <div className="flex rounded-lg bg-white/[0.04] p-0.5">
                         {(["ANIME", "MANGA"] as const).map(t => (
                             <button
                                 key={t}
@@ -121,14 +121,14 @@ export default function SearchPage() {
                                         if (!formatsFor(t).includes(p.get("format") ?? "")) p.delete("format")
                                     })
                                 }
-                                className={cn("h-8 rounded-lg px-4 text-sm font-semibold transition", type === t ? "bg-white/10 text-fg" : "text-muted hover:text-fg")}
+                                className={cn("h-7 rounded-md px-3 text-[13px] font-medium transition-colors", type === t ? "bg-white/[0.1] text-fg" : "text-muted hover:text-fg")}
                             >
                                 {t === "ANIME" ? "Anime" : "Manga"}
                             </button>
                         ))}
                     </div>
                 </div>
-                <Input autoFocus value={text} onChange={e => setText(e.target.value)} placeholder="Search by title…" icon={<SearchIcon className="size-4" />} className="h-12 text-base" />
+                <Input autoFocus value={text} onChange={e => setText(e.target.value)} placeholder="Search by title…" icon={<SearchIcon className="size-4" />} className="h-11 text-[15px]" />
                 <div className="flex flex-wrap items-center gap-3">
                     <SlidersHorizontal className="size-4 text-subtle" />
                     <Select className="w-44" value={season} onChange={v => set("season", v)} options={[{ value: "", label: "Any season" }, ...SEASONS.map(s => ({ value: s, label: s.charAt(0) + s.slice(1).toLowerCase() }))]} />
@@ -165,7 +165,7 @@ export default function SearchPage() {
                                         for (const v of cur.includes(g) ? cur.filter(c => c !== g) : [...cur, g]) p.append("genre", v)
                                     })
                                 }
-                                className={cn("rounded-full border px-3.5 py-1.5 text-sm font-medium transition", on ? "border-brand bg-brand text-white" : "border-line text-muted hover:border-line-strong hover:text-fg")}
+                                className={cn("h-8 rounded-full px-3.5 text-[13px] font-medium transition-colors", on ? "bg-white text-neutral-950" : "bg-white/[0.05] text-muted hover:bg-white/[0.09] hover:text-fg")}
                             >
                                 {g}
                             </button>

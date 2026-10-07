@@ -12,25 +12,25 @@ export function NowPlaying() {
     const cmd = (c: string, value = 0) => api.post("/api/playback/command", { cmd: c, value }).catch(() => {})
     const pct = s.duration > 0 ? s.position / s.duration : 0
     return (
-        <div className="glass fixed bottom-5 left-1/2 z-50 w-[min(92vw,560px)] -translate-x-1/2 rounded-2xl p-3 shadow-2xl rise-in">
+        <div className="fixed bottom-5 left-1/2 z-50 w-[min(92vw,560px)] -translate-x-1/2 rounded-xl border border-line-strong bg-surface-2 p-3 shadow-2xl shadow-black/50 rise-in">
             <div className="flex items-center gap-3">
                 <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-semibold tracking-wider text-brand-strong uppercase">Playing in mpv</p>
-                    <Link to={`/entry?id=${s.mediaId}`} className="block truncate text-sm font-semibold hover:underline">
+                    <p className="text-xs text-muted">Playing in mpv</p>
+                    <Link to={`/entry?id=${s.mediaId}`} className="block truncate text-sm font-medium hover:underline">
                         {s.title}
                     </Link>
                 </div>
                 <div className="flex items-center gap-1">
-                    <button className="grid size-9 place-items-center rounded-full hover:bg-white/10" onClick={() => cmd("seek", -10)} title="Back 10s">
+                    <button className="grid size-9 place-items-center rounded-full text-muted transition-colors hover:bg-white/10 hover:text-fg" onClick={() => cmd("seek", -10)} title="Back 10s">
                         <RotateCcw className="size-4" />
                     </button>
-                    <button className="grid size-10 place-items-center rounded-full bg-white text-black hover:bg-white/90" onClick={() => cmd("toggle")} title="Play/Pause">
-                        {s.paused ? <Play className="ml-0.5 size-4 fill-black" /> : <Pause className="size-4 fill-black" />}
+                    <button className="grid size-9 place-items-center rounded-full bg-white text-neutral-950 transition-colors hover:bg-white/85" onClick={() => cmd("toggle")} title="Play/Pause">
+                        {s.paused ? <Play className="ml-0.5 size-4 fill-current" /> : <Pause className="size-4 fill-current" />}
                     </button>
-                    <button className="grid size-9 place-items-center rounded-full hover:bg-white/10" onClick={() => cmd("seek", 85)} title="Skip 85s">
+                    <button className="grid size-9 place-items-center rounded-full text-muted transition-colors hover:bg-white/10 hover:text-fg" onClick={() => cmd("seek", 85)} title="Skip 85s">
                         <RotateCw className="size-4" />
                     </button>
-                    <button className="grid size-9 place-items-center rounded-full hover:bg-white/10" onClick={() => cmd("stop")} title="Stop">
+                    <button className="grid size-9 place-items-center rounded-full text-muted transition-colors hover:bg-white/10 hover:text-fg" onClick={() => cmd("stop")} title="Stop">
                         <Square className="size-3.5 fill-current" />
                     </button>
                 </div>
@@ -48,11 +48,11 @@ export function ScanIndicator() {
     const s = useStore(scanStore)
     if (!s.running) return null
     return (
-        <div className="glass fixed right-5 bottom-5 z-50 w-80 rounded-2xl p-4 shadow-2xl rise-in">
+        <div className="fixed right-5 bottom-5 z-50 w-80 rounded-xl border border-line-strong bg-surface-2 p-4 shadow-2xl shadow-black/50 rise-in">
             <div className="flex items-center gap-3">
-                <Loader2 className="size-5 animate-spin text-brand" />
+                <Loader2 className="size-4 animate-spin text-muted" />
                 <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">Scanning library</p>
+                    <p className="text-sm font-medium">Scanning library</p>
                     <p className="truncate text-xs text-muted">{s.message}</p>
                 </div>
             </div>

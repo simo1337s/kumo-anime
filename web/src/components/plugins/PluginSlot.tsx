@@ -39,7 +39,7 @@ export function WebviewFrame({ pluginId, id, html, options, className }: { plugi
             // No allow-same-origin: plugin pages can't touch the app or its API.
             sandbox="allow-scripts allow-popups allow-forms"
             srcDoc={withBridge(html)}
-            className={cn("w-full rounded-2xl border border-line bg-transparent", className)}
+            className={cn("w-full rounded-xl border border-line bg-transparent", className)}
             style={{ height, maxHeight: options.maxHeight, maxWidth: options.maxWidth }}
         />
     )
