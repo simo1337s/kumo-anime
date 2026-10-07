@@ -544,7 +544,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         }
     }
 
-    const currentSkip = skips.find(s => (s.type === "op" || s.type === "mixed-op" || s.type === "recap" || s.type === "ed") && time >= s.start && time < s.end - 1)
+    const currentSkip = skips.find(s => ["op", "mixed-op", "recap", "ed", "mixed-ed"].includes(s.type) && time >= s.start && time < s.end - 1)
     useEffect(() => {
         if (!currentSkip || !settings?.playback.skipIntroAniSkip || currentSkip.type === "ed") return
         if (skipped.current.has(currentSkip.type)) return
@@ -750,15 +750,6 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                 </div>
             </div>
 
-            {/* skip (the next episode is in the controls, and n) */}
-            <div className="absolute right-8 bottom-32 flex flex-col items-end gap-3">
-                {currentSkip && (
-                    <button onClick={() => seekTo(currentSkip.end)} className="flex h-11 items-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black shadow-2xl rise-in hover:bg-white/90">
-                        <FastForward className="size-4 fill-black" /> Skip {currentSkip.type.includes("ed") ? "ending" : currentSkip.type === "recap" ? "recap" : "opening"}
-                    </button>
-                )}
-            </div>
-
             {/* bottom controls */}
             <div className={cn("absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-6 pt-20 pb-5 transition-opacity duration-300", controls || paused ? "opacity-100" : "pointer-events-none opacity-0")}>
                 {/* scrubber */}
@@ -917,6 +908,17 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                         </CtrlButton>
                     </div>
                 </div>
+            </div>
+
+            {/* skip (the next episode is in the controls, and n). Above the
+                controls: their gradient reaches up behind the button and
+                would otherwise take its clicks while the controls show. */}
+            <div className="absolute right-8 bottom-32 z-10 flex flex-col items-end gap-3">
+                {currentSkip && (
+                    <button onClick={() => seekTo(currentSkip.end)} className="flex h-11 items-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black shadow-2xl rise-in hover:bg-white/90">
+                        <FastForward className="size-4 fill-black" /> Skip {currentSkip.type.includes("ed") ? "ending" : currentSkip.type === "recap" ? "recap" : "opening"}
+                    </button>
+                )}
             </div>
         </div>
     )
