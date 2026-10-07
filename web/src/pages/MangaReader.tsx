@@ -115,11 +115,14 @@ export default function MangaReaderPage() {
     const wanted = pos?.chapter === chapterId ? pos.page : (asked ?? resumeAt)
     const page = total ? Math.min(wanted, total - 1) : 0
 
-    // A chapter that comes in strips (most of its pages loaded so far are)
-    // reads as one long strip, where they join up again, whatever the mode.
-    const known = srcs.filter(src => ratios[src])
-    const strips = known.filter(src => isStrip(ratios[src])).length
-    const inStrips = stripChapters.includes(chapterId) || (known.length > 0 && known.length >= Math.min(3, total) && strips * 2 >= known.length)
+    // A chapter that comes in strips reads as one long strip, where they join
+    // up again, whatever the mode. That's told from its first 8 pages, in
+    // order, once all of them have loaded (most must be strips): small
+    // banner strips load before whole pages, so the first images to arrive
+    // would make a chapter of pages look like one of strips.
+    const sample = srcs.slice(0, Math.min(8, total))
+    const sampled = sample.length > 0 && sample.every(src => ratios[src])
+    const inStrips = stripChapters.includes(chapterId) || (sampled && sample.filter(src => isStrip(ratios[src])).length * 2 > sample.length)
     useEffect(() => {
         if (inStrips && !stripChapters.includes(chapterId)) setStripChapters(l => [...l, chapterId])
     }, [inStrips, chapterId, stripChapters])
@@ -138,9 +141,10 @@ export default function MangaReaderPage() {
     // before they are turned to (telling which are double spreads before they
     // get paired) and turning back is instant. Page images aren't cacheable
     // (the proxy sends no-store): only the element that loaded one shows it
-    // without downloading it again.
+    // without downloading it again. The first pages are mounted too: they
+    // tell whether the chapter comes in strips.
     const from = Math.max(0, (spread[0] ?? 0) - 2)
-    const near = srcs.slice(from, last + 5)
+    const mounted = srcs.map((_, i) => i).filter(i => i < sample.length || (i >= from && i < last + 5))
 
     // The top page on screen in the long strip, once scrolled (until then,
     // the page it opened at).
@@ -346,8 +350,9 @@ export default function MangaReaderPage() {
                         }}
                     >
                         <div className={cn("flex items-center justify-center", rtl && "flex-row-reverse")} style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}>
-                            {near.map((src, k) => {
-                                const slot = spread.indexOf(from + k)
+                            {mounted.map(i => {
+                                const src = srcs[i]
+                                const slot = spread.indexOf(i)
                                 return (
                                     <img
                                         key={src}
