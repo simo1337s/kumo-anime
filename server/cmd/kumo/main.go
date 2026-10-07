@@ -16,6 +16,7 @@ import (
 	"github.com/simo1337s/animetest/server/internal/api"
 	"github.com/simo1337s/animetest/server/internal/app"
 	"github.com/simo1337s/animetest/server/internal/config"
+	"github.com/simo1337s/animetest/server/internal/lifecycle"
 	"github.com/simo1337s/animetest/server/internal/util"
 	"github.com/simo1337s/animetest/server/internal/webui"
 )
@@ -86,10 +87,42 @@ func main() {
 			sig <- syscall.SIGTERM
 		}()
 	}
-	<-sig
+	// A signal, or a request from inside Kumo (the updater restarting it
+	// into a new version): both shut down the same way.
+	var exit lifecycle.Exit
+	select {
+	case <-sig:
+	case exit = <-a.Exits.C():
+	}
 	log.Printf("shutting down…")
 	srv.Shutdown()
 	a.Shutdown()
 	_ = os.Remove(tokenPath)
 	_ = os.Remove(infoPath)
+	end(exit, *desktop)
+}
+
+// end finishes the process the way exit asks, once Kumo has shut down.
+func end(exit lifecycle.Exit, desktop bool) {
+	restart := exit.Restart
+	if exit.Before != nil {
+		if err := exit.Before(); err != nil {
+			log.Printf("%v; starting Kumo again", err)
+			restart = true
+		}
+	}
+	if !restart {
+		if exit.Code != 0 {
+			os.Exit(exit.Code)
+		}
+		return
+	}
+	// The desktop app started this server: it starts everything again, its
+	// window included. Otherwise (a systemd service, a terminal) the server
+	// runs itself again, in place, where the system can.
+	if !desktop && canReexec {
+		err := reexec()
+		log.Printf("could not start Kumo again: %v", err)
+	}
+	os.Exit(lifecycle.CodeRestart)
 }

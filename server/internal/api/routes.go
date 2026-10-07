@@ -215,6 +215,12 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/manga/mapping", h(s.mangaMapping))
 	m.HandleFunc("POST /api/manga/{id}/progress", h(s.mangaProgress))
 
+	// --- updates
+	m.HandleFunc("GET /api/update", h(s.updateStatus))
+	m.HandleFunc("POST /api/update/check", h(s.checkUpdate))
+	m.HandleFunc("POST /api/update/apply", h(s.applyUpdate))
+	m.HandleFunc("POST /api/update/restart", s.restartKumo)
+
 	// --- web UI (SPA)
 	m.HandleFunc("/", s.serveUI)
 }

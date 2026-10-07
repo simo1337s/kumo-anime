@@ -21,6 +21,7 @@ const (
 	ExtensionsUpdate = "extensions-updated"
 	PluginUI         = "plugin-ui"
 	SettingsUpdated  = "settings-updated"
+	UpdateStatus     = "update-status"
 )
 
 type Event struct {

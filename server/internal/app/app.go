@@ -26,11 +26,13 @@ import (
 	"github.com/simo1337s/animetest/server/internal/history"
 	"github.com/simo1337s/animetest/server/internal/images"
 	"github.com/simo1337s/animetest/server/internal/library"
+	"github.com/simo1337s/animetest/server/internal/lifecycle"
 	"github.com/simo1337s/animetest/server/internal/manga"
 	"github.com/simo1337s/animetest/server/internal/metadata"
 	"github.com/simo1337s/animetest/server/internal/player"
 	"github.com/simo1337s/animetest/server/internal/stream"
 	"github.com/simo1337s/animetest/server/internal/torrent"
+	"github.com/simo1337s/animetest/server/internal/update"
 )
 
 type App struct {
@@ -56,6 +58,10 @@ type App struct {
 	Discord    *discord.Client
 	Images     *images.Cache
 	Logs       *LogBuffer
+	Update     *update.Checker
+	// Exits ends Kumo from inside, e.g. to restart it after an update;
+	// cmd/kumo waits for it, next to the signals.
+	Exits *lifecycle.Exits
 
 	// ShellToken authenticates the desktop window (see api middleware).
 	ShellToken string
@@ -116,6 +122,7 @@ func New(dataDir string) (*App, error) {
 	torrents := torrent.NewManager(settings, hub)
 	exts := extensions.NewManager(d, settings, hub)
 	ctx, cancel := context.WithCancel(context.Background())
+	exits := lifecycle.NewExits()
 
 	a := &App{
 		DB: d, Settings: settings, Hub: hub, Platform: platform, Meta: meta, Files: files, Scanner: scanner,
@@ -124,7 +131,8 @@ func New(dataDir string) (*App, error) {
 		Extensions: exts, Stream: stream.NewService(d, exts, ani, platform), Local: stream.NewLocal(settings, files, d),
 		Manga: manga.NewService(d, exts, platform), Discord: &discord.Client{}, Logs: logs,
 		Images: images.New(filepath.Join(dataDir, "images")),
-		ctx:    ctx, cancel: cancel, DataDir: dataDir,
+		Update: update.New(hub, exits), Exits: exits,
+		ctx: ctx, cancel: cancel, DataDir: dataDir,
 	}
 	a.HLS = stream.NewHLS(a.Local, hlsDir(dataDir))
 	a.ShellToken = randomToken()
@@ -300,6 +308,7 @@ func pickSource(srcs []stream.Source, quality string) stream.Source {
 func (a *App) Start() {
 	a.Extensions.LoadAll()
 	a.Downloads.Start()
+	a.Update.Start()
 	a.Scanner.StartWatcher()
 	go a.Torrents.RunCounter(a.ctx)
 	go a.AutoDL.Loop(a.ctx, func() (bool, time.Duration) {
@@ -323,6 +332,7 @@ func (a *App) Start() {
 
 func (a *App) Shutdown() {
 	a.cancel()
+	a.Update.Stop()
 	a.HLS.Close()
 	a.Scanner.StopWatcher()
 	a.Player.Stop()
