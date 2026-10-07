@@ -71,9 +71,14 @@ gh repo clone simo1337s/animetest kumo && cd kumo
 cd packaging/arch && makepkg -si
 ```
 
-Update later with `cd kumo && git pull && cd packaging/arch && makepkg -sif` (`-f` rebuilds; without it makepkg reinstalls the package it built last time).
-
 Start **Kumo** from your app menu (or run `kumo`).
+
+### Updates
+When GitHub has a newer Kumo, the **Home** page shows it with an **Update** button: Kumo downloads the new source, builds it with makepkg and installs the package with pacman (a password dialog asks for your password); **Restart Kumo** then starts the new version. **Settings › About & updates** shows the version and the last check, and checks again right away.
+
+The repository is private, so the update checks use your GitHub sign-in: stay signed in with the GitHub CLI (`gh auth login`, as above). Without a password dialog (e.g. when Kumo runs as the `kumo-server` service), Kumo builds the update and shows the `sudo pacman -U …` command to run.
+
+You can still update by hand: `cd kumo && git pull && cd packaging/arch && makepkg -sif` (`-f` rebuilds; without it makepkg reinstalls the package it built last time).
 
 ### First run
 1. **Settings › Local Anime Library**: pick your folder (e.g. `/mnt/big/Media/Anime`) and save. The first scan starts on its own.
@@ -89,7 +94,7 @@ Turn on **Allow devices on my network** (with a password) to use Kumo from your 
 
 ## Windows
 
-Kumo also runs on Windows 10/11 (64-bit), released separately from the Arch package: get the installer (`Kumo-Setup-X.Y.Z-windows-x64.exe`) or the portable zip from the newest **Kumo X.Y.Z for Windows** [release](https://github.com/simo1337s/animetest/releases) (tag `windows-vX.Y.Z`). Those files are Windows-only; on Arch, use the PKGBUILD above.
+Kumo also runs on Windows 10/11 (64-bit), released separately from the Arch package: get the installer (`Kumo-Setup-X.Y.Z-windows-x64.exe`) or the portable zip from the newest **Kumo X.Y.Z for Windows** [release](https://github.com/simo1337s/animetest/releases) (tag `windows-vX.Y.Z`). Those files are Windows-only; on Arch, use the PKGBUILD above. The installed app updates itself from its Home page too.
 
 What to install alongside it (ffmpeg, mpv, yt-dlp, ani-cli, qBittorrent), where it keeps its data, how to build it and how releases are made: [packaging/windows/README.md](packaging/windows/README.md).
 

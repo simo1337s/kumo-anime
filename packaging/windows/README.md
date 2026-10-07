@@ -12,8 +12,8 @@ newest **Kumo X.Y.Z for Windows** and download one of:
 
 | File | What it is |
 |---|---|
-| `Kumo-Setup-X.Y.Z-windows-x64.exe` | **Installer** (recommended). Installs Kumo for your Windows user, without admin rights, in `%LOCALAPPDATA%\Programs\Kumo` (you can pick another folder). Adds Start menu and desktop shortcuts. Uninstall it from **Settings › Apps**. To update, run the newer installer. |
-| `Kumo-X.Y.Z-windows-x64-portable.zip` | **Portable** build. Unzip it anywhere and run `Kumo.exe`; nothing gets installed. Your data still goes to the folders [below](#where-kumo-keeps-its-files). |
+| `Kumo-Setup-X.Y.Z-windows-x64.exe` | **Installer** (recommended). Installs Kumo for your Windows user, without admin rights, in `%LOCALAPPDATA%\Programs\Kumo` (you can pick another folder). Adds Start menu and desktop shortcuts. Uninstall it from **Settings › Apps**. Kumo then [updates itself](#updates). |
+| `Kumo-X.Y.Z-windows-x64-portable.zip` | **Portable** build. Unzip it anywhere and run `Kumo.exe`; nothing gets installed. Your data still goes to the folders [below](#where-kumo-keeps-its-files). To update, download the newer zip. |
 
 The builds aren't code-signed, so SmartScreen may show "Windows protected your
 PC": click **More info**, then **Run anyway**.
@@ -97,7 +97,7 @@ is found by itself.
 | Folder | What's in it |
 |---|---|
 | `%APPDATA%\Kumo` | Your data: the database (lists, library matches, settings, watch progress), downloaded artwork, extension storage |
-| `%LOCALAPPDATA%\Kumo` | Cache and temporary files: the in-app player's segments (`hls`), the running server's address and token (`run`), the app window's browser data (`electron`) |
+| `%LOCALAPPDATA%\Kumo` | Cache and temporary files: the in-app player's segments (`hls`), the running server's address and token (`run`), the app window's browser data (`electron`), the last downloaded update (`update`) |
 | `%LOCALAPPDATA%\Programs\Kumo` | The app, when installed with the installer |
 
 Uninstalling keeps your data; delete the first two folders to remove it too.
@@ -108,6 +108,26 @@ whether `kumo.exe` may accept connections: allow it on **private** networks.
 `kumo.exe --web-ui` (in the app's `resources` folder) runs the server alone,
 without the window: the web UI is then at `http://127.0.0.1:43211`. The app
 window uses that server when it's already running.
+
+## Updates
+
+Kumo looks for a newer release on GitHub shortly after it starts, then every
+6 hours (**Settings › About & updates** shows the last check and checks right
+away). When there is one, the **Home** page shows it, with what changed:
+
+- **Installed** with the installer: click **Update**. Kumo downloads the new
+  installer, checks it against GitHub's checksum, then closes; the installer
+  updates Kumo where it's installed, without asking anything, and opens it
+  again. Your data stays as it is.
+- **Portable**: Kumo can't update a folder you unzipped yourself. The Home
+  page links the new release: download the new zip and use it instead of the
+  old folder (your data is in `%APPDATA%\Kumo`, not in that folder).
+
+The repository is private, so update checks need your GitHub sign-in: the
+setup in **Settings › App › Programs** (**Install missing programs**) offers
+it, or run `gh auth login` with the GitHub CLI (`winget install GitHub.cli`).
+Kumo also takes a token from `KUMO_GITHUB_TOKEN`, `GH_TOKEN` or
+`GITHUB_TOKEN`, or from git's credential manager.
 
 ## Build it yourself
 
@@ -130,7 +150,9 @@ UI, embeds it into the server, runs `go vet` and `go test` (the ani-cli tests
 use Git's bash; `-SkipTests` skips the tests), builds `dist\windows\kumo.exe`,
 then packages the app with electron-builder
 ([`desktop/electron-builder.yml`](../../desktop/electron-builder.yml)). The
-installer and the zip land in `dist\windows\release`.
+installer and the zip land in `dist\windows\release`. Unlike a release, a
+build of your own keeps the version in `desktop/package.json` (1.0.0), so
+Kumo offers it the newest release as an update.
 
 For development, `cd desktop; npm ci; npx electron .` starts the window with
 `dist\windows\kumo.exe`. On Linux, `make windows` cross-compiles that
@@ -139,15 +161,16 @@ For development, `cd desktop; npm ci; npx electron .` starts the window with
 ## How releases are made
 
 The [Windows release](../../.github/workflows/windows.yml) workflow builds,
-tests and packages everything on a Windows machine, then creates (or updates)
-the release `windows-v<version>`, with the version from
-`desktop/package.json`. Either:
+tests and packages everything on a Windows machine, then creates the release
+`windows-v<version>` on the commit it built. Run **Windows release** from the
+repository's **Actions** tab: with **publish** ticked it creates the release
+(running it again on the same commit updates it, replacing files of the same
+name); untick it to only get the files as workflow artifacts.
 
-- push a tag that matches that version:
-  `git tag windows-v1.0.0` then `git push origin windows-v1.0.0`; or
-- run **Windows release** from the repository's **Actions** tab. With
-  **publish** ticked it creates or updates the release, replacing files of the
-  same name; untick it to only get the files as workflow artifacts.
-
-Keep the version in step with `AppVersion` in `server/internal/config/config.go`
-and `pkgver` in `packaging/arch/PKGBUILD`.
+The version is `1.0.<number of commits>`: the first two numbers come from
+`desktop/package.json`, the last one grows with every commit, so there's
+nothing to bump by hand. The workflow builds it into `kumo.exe` with the
+commit, and installed copies of Kumo offer the release with the highest
+version as their update. The Arch package gets the same version from its
+PKGBUILD. Only the newest 10 Windows releases are kept: the workflow deletes
+older ones, and their tags.
