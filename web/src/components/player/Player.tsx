@@ -31,6 +31,8 @@ import { Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparat
 
 type SubOption = { key: string; label: string; lang: string; title: string; index: number; url: string; bitmap?: boolean }
 type Skip = { type: string; start: number; end: number }
+// What an AniSkip interval (op, mixed-op, recap, ed, mixed-ed) is.
+const skipName = (type: string) => (type === "ed" || type === "mixed-ed" ? "ending" : type === "recap" ? "recap" : "opening")
 
 const langNames: Record<string, string> = {
     jpn: "Japanese", ja: "Japanese", eng: "English", en: "English", spa: "Spanish", es: "Spanish", fre: "French", fra: "French", fr: "French",
@@ -545,14 +547,14 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
     }
 
     const currentSkip = skips.find(s => ["op", "mixed-op", "recap", "ed", "mixed-ed"].includes(s.type) && time >= s.start && time < s.end - 1)
+    const autoSkip = currentSkip && (skipName(currentSkip.type) === "ending" ? settings?.playback.skipOutroAniSkip : settings?.playback.skipIntroAniSkip)
     useEffect(() => {
-        if (!currentSkip || !settings?.playback.skipIntroAniSkip || currentSkip.type === "ed") return
-        if (skipped.current.has(currentSkip.type)) return
+        if (!currentSkip || !autoSkip || skipped.current.has(currentSkip.type)) return
         skipped.current.add(currentSkip.type)
         seekTo(currentSkip.end)
-        toast.info(`Skipped ${currentSkip.type === "recap" ? "recap" : "opening"}`)
+        toast.info(`Skipped ${skipName(currentSkip.type)}`)
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentSkip?.type])
+    }, [currentSkip?.type, autoSkip])
 
     // -------------------------------------------------------------- keyboard
     useEffect(() => {
@@ -767,11 +769,9 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                 >
                     <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-full bg-white/20 transition-all group-hover/seek:h-1.5">
                         <div className="absolute inset-y-0 left-0 bg-white/30" style={{ width: `${total ? Math.min(100, (buffered / total) * 100) : 0}%` }} />
-                        {skips
-                            .filter(s => s.type !== "ed")
-                            .map(s => (
-                                <div key={s.type} className="absolute inset-y-0 bg-amber-300/50" style={{ left: `${(s.start / total) * 100}%`, width: `${((s.end - s.start) / total) * 100}%` }} />
-                            ))}
+                        {skips.map(s => (
+                            <div key={s.type} className="absolute inset-y-0 bg-amber-300/50" style={{ left: `${(s.start / total) * 100}%`, width: `${((s.end - s.start) / total) * 100}%` }} />
+                        ))}
                         <div className="absolute inset-y-0 left-0 bg-brand" style={{ width: `${pct}%` }} />
                     </div>
                     <div className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 scale-0 rounded-full bg-white shadow transition-transform group-hover/seek:scale-100" style={{ left: `${pct}%` }} />
@@ -916,7 +916,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
             <div className="absolute right-8 bottom-32 z-10 flex flex-col items-end gap-3">
                 {currentSkip && (
                     <button onClick={() => seekTo(currentSkip.end)} className="flex h-11 items-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black shadow-2xl rise-in hover:bg-white/90">
-                        <FastForward className="size-4 fill-black" /> Skip {currentSkip.type.includes("ed") ? "ending" : currentSkip.type === "recap" ? "recap" : "opening"}
+                        <FastForward className="size-4 fill-black" /> Skip {skipName(currentSkip.type)}
                     </button>
                 )}
             </div>

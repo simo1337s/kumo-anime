@@ -143,6 +143,7 @@ type Manager struct {
 
 	// Replaced in tests.
 	launch      func(mpvPath string, opts LaunchOptions) (*Mpv, error)
+	skipTimes   func(ctx context.Context, mediaID, episode int) []SkipInterval
 	trackGuard  time.Duration
 	trackSettle time.Duration
 }
@@ -150,11 +151,13 @@ type Manager struct {
 type episodeKey struct{ mediaID, episode int }
 
 func NewManager(s *config.Store, h *history.Store, d *db.DB, p *anilist.Platform, hub *events.Hub) *Manager {
-	return &Manager{
+	m := &Manager{
 		settings: s, history: h, Tracks: NewTrackStore(d), platform: p, hub: hub, db: d,
 		builtinStarted: map[episodeKey]bool{}, builtinSent: map[episodeKey]bool{},
 		launch: LaunchMpv, trackGuard: defaultTrackGuard, trackSettle: defaultTrackSettle,
 	}
+	m.skipTimes = m.aniSkipTimes
+	return m
 }
 
 // Status returns a copy of the current session (nil if nothing plays).
@@ -264,7 +267,7 @@ func (m *Manager) playLocked(req PlayRequest) (*Session, error) {
 	c := s.snapshot()
 	m.mu.Unlock()
 
-	if cfg.Playback.SkipIntroAniSkip && req.MediaID > 0 && req.Episode > 0 {
+	if (cfg.Playback.SkipIntroAniSkip || cfg.Playback.SkipOutroAniSkip) && req.MediaID > 0 && req.Episode > 0 {
 		go m.loadSkips(s)
 	}
 	go m.loop(s, mpv)
@@ -275,14 +278,19 @@ func (m *Manager) playLocked(req PlayRequest) (*Session, error) {
 func (m *Manager) loadSkips(s *Session) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	media, err := m.platform.MediaLite(ctx, s.MediaID)
-	if err != nil || media.IDMal == nil {
-		return
-	}
-	skips := SkipTimes(ctx, m.db, *media.IDMal, s.Episode)
+	skips := m.skipTimes(ctx, s.MediaID, s.Episode)
 	m.mu.Lock()
 	s.Skips = skips
 	m.mu.Unlock()
+}
+
+// aniSkipTimes looks up an episode's AniSkip intervals.
+func (m *Manager) aniSkipTimes(ctx context.Context, mediaID, episode int) []SkipInterval {
+	media, err := m.platform.MediaLite(ctx, mediaID)
+	if err != nil || media.IDMal == nil {
+		return nil
+	}
+	return SkipTimes(ctx, m.db, *media.IDMal, episode)
 }
 
 // loop handles the session's mpv events until mpv exits.
@@ -469,19 +477,38 @@ func (m *Manager) applyTrackPrefs(s *Session, mpv *Mpv, w *trackWatch) {
 	}
 }
 
-// maybeSkip skips the opening/recap. Must be called with m.mu held.
+// maybeSkip skips the opening, recap or ending, as the settings say. Must be
+// called with m.mu held.
 func (m *Manager) maybeSkip(s *Session, mpv *Mpv) {
+	if len(s.Skips) == 0 {
+		return
+	}
+	p := m.settings.Get().Playback
 	for _, sk := range s.Skips {
-		if (sk.Type == "op" || sk.Type == "mixed-op" || sk.Type == "recap") && !s.skipped[sk.Type] &&
-			s.Position >= sk.Start && s.Position < sk.End-1 {
+		what, on := skipSetting(p, sk.Type)
+		if on && !s.skipped[sk.Type] && s.Position >= sk.Start && s.Position < sk.End-1 {
 			s.skipped[sk.Type] = true
 			end := sk.End
 			go func() {
 				_ = mpv.Set("time-pos", end)
-				mpv.ShowText("Skipped "+strings.ToUpper(sk.Type), 1500)
+				mpv.ShowText("Skipped "+what, 1500)
 			}()
 		}
 	}
+}
+
+// skipSetting names an AniSkip interval type and says whether the settings
+// skip it.
+func skipSetting(p config.PlaybackSettings, typ string) (what string, on bool) {
+	switch typ {
+	case "op", "mixed-op":
+		return "opening", p.SkipIntroAniSkip
+	case "recap":
+		return "recap", p.SkipIntroAniSkip
+	case "ed", "mixed-ed":
+		return "ending", p.SkipOutroAniSkip
+	}
+	return "", false
 }
 
 // tick decides whether to save the position, whether playback just got far

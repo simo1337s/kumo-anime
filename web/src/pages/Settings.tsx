@@ -756,6 +756,9 @@ function PlaybackSection({ draft, set }: SectionProps) {
                 <Row label="Skip openings automatically" help="Uses AniSkip timestamps (the same source as ani-cli --skip)">
                     <Switch checked={p.skipIntroAniSkip} onChange={v => set("playback", { skipIntroAniSkip: v })} />
                 </Row>
+                <Row label="Skip endings automatically" help="Jumps past the ending song, also with AniSkip timestamps">
+                    <Switch checked={p.skipOutroAniSkip} onChange={v => set("playback", { skipOutroAniSkip: v })} />
+                </Row>
             </Group>
             <Group title="Progress">
                 <Row label="Update progress automatically" help="Mark the episode as watched on AniList after you finish it">

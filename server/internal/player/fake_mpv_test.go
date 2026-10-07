@@ -40,6 +40,7 @@ type fakeMpv struct {
 
 	mu   sync.Mutex
 	cmds []string // received commands, e.g. "set_property sid"
+	args [][]any  // the rest of each command, e.g. the value set
 
 	exitOnce sync.Once
 	exited   chan struct{}
@@ -93,12 +94,14 @@ func (f *fakeMpv) serve() {
 		if json.Unmarshal(sc.Bytes(), &req) != nil || len(req.Command) == 0 {
 			continue
 		}
-		name := fmt.Sprint(req.Command[0])
+		name, rest := fmt.Sprint(req.Command[0]), req.Command[1:]
 		if len(req.Command) > 1 && (name == "set_property" || name == "get_property") {
 			name += " " + fmt.Sprint(req.Command[1])
+			rest = req.Command[2:]
 		}
 		f.mu.Lock()
 		f.cmds = append(f.cmds, name)
+		f.args = append(f.args, rest)
 		f.mu.Unlock()
 
 		reply := map[string]any{"request_id": req.RequestID, "error": "success"}
@@ -174,6 +177,20 @@ func (f *fakeMpv) exit() {
 }
 
 func (f *fakeMpv) received(cmd string) bool { return f.count(cmd) > 0 }
+
+// sent returns the rest of each cmd received, in order: e.g. for
+// "set_property time-pos", the positions.
+func (f *fakeMpv) sent(cmd string) [][]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out [][]any
+	for i, c := range f.cmds {
+		if c == cmd {
+			out = append(out, f.args[i])
+		}
+	}
+	return out
+}
 
 func (f *fakeMpv) count(cmd string) int {
 	f.mu.Lock()

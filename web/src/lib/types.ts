@@ -185,6 +185,7 @@ export type Settings = {
         preferredAudioLang: string
         preferredSubLang: string
         skipIntroAniSkip: boolean
+        skipOutroAniSkip: boolean
     }
     mpv: { path: string; socket: string; extraArgs: string; fullscreen: boolean }
     transcode: { ffmpegPath: string; ffprobePath: string; mode: string; hwAccel: string; vaapiNode: string; preset: string }

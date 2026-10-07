@@ -466,6 +466,66 @@ func TestMpvStartsWatchingOncePerViewing(t *testing.T) {
 	}
 }
 
+func TestMpvSkipsWhatTheSettingsSay(t *testing.T) {
+	skips := []SkipInterval{{Type: "op", Start: 90, End: 180}, {Type: "mixed-ed", Start: 1290, End: 1380}}
+	cases := []struct {
+		name         string
+		intro, outro bool
+		want         []string // what mpv was told: "<new position> <text>"
+	}{
+		{"openings", true, false, []string{"180 Skipped opening"}},
+		{"endings", false, true, []string{"1380 Skipped ending"}},
+		{"both", true, true, []string{"180 Skipped opening", "1380 Skipped ending"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, l := newTestManager(t, func(c *config.Settings) {
+				c.Playback.SkipIntroAniSkip, c.Playback.SkipOutroAniSkip = tc.intro, tc.outro
+			})
+			m.skipTimes = func(_ context.Context, mediaID, episode int) []SkipInterval {
+				if mediaID != 6 || episode != 2 {
+					t.Errorf("skip times asked for %d/%d", mediaID, episode)
+				}
+				return skips
+			}
+			if _, err := m.PlayMpv(PlayRequest{MediaID: 6, Episode: 2, Source: "local", Target: "/anime/02.mkv"}); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, "the skip times", func() bool {
+				st := m.Status()
+				return st != nil && len(st.Skips) == len(skips)
+			})
+			f := l.last()
+			told := func() []string {
+				var out []string
+				seeks, texts := f.sent("set_property time-pos"), f.sent("show-text")
+				for i := range min(len(seeks), len(texts)) {
+					out = append(out, fmt.Sprint(seeks[i][0], " ", texts[i][0]))
+				}
+				return out
+			}
+			f.prop("duration", 1420.0)
+			// The opening, then the ending; a seek here doesn't move the
+			// position, as no time-pos comes back.
+			for i, pos := range []float64{10, 95, 600, 1300} {
+				f.prop("time-pos", pos)
+				waitFor(t, fmt.Sprint("the position to reach ", pos), func() bool {
+					st := m.Status()
+					return st != nil && st.Position == pos
+				})
+				if i == 1 && tc.intro {
+					waitFor(t, "the opening to be skipped", func() bool { return len(told()) == 1 })
+				}
+			}
+			waitFor(t, "the skips", func() bool { return len(told()) >= len(tc.want) })
+			time.Sleep(100 * time.Millisecond) // a wrong skip would arrive by now
+			if got := told(); !slices.Equal(got, tc.want) {
+				t.Errorf("mpv was told %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStatusHooksRunOneAtATime(t *testing.T) {
 	m, _ := newTestManager(t, nil)
 	var running, overlaps atomic.Int32

@@ -111,3 +111,33 @@ func TestMigrateMangaDirection(t *testing.T) {
 		t.Error("new installs should read manga right to left")
 	}
 }
+
+func TestMigrateSkipEndings(t *testing.T) {
+	for _, intro := range []bool{true, false} {
+		d, err := db.Open(filepath.Join(t.TempDir(), "kumo.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = d.Close() })
+		// Saved by version 4, before endings could be skipped.
+		if err := d.SetKV(settingsKey, map[string]any{"schemaVersion": 4, "playback": map[string]any{"skipIntroAniSkip": intro}}); err != nil {
+			t.Fatal(err)
+		}
+		s, err := NewStore(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p := s.Get().Playback; p.SkipIntroAniSkip != intro || p.SkipOutroAniSkip != intro {
+			t.Errorf("skipping openings %v: got openings %v, endings %v; want endings like openings", intro, p.SkipIntroAniSkip, p.SkipOutroAniSkip)
+		}
+		// Changed afterwards, it sticks.
+		cur := s.Get()
+		cur.Playback.SkipOutroAniSkip = !intro
+		if _, err := s.Save(cur); err != nil {
+			t.Fatal(err)
+		}
+		if s2, err := NewStore(d); err != nil || s2.Get().Playback.SkipOutroAniSkip != !intro {
+			t.Errorf("skipping endings set to %v is lost after a restart (%v)", !intro, err)
+		}
+	}
+}

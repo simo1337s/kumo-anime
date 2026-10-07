@@ -96,7 +96,8 @@ type PlaybackSettings struct {
 	RememberTracks      bool    `json:"rememberTracks"`
 	PreferredAudioLang  string  `json:"preferredAudioLang"` // e.g. "jpn,ja"
 	PreferredSubLang    string  `json:"preferredSubLang"`   // e.g. "eng,en"
-	SkipIntroAniSkip    bool    `json:"skipIntroAniSkip"`
+	SkipIntroAniSkip    bool    `json:"skipIntroAniSkip"`   // openings and recaps
+	SkipOutroAniSkip    bool    `json:"skipOutroAniSkip"`   // endings
 }
 
 type MpvSettings struct {
@@ -349,7 +350,7 @@ func (s *Store) OnChange(fn func(old, new Settings)) {
 
 // schemaVersion is the current settings version; add a step to migrate when
 // changing a default that existing installs should pick up too.
-const schemaVersion = 4
+const schemaVersion = 5
 
 func migrate(s *Settings) bool {
 	if s.SchemaVersion >= schemaVersion {
@@ -369,6 +370,11 @@ func migrate(s *Settings) bool {
 		// v4: manga reads right to left, as printed (the first page of two
 		// on the right), rather than left to right, the default before.
 		s.Manga.Direction = "rtl"
+	}
+	if s.SchemaVersion < 5 {
+		// v5: endings can be skipped too, with a setting of their own; it
+		// starts out like the openings one.
+		s.Playback.SkipOutroAniSkip = s.Playback.SkipIntroAniSkip
 	}
 	s.SchemaVersion = schemaVersion
 	return true
