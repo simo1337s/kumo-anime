@@ -209,7 +209,7 @@ function init() {
     report.leakedGlobals = Object.getOwnPropertyNames(globalThis).filter(function(k) {
       return /host|kumo/i.test(k);
     }).join(',');
-    // ctx.manga needs no scope (like in Seanime).
+    // ctx.manga needs no scope (as plugins expect).
     ctx.manga.getCollection().then(function(c) { $store.set('manga', c); },
       function(e) { $store.set('manga', 'error: ' + e.message); });
     $store.set('report', report);

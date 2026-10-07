@@ -7,7 +7,7 @@ None of it is for Linux: on Arch, keep installing Kumo from source with
 
 ## Install
 
-Open the [releases](https://github.com/simo1337s/animetest/releases), take the
+Open the [releases](https://github.com/simo1337s/kumo-anime/releases), take the
 newest **Kumo X.Y.Z for Windows** and download one of:
 
 | File | What it is |
@@ -30,8 +30,6 @@ administrator rights):
 - Scoop itself and its extras bucket
 - Git for Windows (its bash runs ani-cli) and ani-cli
 - ffmpeg, mpv, yt-dlp, aria2 and fzf
-- the GitHub CLI (`gh`). The repository is private, so the setup offers to
-  sign you in to GitHub, which Kumo's update checks need.
 
 Programs you already have are skipped, so you can run it again whenever
 something is missing. Kumo picks newly installed programs up by itself. The
@@ -123,24 +121,19 @@ away). When there is one, the **Home** page shows it, with what changed:
   page links the new release: download the new zip and use it instead of the
   old folder (your data is in `%APPDATA%\Kumo`, not in that folder).
 
-The repository is private, so update checks need your GitHub sign-in: the
-setup in **Settings › App › Programs** (**Install missing programs**) offers
-it, or run `gh auth login` with the GitHub CLI (`winget install GitHub.cli`).
-Kumo also takes a token from `KUMO_GITHUB_TOKEN`, `GH_TOKEN` or
-`GITHUB_TOKEN`, or from git's credential manager.
+Update checks need no GitHub account. (If you're signed in with the GitHub
+CLI, `gh`, or have a token in `KUMO_GITHUB_TOKEN`, `GH_TOKEN` or
+`GITHUB_TOKEN`, Kumo uses it, which raises GitHub's limit on requests.)
 
 ## Build it yourself
 
-On Windows, with Go, Node.js, Git and the GitHub CLI (the repository is
-private):
+On Windows, with Go, Node.js and Git:
 
 ```powershell
 winget install GoLang.Go
 winget install OpenJS.NodeJS.LTS
 winget install Git.Git
-winget install GitHub.cli
-gh auth login
-gh repo clone simo1337s/animetest kumo
+git clone https://github.com/simo1337s/kumo-anime kumo
 cd kumo
 powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
 ```

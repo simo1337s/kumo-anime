@@ -1,4 +1,4 @@
-// Package extensions runs Seanime-compatible extensions (torrent, online
+// Package extensions runs marketplace extensions (torrent, online
 // streaming and manga providers, plus a subset of the plugin API) inside a
 // sandboxed goja JavaScript runtime, and manages installing them from the
 // community marketplace.
@@ -88,7 +88,7 @@ type Manifest struct {
 
 var reID = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9\-_.]*[a-zA-Z0-9]$`)
 
-// Validate performs the same sanity checks Seanime does (a bit more lenient
+// Validate performs the usual sanity checks on a manifest (a bit lenient
 // on lengths, since marketplace entries sometimes exceed them).
 func (m *Manifest) Validate() error {
 	var missing []string

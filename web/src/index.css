@@ -214,7 +214,7 @@ video::cue {
     text-shadow: 0 2px 4px rgb(0 0 0 / 0.8);
 }
 
-/* Plugins (Seanime marketplace) style their tray UIs with Tailwind classes;
+/* Plugins (from the marketplace) style their tray UIs with Tailwind classes;
    generate the common utilities so they render properly. */
 @source inline("{flex,inline-flex,grid,block,inline-block,hidden,contents,relative,absolute,sticky,truncate,italic,underline,uppercase,capitalize,shrink-0,grow,flex-1,flex-wrap,flex-row,flex-col,flex-row-reverse,flex-col-reverse,w-full,h-full,w-auto,h-auto,min-w-0,max-w-full,overflow-hidden,overflow-auto,overflow-y-auto,overflow-x-auto,whitespace-nowrap,break-all,break-words,object-cover,object-contain,cursor-pointer,select-none,pointer-events-none,transition,border,border-0,border-t,border-b,shadow,shadow-md,shadow-lg,opacity-50,opacity-60,opacity-70,opacity-80,line-clamp-1,line-clamp-2,line-clamp-3,aspect-video,aspect-square}");
 @source inline("{items,self}-{start,center,end,stretch,baseline}");

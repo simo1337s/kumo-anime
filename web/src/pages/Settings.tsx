@@ -549,7 +549,7 @@ function AppSection({ draft, set }: SectionProps) {
             <ProgramsGroup />
 
             <Group title="Extensions">
-                <Stack label="Marketplace URL" help="Any Seanime-compatible extension index works.">
+                <Stack label="Marketplace URL" help="Any compatible extension index works.">
                     <Input value={draft.extensions.marketplaceUrl} onChange={e => set("extensions", { marketplaceUrl: e.target.value })} />
                 </Stack>
             </Group>

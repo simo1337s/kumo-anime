@@ -8,7 +8,8 @@ import (
 	"github.com/simo1337s/animetest/server/internal/extensions"
 )
 
-// pluginServices exposes app data to plugins in Seanime-like shapes.
+// pluginServices exposes app data to plugins in the shapes marketplace
+// plugins expect.
 func (a *App) pluginServices() extensions.PluginHostServices {
 	return extensions.PluginHostServices{
 		GetAnime: func(ctx context.Context, id int) (any, error) { return a.Platform.MediaLite(ctx, id) },

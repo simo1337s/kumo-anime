@@ -7,7 +7,8 @@ import (
 	"github.com/dop251/goja"
 )
 
-// installDoc binds LoadDoc / Doc (goquery-backed, Seanime compatible).
+// installDoc binds LoadDoc / Doc (goquery-backed, as marketplace extensions
+// expect).
 func installDoc(vm *goja.Runtime) {
 	_ = vm.Set("LoadDoc", func(html string) goja.Value {
 		doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))

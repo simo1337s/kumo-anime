@@ -4,8 +4,8 @@ import type { UINode } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Badge, Button, Dialog, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, Popover, Select, Switch, Tooltip } from "../ui"
 
-// Renders the component trees produced by plugin trays (Seanime's tray
-// component API) and routes events back to the plugin.
+// Renders the component trees produced by plugin trays (the marketplace's
+// tray component API) and routes events back to the plugin.
 
 const PluginCtx = createContext<string>("")
 

@@ -9,8 +9,9 @@
 //     windows-v<v>). The update downloads the newest one's installer and
 //     runs it once Kumo has quit; the installer starts the new version.
 //
-// The repository is private, so the requests carry the user's GitHub token
-// when one can be found without asking (see githubToken).
+// The requests carry the user's GitHub token when one can be found without
+// asking (see githubToken): a private repository needs one, and it raises
+// GitHub's limit on requests.
 package update
 
 import (
@@ -416,9 +417,9 @@ func (c *Checker) describe(err error) (string, string) {
 	var ae *apiError
 	switch {
 	case errors.As(err, &ae) && (ae.status == http.StatusNotFound || ae.status == http.StatusUnauthorized):
-		hint := "The repository is private: sign in with the GitHub CLI (gh auth login) and check again."
+		hint := "If the repository is private, sign in with the GitHub CLI (gh auth login) and check again."
 		if c.GOOS == "windows" {
-			hint = "Sign in to GitHub: Settings › App › Programs › Install missing programs signs you in, or run gh auth login."
+			hint = "If the repository is private, sign in to GitHub: Settings › App › Programs › Install missing programs signs you in, or run gh auth login."
 		}
 		return fmt.Sprintf("Kumo can't read github.com/%s (HTTP %d).", c.Repo, ae.status), hint
 	case errors.As(err, &ae) && ae.rateLimited:

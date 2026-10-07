@@ -8,8 +8,8 @@
 #   mpv      the external player (extras bucket)
 #   yt-dlp   episode downloads; aria2 too (ani-cli downloads with it)
 #   fzf      ani-cli checks for it (Kumo answers ani-cli's menus itself)
-#   gh       the GitHub CLI: signed in to GitHub, Kumo can check for and
-#            download its updates while its repository is private
+#   gh       the GitHub CLI, only if Kumo's repository is private: signed in
+#            to GitHub, Kumo can then check for and download its updates
 #
 # Programs that are already installed, with Scoop or otherwise, are left
 # alone, so it's safe to run again. The Kumo installer offers to run it, and
@@ -20,7 +20,7 @@
 
 param(
     # The GitHub repository Kumo updates from.
-    [string]$Repo = "simo1337s/animetest",
+    [string]$Repo = "simo1337s/kumo-anime",
     # Close the window at the end without waiting for Enter.
     [switch]$NoPause
 )
@@ -107,18 +107,18 @@ try {
     Install "mpv" "mpv" "the external player"
     # A bash script: Kumo finds it in Scoop's folder.
     Install "ani-cli" $null "sub/dub streaming"
-    Install "gh" "gh" "signs Kumo in to GitHub for its updates"
 
-    # Kumo checks GitHub for its updates. While its repository is private
-    # that takes a GitHub sign-in, which the GitHub CLI keeps.
-    if (Have "gh") {
-        $public = $true
-        try {
-            Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo" -Headers @{ "User-Agent" = "Kumo-setup" } | Out-Null
-        } catch {
-            $public = $false
-        }
-        if (-not $public) {
+    # Kumo checks GitHub for its updates. Were its repository private, that
+    # would take a GitHub sign-in, which the GitHub CLI keeps.
+    $public = $true
+    try {
+        Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo" -Headers @{ "User-Agent" = "Kumo-setup" } | Out-Null
+    } catch {
+        $public = $false
+    }
+    if (-not $public) {
+        Install "gh" "gh" "signs Kumo in to GitHub for its updates"
+        if (Have "gh") {
             gh auth status --hostname github.com *> $null
             if ($LASTEXITCODE -ne 0) {
                 Step "Signing in to GitHub"

@@ -7,6 +7,6 @@ Exec=kumo %U
 Icon=kumo
 Terminal=false
 Categories=AudioVideo;Video;Player;
-Keywords=anime;anilist;seanime;ani-cli;torrent;manga;
+Keywords=anime;anilist;ani-cli;torrent;manga;
 StartupWMClass=Kumo
 StartupNotify=true

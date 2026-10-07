@@ -10,8 +10,7 @@ import (
 	"github.com/simo1337s/animetest/server/internal/torrent"
 )
 
-// ProviderMedia is the media shape providers receive (Seanime's
-// hibike Media).
+// ProviderMedia is the media shape providers receive (hibike's Media).
 type ProviderMedia struct {
 	ID                   int        `json:"id"`
 	IDMal                *int       `json:"idMal,omitempty"`

@@ -47,7 +47,7 @@ export default function ExtensionsPage() {
             <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <h1 className="text-4xl font-extrabold tracking-tight">Extensions</h1>
-                    <p className="mt-1 max-w-2xl text-muted">Streaming, torrent and manga providers plus plugins — compatible with the Seanime extension marketplace.</p>
+                    <p className="mt-1 max-w-2xl text-muted">Streaming, torrent and manga providers plus plugins, from the extension marketplace.</p>
                 </div>
                 <Button icon={<Link2 className="size-4" />} onClick={() => setManualOpen(true)}>
                     Install from URL
@@ -532,7 +532,7 @@ function InstallUrlDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
             open={open}
             onOpenChange={onOpenChange}
             title="Install from URL"
-            description="Paste the manifest URL of a Seanime-compatible extension."
+            description="Paste the manifest URL of a marketplace extension."
             footer={
                 <Button variant="primary" loading={busy} disabled={!url.trim()} onClick={go}>
                     Install

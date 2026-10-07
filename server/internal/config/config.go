@@ -20,7 +20,7 @@ const (
 
 	// UpdateRepo is the GitHub repository Kumo looks for updates in
 	// ($KUMO_UPDATE_REPO overrides it).
-	UpdateRepo = "simo1337s/animetest"
+	UpdateRepo = "simo1337s/kumo-anime"
 )
 
 // Set when building, with -ldflags "-X <module>/internal/config.AppVersion=…

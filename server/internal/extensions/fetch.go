@@ -20,7 +20,7 @@ import (
 )
 
 // Fetcher performs HTTP requests for extensions. It impersonates Chrome's
-// TLS fingerprint (like Seanime) and refuses to connect to loopback or
+// TLS fingerprint (as extensions expect) and refuses to connect to loopback or
 // private addresses, so an extension can never reach the user's LAN
 // (router, torrent client, Kumo itself...).
 type Fetcher struct {
@@ -59,10 +59,10 @@ func (f *Fetcher) WithDomains(domains []string) *Fetcher {
 	return &c
 }
 
-// Plugin network allowlist that Seanime grants every plugin.
+// Hosts every plugin may reach, whatever its manifest allows.
 var builtinPluginDomains = []string{
 	"api.github.com", "raw.githubusercontent.com", "shikimori.one", "anilist.co", "graphql.anilist.co",
-	"myanimelist.net", "*.myanimelist.net", "seanime.app", "trakt.tv", "*.trakt.tv", "kitsu.io",
+	"myanimelist.net", "*.myanimelist.net", "trakt.tv", "*.trakt.tv", "kitsu.io",
 	"api.simkl.com", "simkl.com", "*.gstatic.com", "*.googleapis.com",
 }
 

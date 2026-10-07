@@ -15,8 +15,8 @@ import (
 	"github.com/dop251/goja"
 )
 
-// installCrypto binds the CryptoJS subset Seanime exposes. Semantics follow
-// Seanime (not upstream CryptoJS): AES-CBC/PKCS7, keys that aren't 16/24/32
+// installCrypto binds the CryptoJS subset marketplace extensions use. Its
+// semantics are the ones they expect (not upstream CryptoJS's): AES-CBC/PKCS7, keys that aren't 16/24/32
 // bytes are SHA-256'd, "Salted__" payloads use OpenSSL's EVP_BytesToKey.
 func installCrypto(vm *goja.Runtime) {
 	type encoder struct {

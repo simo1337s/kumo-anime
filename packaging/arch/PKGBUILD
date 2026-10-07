@@ -1,4 +1,4 @@
-# Kumo — Seanime-style anime app for Arch Linux.
+# Kumo — anime app for Arch Linux.
 #
 # Build & install from a checkout of this repository:
 #     cd packaging/arch && makepkg -si      (after a git pull: makepkg -sif)
@@ -9,9 +9,9 @@
 pkgname=kumo
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="Seanime-style anime library: AniList sync, auto matching, mpv & in-app player, ani-cli sub/dub streaming, torrents, extensions"
+pkgdesc="Anime library: AniList sync, auto matching, mpv & in-app player, ani-cli sub/dub streaming, torrents, extensions"
 arch=('x86_64' 'aarch64')
-url="https://github.com/simo1337s/animetest"
+url="https://github.com/simo1337s/kumo-anime"
 license=('GPL-3.0-or-later')
 depends=('electron' 'mpv' 'ffmpeg' 'hicolor-icon-theme' 'xdg-utils')
 makedepends=('go' 'nodejs' 'npm')

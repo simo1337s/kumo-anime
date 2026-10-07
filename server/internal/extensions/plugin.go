@@ -40,9 +40,9 @@ type PluginUIState struct {
 	State json.RawMessage `json:"state"`
 }
 
-// PluginHost runs one plugin in a single VM. Unlike Seanime (which re-runs
-// callbacks from source in separate VMs) everything shares one VM, which is
-// a compatible superset.
+// PluginHost runs one plugin in a single VM: everything shares it (rather
+// than re-running callbacks from source in separate VMs), which is a
+// compatible superset of what plugins expect.
 type PluginHost struct {
 	id     string
 	mgr    *Manager
@@ -526,7 +526,7 @@ func (h *PluginHost) bindings(r *Runtime, vm *goja.Runtime) *goja.Object {
 		if svc.CustomQuery == nil {
 			return result(nil, unsupported("customQuery"))
 		}
-		// Like in Seanime, a query only carries the token it is given (none
+		// As plugins expect, a query only carries the token it is given (none
 		// means anonymous). Plugins allowed to use the user's token may
 		// leave it out to query as the user.
 		if token == "" && h.scopes["anilist-token"] && svc.Token != nil {
@@ -543,7 +543,7 @@ func (h *PluginHost) bindings(r *Runtime, vm *goja.Runtime) *goja.Object {
 	})
 	_ = host.Set("anilist", al)
 
-	// ctx.anime / ctx.manga are available to every plugin, like in Seanime.
+	// ctx.anime / ctx.manga are available to every plugin, as plugins expect.
 	_ = host.Set("animeEntry", func(id int) goja.Value {
 		if svc.AnimeEntry == nil {
 			return result(nil, unsupported("getAnimeEntry"))
@@ -845,7 +845,7 @@ var pluginPrelude = strings.TrimSpace(`
   // ---- globals
   g.$ui = { register: function(fn){ uiCallbacks.push(fn); } };
   g.$shared = { define: function(name, factory){ shared[name] = factory; }, use: function(name){ return shared[name] ? shared[name]() : undefined; } };
-  // Seanime exposes these two as plain strings.
+  // Plugins expect these two as plain strings.
   var appBase = { getVersion: '3.10.3', getVersionName: 'Kumo', invalidateClientQuery: function(){},
     getClientIds: function(){ return []; }, getClientPlatform: function(){ return 'denshi'; } };
   g.$app = new Proxy(appBase, { get: function(t, k){

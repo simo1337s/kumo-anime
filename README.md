@@ -2,7 +2,7 @@
 
 <h1 align="center">Kumo</h1>
 
-<p align="center">A Seanime-style anime app for Arch Linux (and Windows): your AniList, your local library, ani-cli streaming, torrents and the Seanime extension marketplace — in one desktop app that only ever talks to your own computer and home network.</p>
+<p align="center">An anime app for Arch Linux (and Windows): your AniList, your local library, ani-cli streaming, torrents and an extension marketplace — in one desktop app that only ever talks to your own computer and home network.</p>
 
 ---
 
@@ -42,12 +42,12 @@
 - Works without an account too: your list is stored locally.
 
 **Extensions & plugins**
-- Built-in browser for the **[Seanime marketplace](https://raw.githubusercontent.com/Bas1874/Seanime-Marketplace/refs/heads/main/Marketplace/Main.json)** (any compatible index URL works): install, update, configure and uninstall.
-- Runs **online-streaming, torrent and manga providers** in a sandboxed JavaScript runtime with Seanime-compatible APIs (`fetch`, `LoadDoc`, `CryptoJS`, `$store`, `$storage`, `$habari`, user config…).
+- Built-in browser for the **[extension marketplace](https://raw.githubusercontent.com/Bas1874/Seanime-Marketplace/refs/heads/main/Marketplace/Main.json)** (any compatible index URL works): install, update, configure and uninstall.
+- Runs **online-streaming, torrent and manga providers** in a sandboxed JavaScript runtime with the APIs marketplace extensions use (`fetch`, `LoadDoc`, `CryptoJS`, `$store`, `$storage`, `$habari`, user config…).
 - **UI plugins**: trays, anime-page buttons, webviews, toasts, storage, AniList access, `$ui.register`, `ctx.state/effect/fieldRef`, … All 15 most-starred marketplace plugins load. Plugins that rewrite the app's own pages (`ctx.dom`) or need file/command access only partly work, because Kumo deliberately doesn't allow either.
-- **Manga** reader (long strip / paged, LTR / RTL) using manga provider extensions.
+- **Manga** reader (long strip, single pages or two-page spreads, LTR / RTL) using manga provider extensions.
 
-**Extras**: Discord rich presence (local IPC), accent colours, spoiler blur, Ctrl+K quick search, server logs and cache viewer.
+**Extras**: updates itself from the Home page, Discord rich presence (local IPC), accent colours, spoiler blur, Ctrl+K quick search, server logs and cache viewer.
 
 ## Closed network by design
 
@@ -66,17 +66,18 @@ The server also rejects other websites' requests (Origin check) and DNS rebindin
 sudo pacman -S --needed base-devel go nodejs npm electron mpv ffmpeg
 yay -S ani-cli            # sub/dub streaming & downloads (recommended)
 sudo pacman -S yt-dlp     # optional, better downloads
-sudo pacman -S --needed github-cli && gh auth login   # the repository is private
-gh repo clone simo1337s/animetest kumo && cd kumo
+git clone https://github.com/simo1337s/kumo-anime kumo && cd kumo
 cd packaging/arch && makepkg -si
 ```
+
+No git? Download the source from GitHub (**Code › Download ZIP**), unpack it (`bsdtar -xf kumo-anime-*.zip`) and run `makepkg -si` in its `packaging/arch` folder.
 
 Start **Kumo** from your app menu (or run `kumo`).
 
 ### Updates
 When GitHub has a newer Kumo, the **Home** page shows it with an **Update** button: Kumo downloads the new source, builds it with makepkg and installs the package with pacman (a password dialog asks for your password); **Restart Kumo** then starts the new version. **Settings › About & updates** shows the version and the last check, and checks again right away.
 
-The repository is private, so the update checks use your GitHub sign-in: stay signed in with the GitHub CLI (`gh auth login`, as above). Without a password dialog (e.g. when Kumo runs as the `kumo-server` service), Kumo builds the update and shows the `sudo pacman -U …` command to run.
+Update checks need no GitHub account. Without a password dialog (e.g. when Kumo runs as the `kumo-server` service), Kumo builds the update and shows the `sudo pacman -U …` command to run.
 
 You can still update by hand: `cd kumo && git pull && cd packaging/arch && makepkg -sif` (`-f` rebuilds; without it makepkg reinstalls the package it built last time).
 
@@ -94,7 +95,7 @@ Turn on **Allow devices on my network** (with a password) to use Kumo from your 
 
 ## Windows
 
-Kumo also runs on Windows 10/11 (64-bit), released separately from the Arch package: get the installer (`Kumo-Setup-X.Y.Z-windows-x64.exe`) or the portable zip from the newest **Kumo X.Y.Z for Windows** [release](https://github.com/simo1337s/animetest/releases) (tag `windows-vX.Y.Z`). Those files are Windows-only; on Arch, use the PKGBUILD above. The installed app updates itself from its Home page too.
+Kumo also runs on Windows 10/11 (64-bit), released separately from the Arch package: get the installer (`Kumo-Setup-X.Y.Z-windows-x64.exe`) or the portable zip from the newest **Kumo X.Y.Z for Windows** [release](https://github.com/simo1337s/kumo-anime/releases) (tag `windows-vX.Y.Z`). Those files are Windows-only; on Arch, use the PKGBUILD above. The installer also offers to install the programs Kumo uses (Git, ani-cli, ffmpeg, mpv, yt-dlp…) with Scoop, and the installed app updates itself from its Home page too.
 
 What to install alongside it (ffmpeg, mpv, yt-dlp, ani-cli, qBittorrent), where it keeps its data, how to build it and how releases are made: [packaging/windows/README.md](packaging/windows/README.md).
 
@@ -120,4 +121,4 @@ Data lives in `~/.local/share/kumo` (SQLite database, artwork cache, extension s
 ## Notes
 - AniList's API may rate-limit large first scans; Kumo waits and retries automatically.
 - Image-based subtitles (PGS/VobSub) only render in mpv.
-- Kumo is a personal project, unaffiliated with Seanime, AniList or ani-cli. Licensed GPL-3.0.
+- Kumo is a personal project, unaffiliated with AniList or ani-cli. Licensed GPL-3.0.
