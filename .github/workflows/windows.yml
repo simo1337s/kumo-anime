@@ -1,10 +1,17 @@
 # Builds, tests and packages Kumo for Windows on a real Windows machine, then
 # publishes the installer and the portable zip as the GitHub Release
-# "Kumo <version> for Windows", tagged windows-v<version>. The version comes
-# from desktop/package.json.
+# "Kumo <version> for Windows", tagged windows-v<version> on the commit it
+# built.
 #
-# Runs when a windows-v* tag is pushed (e.g. git tag windows-v1.0.0 && git
-# push origin windows-v1.0.0), or by hand from the Actions tab.
+# The version is 1.0.<number of commits> (the first two numbers come from
+# desktop/package.json): each commit has its own, later commits higher ones.
+# Installed copies of Kumo look for the release with the highest version and
+# offer it on the Home page (server/internal/update), so the version is also
+# built into kumo.exe, with the commit.
+#
+# Runs by hand from the Actions tab. Running it again on the same commit
+# updates that commit's release. Only the newest 10 Windows releases are
+# kept: older ones are deleted, tags included.
 #
 # Windows only: the Arch Linux package is built from source with
 # packaging/arch/PKGBUILD and has nothing to do with this workflow.
@@ -16,9 +23,6 @@
 name: Windows release
 
 on:
-  push:
-    tags:
-      - "windows-v*"
   workflow_dispatch:
     inputs:
       publish:
@@ -44,17 +48,20 @@ jobs:
     env:
       CGO_ENABLED: "0"
     steps:
+      # The whole history: the version counts its commits.
       - name: Check out
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Read the version
         id: version
         run: |
-          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
-          if (-not $version) { throw "desktop/package.json has no version" }
-          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -like "windows-v*" -and $env:GITHUB_REF_NAME -ne "windows-v$version") {
-            throw "The tag $env:GITHUB_REF_NAME doesn't match desktop/package.json (version $version): it should be windows-v$version."
-          }
+          $base = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          if (-not ($base -match '^(\d+)\.(\d+)\.')) { throw "desktop/package.json has no version like 1.0.0 (it says '$base')" }
+          $count = git rev-list --count HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $version = "$($Matches[1]).$($Matches[2]).$("$count".Trim())"
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=windows-v$version" >> $env:GITHUB_OUTPUT
           "installer=Kumo-Setup-$version-windows-x64.exe" >> $env:GITHUB_OUTPUT
@@ -112,6 +119,8 @@ jobs:
         working-directory: server
         run: go test -count 1 -timeout 8m ./...
 
+      # The version and the commit go into kumo.exe (config.AppVersion and
+      # config.Commit): the updater compares them with the newest release's.
       - name: Build kumo.exe
         working-directory: server
         env:
@@ -120,19 +129,27 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           New-Item -ItemType Directory -Force ../dist/windows | Out-Null
-          go build -trimpath -ldflags "-s -w" -o ../dist/windows/kumo.exe ./cmd/kumo
+          $config = "github.com/simo1337s/animetest/server/internal/config"
+          go build -trimpath -ldflags "-s -w -X $config.AppVersion=$env:VERSION -X $config.Commit=$env:GITHUB_SHA" -o ../dist/windows/kumo.exe ./cmd/kumo
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $reported = & ../dist/windows/kumo.exe --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "kumo.exe --version: $reported"
-          if ($reported -notmatch [regex]::Escape($env:VERSION)) {
-            "::warning::kumo.exe says '$reported' but desktop/package.json is $env:VERSION: update AppVersion in server/internal/config/config.go too."
+          if ($reported -ne "Kumo $env:VERSION") {
+            throw "kumo.exe says '$reported' instead of 'Kumo $env:VERSION': the version didn't make it into the build."
           }
 
+      # electron-builder names the files and versions the app after
+      # desktop/package.json: it gets this build's version, on the runner
+      # only (nothing is committed).
       - name: Package the desktop app (installer and portable zip)
         working-directory: desktop
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm version $env:VERSION --no-git-tag-version --allow-same-version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npx electron-builder --win --x64 --publish never
 
@@ -158,7 +175,7 @@ jobs:
       # exist yet), or updates it: new title and notes, and files of the same
       # name replaced.
       - name: Publish the GitHub Release
-        if: github.event_name == 'push' || inputs.publish
+        if: inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -178,6 +195,8 @@ jobs:
           | `{portable}` | **Portable** build. Unzip it anywhere and run `Kumo.exe`; nothing gets installed. Your data is still kept in `%APPDATA%\Kumo`. |
 
           The files aren't code-signed, so Windows SmartScreen may warn "Windows protected your PC" the first time: click **More info**, then **Run anyway**.
+
+          Kumo finds newer releases by itself: the installed app updates from its Home page (**Update**); for the portable build, download the newest zip.
 
           Some features use other programs: ffmpeg (needed by the in-app player for most files), mpv, yt-dlp, ani-cli and qBittorrent. What to install for what, and where Kumo keeps its data: [packaging/windows/README.md]({guide}).
 
@@ -200,4 +219,24 @@ jobs:
           } else {
             "Creating the release $env:TAG"
             gh release create $env:TAG @files --target $env:GITHUB_SHA --title $title --notes-file $notesFile
+          }
+
+      # Every commit can have a release now: keep the newest 10 Windows
+      # releases, by version (numbers compared as numbers: 1.0.10 is newer
+      # than 1.0.9), and delete the older ones with their tags.
+      - name: Delete old releases
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $tags = gh release list --limit 1000 --json tagName --jq '.[].tagName'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $byVersion = @{ Descending = $true; Expression = { ($_.Substring("windows-v".Length).Split(".") | ForEach-Object { $_.PadLeft(10, "0") }) -join "." } }
+          $old = @($tags | Where-Object { $_ -match '^windows-v\d+(\.\d+)*$' } | Sort-Object -Property $byVersion | Select-Object -Skip 10)
+          if ($old.Count -eq 0) { "No old releases to delete" }
+          foreach ($tag in $old) {
+            "Deleting the release $tag and its tag"
+            gh release delete $tag --cleanup-tag --yes
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
