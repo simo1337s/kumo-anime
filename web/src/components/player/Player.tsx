@@ -319,7 +319,15 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         if (isHls && Hls.isSupported()) {
             // A local session's playlist grows while it's converted: give a
             // start, or players begin at its end like a live stream.
-            const hls = new Hls({ startPosition: localHls ? resume : resume > 0 ? resume : -1, maxBufferLength: 60 })
+            // Memory: hls.js keeps everything already watched (the whole
+            // episode by the end); keep the last 90s for going back, and up
+            // to 30 MB (at least 60s) ahead.
+            const hls = new Hls({
+                startPosition: localHls ? resume : resume > 0 ? resume : -1,
+                maxBufferLength: 60,
+                maxBufferSize: 30 * 1000 * 1000,
+                backBufferLength: 90,
+            })
             hls.loadSource(videoSrc)
             hls.attachMedia(v)
             hls.on(Hls.Events.ERROR, (_, data) => {

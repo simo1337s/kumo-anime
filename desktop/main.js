@@ -26,11 +26,16 @@ const EXIT_INSTALLING = 76
 const APP_ID = isWindows ? "app.kumo.desktop" : "kumo"
 app.setName("Kumo")
 app.setAppUserModelId?.(APP_ID)
+// The window only talks to Kumo's own server (and AniList's login page): run
+// Chromium's network service inside the app instead of a process of its
+// own, which saves about 80 MB.
+const features = ["NetworkServiceInProcess2"]
 if (process.platform === "linux") {
     // Smooth video and scrolling on Linux.
-    app.commandLine.appendSwitch("enable-features", "VaapiVideoDecodeLinuxGL,VaapiVideoDecoder")
+    features.push("VaapiVideoDecodeLinuxGL", "VaapiVideoDecoder")
     app.commandLine.appendSwitch("ignore-gpu-blocklist")
 }
+app.commandLine.appendSwitch("enable-features", features.join(","))
 if (isWindows && process.env.LOCALAPPDATA) {
     // Electron would keep the window's browser data (caches, the AniList
     // login window's cookies) in %APPDATA%\Kumo, which is the server's data

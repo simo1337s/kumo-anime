@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/simo1337s/animetest/server/internal/db"
@@ -42,6 +43,11 @@ type Platform struct {
 	// versions counts the changes made to each cached collection, so that a
 	// fetch already running (whose result may predate a change) isn't cached.
 	versions map[string]uint64
+
+	// discoverMu allows one Discover fetch at a time, and discovering one
+	// refresh in the background (discover.go).
+	discoverMu  sync.Mutex
+	discovering atomic.Bool
 
 	// fetchSem allows one collection fetch at a time. Unlike a mutex, the
 	// wait for it ends when the caller's context does.

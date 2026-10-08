@@ -165,14 +165,20 @@ export function useSearch(params: SearchParams, enabled = true) {
     })
 }
 
+type Discover = { trending: Media[]; thisSeason: Media[]; nextSeason: Media[]; popular: Media[]; topRated: Media[]; season: string; year: number; fetchedAt: number }
+
 export function useDiscover() {
     return useQuery({
         queryKey: ["discover"],
-        queryFn: () =>
-            api.get<{ trending: Media[]; thisSeason: Media[]; nextSeason: Media[]; popular: Media[]; topRated: Media[]; season: string; year: number }>(
-                "/api/anilist/discover",
-            ),
+        queryFn: () => api.get<Discover>("/api/anilist/discover"),
         staleTime: 10 * 60_000,
+        // The server answers at once with the page it saved last, and fetches
+        // a fresh one when that's over 30 minutes old: pick it up shortly
+        // (a few tries, in case AniList can't be reached).
+        refetchInterval: q => {
+            const d = q.state.data
+            return d && Date.now() / 1000 - d.fetchedAt > 30 * 60 && q.state.dataUpdateCount < 4 ? 4000 : false
+        },
     })
 }
 

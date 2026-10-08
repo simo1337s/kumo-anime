@@ -557,54 +557,10 @@ func (s *Server) search(r *http.Request) (any, error) {
 	return s.app.Platform.Search(r.Context(), p)
 }
 
-func currentSeason(t time.Time) (string, int) {
-	y := t.Year()
-	switch t.Month() {
-	case time.December:
-		return "WINTER", y + 1
-	case time.January, time.February:
-		return "WINTER", y
-	case time.March, time.April, time.May:
-		return "SPRING", y
-	case time.June, time.July, time.August:
-		return "SUMMER", y
-	}
-	return "FALL", y
-}
-
+// discover is the Discover page, cached by the platform: only the very first
+// one waits for AniList.
 func (s *Server) discover(r *http.Request) (any, error) {
-	noAdult := false
-	season, year := currentSeason(time.Now())
-	nextSeason, nextYear := currentSeason(time.Now().AddDate(0, 3, 0))
-	type section struct {
-		key    string
-		params anilist.SearchParams
-	}
-	sections := []section{
-		{"trending", anilist.SearchParams{Sort: []string{"TRENDING_DESC", "POPULARITY_DESC"}, PerPage: 20}},
-		{"thisSeason", anilist.SearchParams{Season: season, Year: year, Sort: []string{"POPULARITY_DESC"}, PerPage: 20}},
-		{"nextSeason", anilist.SearchParams{Season: nextSeason, Year: nextYear, Sort: []string{"POPULARITY_DESC"}, PerPage: 20}},
-		{"popular", anilist.SearchParams{Sort: []string{"POPULARITY_DESC"}, PerPage: 20}},
-		{"topRated", anilist.SearchParams{Sort: []string{"SCORE_DESC"}, PerPage: 20}},
-	}
-	out := map[string]any{"season": season, "year": year}
-	var firstErr error
-	for _, sec := range sections {
-		sec.params.IsAdult = &noAdult
-		res, err := s.app.Platform.Search(r.Context(), sec.params)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			out[sec.key] = []any{}
-			continue
-		}
-		out[sec.key] = res.Media
-	}
-	if firstErr != nil && out["trending"] == nil {
-		return nil, firstErr
-	}
-	return out, nil
+	return s.app.Platform.Discover(r.Context())
 }
 
 func (s *Server) schedule(r *http.Request) (any, error) {

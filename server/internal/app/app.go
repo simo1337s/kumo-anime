@@ -316,6 +316,14 @@ func (a *App) Start() {
 		return cfg.Torrent.AutoDownloader, time.Duration(cfg.Torrent.AutoDownloadMinutes) * time.Minute
 	})
 	go func() {
+		// The Discover page, ready before it's opened.
+		ctx, cancel := context.WithTimeout(a.ctx, time.Minute)
+		defer cancel()
+		if d, err := a.Platform.WarmDiscover(ctx); err == nil {
+			a.PrefetchDiscoverArt(d)
+		}
+	}()
+	go func() {
 		ctx, cancel := context.WithTimeout(a.ctx, time.Minute)
 		defer cancel()
 		a.Platform.RefreshViewer(ctx)
@@ -364,6 +372,26 @@ func (a *App) PrefetchCollectionArt(view *library.CollectionView) {
 	add(view.LocalOnly)
 	for _, c := range view.ContinueWatching {
 		urls = append(urls, c.Image, c.Media.BannerImage) // the banner is the Home page header
+	}
+	a.Images.Prefetch(urls...)
+}
+
+// PrefetchDiscoverArt downloads what the Discover page shows first: the
+// banners of its header and the first covers of each row. The rest load as
+// they're scrolled to.
+func (a *App) PrefetchDiscoverArt(d *anilist.Discover) {
+	var urls []string
+	banners := 0
+	for _, m := range d.Trending {
+		if m.BannerImage != "" && banners < 6 {
+			urls = append(urls, m.BannerImage)
+			banners++
+		}
+	}
+	for _, row := range [][]*anilist.Media{d.Trending, d.ThisSeason, d.NextSeason, d.Popular, d.TopRated} {
+		for _, m := range row[:min(len(row), 8)] {
+			urls = append(urls, m.CoverImage.ExtraLarge)
+		}
 	}
 	a.Images.Prefetch(urls...)
 }
