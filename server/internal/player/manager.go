@@ -477,7 +477,7 @@ func (m *Manager) applyTrackPrefs(s *Session, mpv *Mpv, w *trackWatch) {
 	}
 }
 
-// maybeSkip skips the opening, recap or ending, as the settings say. Must be
+// maybeSkip skips the opening or the ending, as the settings say. Must be
 // called with m.mu held.
 func (m *Manager) maybeSkip(s *Session, mpv *Mpv) {
 	if len(s.Skips) == 0 {
@@ -486,9 +486,6 @@ func (m *Manager) maybeSkip(s *Session, mpv *Mpv) {
 	p := m.settings.Get().Playback
 	for _, sk := range s.Skips {
 		what, on := skipSetting(p, sk.Type)
-		if what == "recap" && isPreview(sk, s.Skips, s.Duration) {
-			continue // the next episode's preview plays
-		}
 		if on && !s.skipped[sk.Type] && s.Position >= sk.Start && s.Position < sk.End-1 {
 			s.skipped[sk.Type] = true
 			end := sk.End
@@ -500,28 +497,12 @@ func (m *Manager) maybeSkip(s *Session, mpv *Mpv) {
 	}
 }
 
-// isPreview: AniSkip has no type for the next episode's preview, so a
-// "recap" after the ending, or in the episode's second half, is one.
-func isPreview(sk SkipInterval, all []SkipInterval, duration float64) bool {
-	if sk.Type != "recap" {
-		return false
-	}
-	for _, e := range all {
-		if (e.Type == "ed" || e.Type == "mixed-ed") && e.Start < sk.Start {
-			return true
-		}
-	}
-	return duration > 0 && sk.Start > duration/2
-}
-
 // skipSetting names an AniSkip interval type and says whether the settings
-// skip it.
+// skip it. Recaps play (AniSkip calls the next episode's preview one too).
 func skipSetting(p config.PlaybackSettings, typ string) (what string, on bool) {
 	switch typ {
 	case "op", "mixed-op":
 		return "opening", p.SkipIntroAniSkip
-	case "recap":
-		return "recap", p.SkipIntroAniSkip
 	case "ed", "mixed-ed":
 		return "ending", p.SkipOutroAniSkip
 	}

@@ -96,7 +96,7 @@ type PlaybackSettings struct {
 	RememberTracks      bool    `json:"rememberTracks"`
 	PreferredAudioLang  string  `json:"preferredAudioLang"` // e.g. "jpn,ja"
 	PreferredSubLang    string  `json:"preferredSubLang"`   // e.g. "eng,en"
-	SkipIntroAniSkip    bool    `json:"skipIntroAniSkip"`   // openings and recaps
+	SkipIntroAniSkip    bool    `json:"skipIntroAniSkip"`   // openings
 	SkipOutroAniSkip    bool    `json:"skipOutroAniSkip"`   // endings
 }
 

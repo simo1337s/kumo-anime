@@ -31,15 +31,10 @@ import { Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparat
 
 type SubOption = { key: string; label: string; lang: string; title: string; index: number; url: string; bitmap?: boolean }
 type Skip = { type: string; start: number; end: number }
-// What an AniSkip interval (op, mixed-op, recap, ed, mixed-ed) is. AniSkip
-// has no type for the next episode's preview: a "recap" after the ending, or
-// in the episode's second half, is one.
-function skipName(s: Skip, skips: Skip[], duration: number) {
-    if (s.type === "ed" || s.type === "mixed-ed") return "ending"
-    if (s.type !== "recap") return "opening"
-    const afterEnding = skips.some(e => (e.type === "ed" || e.type === "mixed-ed") && e.start < s.start)
-    return afterEnding || (duration > 0 && s.start > duration / 2) ? "preview" : "recap"
-}
+// The AniSkip intervals the player skips: openings and endings. Recaps play
+// (AniSkip calls the next episode's preview one too).
+const SKIPPED = ["op", "mixed-op", "ed", "mixed-ed"]
+const skipName = (type: string) => (type === "ed" || type === "mixed-ed" ? "ending" : "opening")
 
 const langNames: Record<string, string> = {
     jpn: "Japanese", ja: "Japanese", eng: "English", en: "English", spa: "Spanish", es: "Spanish", fre: "French", fra: "French", fr: "French",
@@ -553,10 +548,9 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         }
     }
 
-    // The next episode's preview isn't skipped: no button, no marker.
-    const skippable = skips.filter(s => ["op", "mixed-op", "recap", "ed", "mixed-ed"].includes(s.type) && skipName(s, skips, duration) !== "preview")
+    const skippable = skips.filter(s => SKIPPED.includes(s.type))
     const currentSkip = skippable.find(s => time >= s.start && time < s.end - 1)
-    const skipWhat = currentSkip && skipName(currentSkip, skips, duration)
+    const skipWhat = currentSkip && skipName(currentSkip.type)
     const autoSkip = skipWhat === "ending" ? settings?.playback.skipOutroAniSkip : skipWhat ? settings?.playback.skipIntroAniSkip : false
     useEffect(() => {
         if (!currentSkip || !autoSkip || skipped.current.has(currentSkip.type)) return
