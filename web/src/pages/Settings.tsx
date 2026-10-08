@@ -576,9 +576,10 @@ function DesktopGroup() {
     const mac = bridge.platform === "darwin"
     const change = async (name: keyof DesktopPrefs, value: boolean) => {
         setPrefs({ ...prefs, [name]: value })
-        if (!(await bridge.setPref!(name, value).catch(() => false))) {
+        const res = await bridge.setPref!(name, value).catch(() => false as const)
+        if (res !== true) {
             setPrefs(prefs)
-            toast.error("Couldn't change that setting")
+            toast.error(typeof res === "object" && res.error ? res.error : "Couldn't change that setting")
         }
     }
     return (
@@ -593,6 +594,18 @@ function DesktopGroup() {
             >
                 <Switch checked={prefs.keepRunning} onChange={v => change("keepRunning", v)} />
             </Row>
+            {prefs.startAtLogin !== undefined && (
+                <Row
+                    label="Start Kumo when you log in"
+                    help={
+                        prefs.keepRunning
+                            ? `In the background, ${mac ? "in the Dock" : "with its tray icon"}: ready for your other devices, downloads and the auto downloader without opening its window.`
+                            : "It opens its window. Turn on keeping it running to start it in the background instead."
+                    }
+                >
+                    <Switch checked={prefs.startAtLogin} onChange={v => change("startAtLogin", v)} />
+                </Row>
+            )}
             <Row
                 label="Free memory while the computer is locked"
                 help="After 5 minutes locked, the window lets go of the page and loads it again when you unlock. Never while a video, the manga reader or Settings is open."

@@ -67,10 +67,11 @@ export type DesktopBridge = {
     close?: () => void
     // Missing in desktop apps older than these settings.
     getPrefs?: () => Promise<DesktopPrefs>
-    setPref?: (name: keyof DesktopPrefs, value: boolean) => Promise<boolean>
+    // true, or what went wrong (older apps: false).
+    setPref?: (name: keyof DesktopPrefs, value: boolean) => Promise<true | false | { error: string }>
 }
 
-export type DesktopPrefs = { keepRunning: boolean; freeWhenLocked: boolean }
+export type DesktopPrefs = { keepRunning: boolean; freeWhenLocked: boolean; startAtLogin?: boolean }
 
 export function desktop(): DesktopBridge | null {
     return (window as any).kumoDesktop ?? null

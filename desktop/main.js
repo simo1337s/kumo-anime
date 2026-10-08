@@ -81,6 +81,51 @@ function savePrefs() {
     }
 }
 
+// Starting with the computer (Settings › App › Desktop app), off unless
+// turned on: the system's own login items on Windows and macOS, an autostart
+// entry on Linux. Started that way, Kumo opens in the background (tray, or
+// the Dock on a Mac) when it keeps running without its window; otherwise
+// with its window, so it's never running unseen.
+const BACKGROUND = "--background"
+const autostartFile = () => path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "autostart", "kumo.desktop")
+
+function startsAtLogin() {
+    if (process.platform === "linux") return fs.existsSync(autostartFile())
+    return app.getLoginItemSettings(isWindows ? { args: [BACKGROUND] } : undefined).openAtLogin
+}
+
+// setStartAtLogin turns starting with the computer on or off; it returns
+// what went wrong, if anything.
+function setStartAtLogin(on) {
+    if (process.platform === "linux") {
+        const file = autostartFile()
+        try {
+            if (!on) {
+                fs.rmSync(file, { force: true })
+                return null
+            }
+            // The package's launcher, else this Electron with this app.
+            const exec = fs.existsSync("/usr/bin/kumo") ? "/usr/bin/kumo" : `"${process.execPath}" "${app.getAppPath()}"`
+            fs.mkdirSync(path.dirname(file), { recursive: true })
+            fs.writeFileSync(file, ["[Desktop Entry]", "Type=Application", "Name=Kumo", "Comment=Kumo in the background", `Exec=${exec} ${BACKGROUND}`, "Icon=kumo-anime", "Terminal=false", "X-GNOME-Autostart-enabled=true", ""].join("\n"))
+            return null
+        } catch (err) {
+            return String(err?.message || err)
+        }
+    }
+    app.setLoginItemSettings(isWindows ? { openAtLogin: on, args: [BACKGROUND] } : { openAtLogin: on })
+    if (isMac && on && app.getLoginItemSettings().status === "requires-approval") {
+        return "macOS asks you to allow it: System Settings › General › Login Items, turn on Kumo."
+    }
+    return startsAtLogin() === on ? null : "The system didn't take the change."
+}
+
+// startedAtLogin reports a launch by the system at login.
+function startedAtLogin() {
+    if (process.argv.includes(BACKGROUND)) return true
+    return isMac && app.getLoginItemSettings().wasOpenedAtLogin
+}
+
 // Where the server writes server.json and the shell token: the same folder
 // as its config.RuntimeDir().
 function serverRuntimeDir() {
@@ -374,9 +419,15 @@ ipcMain.on("kumo:open-external", (_e, url) => {
     if (typeof url === "string" && /^https?:\/\//.test(url)) shell.openExternal(url)
 })
 
-ipcMain.handle("kumo:get-prefs", () => ({ keepRunning: prefs.keepRunning, freeWhenLocked: prefs.freeWhenLocked }))
+ipcMain.handle("kumo:get-prefs", () => ({ keepRunning: prefs.keepRunning, freeWhenLocked: prefs.freeWhenLocked, startAtLogin: startsAtLogin() }))
+// set-pref returns true, or { error } when it couldn't be done.
 ipcMain.handle("kumo:set-pref", (_e, name, value) => {
-    if (!["keepRunning", "freeWhenLocked"].includes(name) || typeof value !== "boolean") return false
+    if (typeof value !== "boolean") return { error: "not a setting" }
+    if (name === "startAtLogin") {
+        const error = setStartAtLogin(value)
+        return error ? { error } : true
+    }
+    if (!["keepRunning", "freeWhenLocked"].includes(name)) return { error: "not a setting" }
     prefs[name] = value
     savePrefs()
     updateTray()
@@ -499,7 +550,9 @@ async function boot() {
     // Wait until the token file exists (written right after startup).
     for (let i = 0; i < 50 && !readToken(); i++) await new Promise(r => setTimeout(r, 100))
     installShellHeader()
-    createWindow()
+    // Started with the computer: in the background, if Kumo runs without
+    // its window (the tray icon or the Dock opens it).
+    if (!(startedAtLogin() && prefs.keepRunning)) createWindow()
     updateTray()
     updateDesktopShortcuts()
     powerMonitor.on("lock-screen", () => {
@@ -517,7 +570,10 @@ if (!app.requestSingleInstanceLock()) {
 } else {
     // Opening Kumo again shows its window, also after it was closed while
     // Kumo kept running.
-    app.on("second-instance", showWindow)
+    app.on("second-instance", (_e, argv) => {
+        // Started with the computer while already running: nothing to show.
+        if (!argv.includes(BACKGROUND)) showWindow()
+    })
     app.on("activate", showWindow) // the Dock icon (macOS)
     app.whenReady().then(() => {
         loadPrefs()
