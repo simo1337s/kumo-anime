@@ -129,3 +129,42 @@ func TestHideContinueConcurrent(t *testing.T) {
 		t.Fatalf("%d of 20 hidden anime saved", n)
 	}
 }
+
+// Files other Kumo apps share fill in the episodes this computer doesn't
+// have; its own always win.
+func TestSharedFilesFillIn(t *testing.T) {
+	s := newTestService(t)
+	local := []*LocalFile{
+		{Path: "/a/Show - 01.mkv", Name: "Show - 01.mkv", MediaID: 5, Episode: 1, Kind: "main", Size: 100},
+		{Path: "/a/Show - OVA.mkv", Name: "Show - OVA.mkv", MediaID: 5, Kind: "special"},
+	}
+	shared := []*LocalFile{
+		{Path: "kumo://h//b/Show - 01.mkv", Name: "Show - 01.mkv", MediaID: 5, Episode: 1, Kind: "main", Size: 900, Host: "h", MatchScore: 1},
+		{Path: "kumo://h//b/Show - 02.mkv", Name: "Show - 02.mkv", MediaID: 5, Episode: 2, Kind: "main", Host: "h"},
+		{Path: "kumo://h//b/Show - OVA.mkv", Name: "Show - OVA.mkv", MediaID: 5, Kind: "special", Host: "h"},
+		{Path: "kumo://h//b/Show - NCOP.mkv", Name: "Show - NCOP.mkv", MediaID: 5, Kind: "nc", Host: "h"},
+		{Path: "kumo://h//b/Other - 01.mkv", Name: "Other - 01.mkv", MediaID: 6, Episode: 1, Kind: "main", Host: "h"},
+	}
+	s.Remote = func() []*LocalFile { return shared }
+
+	got := map[string]bool{}
+	for _, f := range s.sharedFor(5, local) {
+		got[f.Name] = true
+	}
+	if !got["Show - 01.mkv"] || !got["Show - 02.mkv"] || !got["Show - NCOP.mkv"] || got["Show - OVA.mkv"] || got["Other - 01.mkv"] {
+		t.Errorf("shared files of the anime: %v", got)
+	}
+
+	all := append(append([]*LocalFile{}, local...), s.sharedFor(5, local)...)
+	if f := EpisodeFile(all, 1); f == nil || f.Host != "" {
+		t.Errorf("episode 1 plays from %+v, want this computer's file", f)
+	}
+	if f := EpisodeFile(all, 2); f == nil || f.Host != "h" {
+		t.Errorf("episode 2 plays from %+v, want the shared file", f)
+	}
+
+	items := s.continueWatching(context.Background(), watching(map[int]int{5: 1}), map[int][]*LocalFile{5: all})
+	if len(items) != 1 || items[0].Episode != 2 || !items[0].HasFile || items[0].FilePath != "kumo://h//b/Show - 02.mkv" {
+		t.Errorf("continue watching: %+v", items)
+	}
+}

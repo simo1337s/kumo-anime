@@ -21,6 +21,9 @@ type Service struct {
 	Meta     *metadata.Service
 	History  *history.Store
 	DB       *db.DB // items removed from "Continue watching"
+	// Remote: the files other Kumo apps on the network share with this one
+	// (package share), shown with the local ones; nil without sharing.
+	Remote func() []*LocalFile
 
 	hiddenMu sync.Mutex
 }
@@ -42,16 +45,18 @@ type EpisodeView struct {
 }
 
 type EntryView struct {
-	Media        *anilist.Media     `json:"media"`
-	ListEntry    *anilist.ListEntry `json:"listEntry"`
-	Episodes     []*EpisodeView     `json:"episodes"`
-	Specials     []*EpisodeView     `json:"specials"`
-	Others       []*EpisodeView     `json:"others"`
-	NextEpisode  *EpisodeView       `json:"nextEpisode"`
-	LocalCount   int                `json:"localCount"`
-	Images       metadata.Images    `json:"images"`
-	Mappings     metadata.Mappings  `json:"mappings"`
-	MetadataNote string             `json:"metadataNote,omitempty"`
+	Media       *anilist.Media     `json:"media"`
+	ListEntry   *anilist.ListEntry `json:"listEntry"`
+	Episodes    []*EpisodeView     `json:"episodes"`
+	Specials    []*EpisodeView     `json:"specials"`
+	Others      []*EpisodeView     `json:"others"`
+	NextEpisode *EpisodeView       `json:"nextEpisode"`
+	LocalCount  int                `json:"localCount"`
+	// SharedCount: files of it other Kumo apps share with this one.
+	SharedCount  int               `json:"sharedCount"`
+	Images       metadata.Images   `json:"images"`
+	Mappings     metadata.Mappings `json:"mappings"`
+	MetadataNote string            `json:"metadataNote,omitempty"`
 }
 
 // Entry returns everything the anime page needs.
@@ -67,9 +72,11 @@ func (s *Service) Entry(ctx context.Context, mediaID int, refresh bool) (*EntryV
 	}
 	meta, metaErr := s.Meta.Get(ctx, mediaID)
 	files, _ := s.Store.ByMedia(mediaID)
+	localCount := len(files)
+	files = append(files, s.sharedFor(mediaID, files)...)
 	hist := s.History.ForMedia(mediaID)
 
-	v := &EntryView{Media: media, ListEntry: entry, LocalCount: len(files)}
+	v := &EntryView{Media: media, ListEntry: entry, LocalCount: localCount, SharedCount: len(files) - localCount}
 	if meta != nil {
 		v.Images, v.Mappings = meta.Images, meta.Mappings
 	}
@@ -168,6 +175,30 @@ func (s *Service) Entry(ctx context.Context, mediaID int, refresh bool) (*EntryV
 	return v, nil
 }
 
+// shared are the files other Kumo apps share with this one.
+func (s *Service) shared() []*LocalFile {
+	if s.Remote == nil {
+		return nil
+	}
+	return s.Remote()
+}
+
+// sharedFor are an anime's shared files, but its specials and extras this
+// computer has too (same file name).
+func (s *Service) sharedFor(mediaID int, local []*LocalFile) []*LocalFile {
+	names := map[string]bool{}
+	for _, f := range local {
+		names[f.Name] = true
+	}
+	var out []*LocalFile
+	for _, f := range s.shared() {
+		if f.MediaID == mediaID && !f.Ignored && (f.Kind == "main" || !names[f.Name]) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 func maxLocal(m map[int]*LocalFile) int {
 	n := 0
 	for k := range m {
@@ -230,6 +261,7 @@ func (s *Service) Collection(ctx context.Context, refresh bool) (*CollectionView
 		return nil, err
 	}
 	all, _ := s.Store.All()
+	all = append(all, s.shared()...)
 	filesByMedia := map[int][]*LocalFile{}
 	view := &CollectionView{}
 	for _, f := range all {
@@ -491,8 +523,12 @@ func EpisodeFile(files []*LocalFile, episode int) *LocalFile {
 // betterFile reports whether f is the one to play when it and old are
 // matched to the same episode, e.g. a sequel's files wrongly matched to
 // its first season: a match made by hand wins, then the surer match, then
-// the bigger file.
+// the bigger file. A file on this computer always wins.
 func betterFile(f, old *LocalFile) bool {
+	// This computer's file, not one another Kumo shares.
+	if (f.Host == "") != (old.Host == "") {
+		return f.Host == ""
+	}
 	if f.Locked != old.Locked {
 		return f.Locked
 	}

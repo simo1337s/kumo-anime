@@ -36,12 +36,12 @@ import { LoginDialog } from "@/components/LoginDialog"
 import { Badge, Button, Dialog, Input, Select, Switch, Textarea } from "@/components/ui"
 import { versionName } from "@/components/UpdateBanner"
 import { api, desktop, type DesktopPrefs } from "@/lib/api"
-import { useCheckUpdate, useOnlineProviders, useSaveSettings, useStatus, useUpdateStatus } from "@/lib/queries"
+import { useCheckUpdate, useOnlineProviders, useSaveSettings, useSharing, useStatus, useUpdateStatus } from "@/lib/queries"
 import { exampleMpvPath, installHint, installSource, platformName } from "@/lib/platform"
 import type { Tool } from "@/lib/platform"
 import { canInstallPrograms, useInstallPrograms, useWatchSetup } from "@/lib/programs"
 import { accentPreviewStore } from "@/lib/store"
-import type { Settings, Status } from "@/lib/types"
+import type { Settings, SharingPeer, Status } from "@/lib/types"
 import { cn, copyText, formatBytes, img, relativeTime } from "@/lib/utils"
 
 type SectionId =
@@ -714,6 +714,114 @@ function UISection({ draft, set }: SectionProps) {
     )
 }
 
+// Library sharing with the Kumo apps on the other computers at home. Turning
+// it on or off and the name are saved with the rest; who gets this
+// computer's library changes at once.
+function SharingGroup({ draft, set }: SectionProps) {
+    const { data: status } = useStatus()
+    const saved = status?.settings.sharing
+    const trusted = status?.client !== "lan"
+    const { data: sharing } = useSharing(!!saved?.enabled)
+    const qc = useQueryClient()
+    const [address, setAddress] = useState("")
+    const [adding, setAdding] = useState(false)
+    const call = async (fn: () => Promise<unknown>) => {
+        try {
+            await fn()
+            qc.invalidateQueries({ queryKey: ["sharing"] })
+        } catch (e: any) {
+            toast.error(e.message)
+        }
+    }
+    const add = async () => {
+        if (!address.trim()) return
+        setAdding(true)
+        await call(async () => {
+            const p = await api.post<SharingPeer>("/api/sharing/connect", { address })
+            toast.success(`Found ${p.name}`)
+            setAddress("")
+        })
+        setAdding(false)
+    }
+    const peers = sharing?.peers ?? []
+    return (
+        <Group
+            title="Library sharing"
+            description="Watch the libraries of Kumo on your other computers at home, and share yours with them. Each computer decides who gets its library. Watching updates the AniList account (or local list) of the computer you watch on, never the other's."
+        >
+            <Row label="Library sharing" help="Find the Kumo apps on this network, and let them find this one. Turn it on on both computers.">
+                <Switch checked={draft.sharing.enabled} disabled={!trusted} onChange={v => set("sharing", { enabled: v })} />
+            </Row>
+            {draft.sharing.enabled && (
+                <Stack label="Name on the network" help="What the other Kumo apps call this one.">
+                    <Input value={draft.sharing.name} disabled={!trusted} placeholder={sharing?.name || "This computer's name"} onChange={e => set("sharing", { name: e.target.value })} />
+                </Stack>
+            )}
+            {draft.sharing.enabled !== !!saved?.enabled && <p className="px-4 py-3 text-xs text-amber-200/80">Save to turn library sharing {draft.sharing.enabled ? "on" : "off"}.</p>}
+            {saved?.enabled && sharing && (
+                <>
+                    <div className="px-4 pt-3.5 pb-1">
+                        <p className="text-sm font-medium">Kumo apps on this network</p>
+                        <p className="mt-0.5 text-xs text-subtle">
+                            Turn on <b>Share my library</b> for those that may watch this computer's anime.
+                            {sharing.addresses.length > 0 && <> This computer is at {sharing.addresses.join(", ")}.</>}
+                        </p>
+                    </div>
+                    {peers.length === 0 && (
+                        <p className="px-4 py-3 text-sm text-muted">
+                            {sharing.listening ? "Looking for Kumo apps… Turn on library sharing on the other computer too." : "This computer can't listen for the others (another program uses the network port): add them by address below."}
+                        </p>
+                    )}
+                    {peers.map(p => (
+                        <div key={p.id} className="flex items-center justify-between gap-4 px-4 py-3.5">
+                            <div className="min-w-0">
+                                <p className="flex items-center gap-2 text-sm font-medium">
+                                    <span className={cn("size-2 shrink-0 rounded-full", p.online ? "bg-emerald-400" : "bg-white/20")} />
+                                    <span className="truncate">{p.name}</span>
+                                </p>
+                                <p className="mt-0.5 text-xs text-subtle">
+                                    {[
+                                        p.address,
+                                        !p.online && p.lastSeen > 0 && `seen ${relativeTime(p.lastSeen)}`,
+                                        p.shares && `shares its library with you${p.files ? ` (${p.files} ${p.files === 1 ? "file" : "files"})` : ""}`,
+                                        p.error,
+                                    ]
+                                        .filter(Boolean)
+                                        .join(" · ")}
+                                </p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-3">
+                                <span className="text-xs text-muted">Share my library</span>
+                                <Switch checked={p.allowed} disabled={!trusted} onChange={v => call(() => api.post(`/api/sharing/peers/${p.id}`, { allowed: v }))} />
+                                {!p.online && trusted && (
+                                    <button
+                                        onClick={() => call(() => api.del(`/api/sharing/peers/${p.id}`))}
+                                        className="grid size-8 place-items-center rounded-lg text-muted hover:bg-white/[0.06] hover:text-rose-300"
+                                        aria-label={`Remove ${p.name}`}
+                                        title="Remove"
+                                    >
+                                        <X className="size-4" />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                    {trusted && (
+                        <Stack label="Add by address" help="When the computers don't find each other by themselves (some routers block it): the other computer's address, shown in its settings here.">
+                            <div className="flex gap-2">
+                                <Input value={address} onChange={e => setAddress(e.target.value)} onKeyDown={e => e.key === "Enter" && add()} placeholder="192.168.1.20:43211" />
+                                <Button onClick={add} loading={adding} disabled={!address.trim()}>
+                                    Add
+                                </Button>
+                            </div>
+                        </Stack>
+                    )}
+                </>
+            )}
+        </Group>
+    )
+}
+
 function LibrarySection({ draft, set }: SectionProps) {
     const extra = draft.library.extraDirs ?? []
     return (
@@ -748,6 +856,7 @@ function LibrarySection({ draft, set }: SectionProps) {
                     <Switch checked={draft.library.refreshOnStartup} onChange={v => set("library", { refreshOnStartup: v })} />
                 </Row>
             </Group>
+            <SharingGroup draft={draft} set={set} />
             <Collapsible title="Advanced">
                 <Stack label={`Matching threshold — ${Math.round(draft.library.matchThreshold * 100)}%`} help="How similar a file name must be to an AniList title to match automatically.">
                     <input type="range" min={0.3} max={0.95} step={0.05} value={draft.library.matchThreshold} onChange={e => set("library", { matchThreshold: Number(e.target.value) })} className="accent-[var(--brand)]" />

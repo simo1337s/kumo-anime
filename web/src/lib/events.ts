@@ -38,6 +38,10 @@ export function connectEvents(qc: QueryClient) {
                 qc.invalidateQueries({ queryKey: ["collection"] })
                 qc.invalidateQueries({ queryKey: ["library"] })
                 qc.invalidateQueries({ queryKey: ["entry"] })
+                qc.invalidateQueries({ queryKey: ["sharing", "libraries"] })
+                break
+            case "sharing-updated":
+                qc.invalidateQueries({ queryKey: ["sharing"] })
                 break
             case "collection-updated":
                 qc.invalidateQueries({ queryKey: ["collection"] })

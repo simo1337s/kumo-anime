@@ -46,7 +46,7 @@ export default function EntryPage() {
         document.getElementById("main-scroll")?.scrollTo({ top: 0 })
     }, [id])
 
-    const defaultTab: Tab = entry ? (entry.localCount > 0 ? "episodes" : status?.settings.onlineStream.enabled !== false ? "stream" : "torrents") : "episodes"
+    const defaultTab: Tab = entry ? (entry.localCount + (entry.sharedCount ?? 0) > 0 ? "episodes" : status?.settings.onlineStream.enabled !== false ? "stream" : "torrents") : "episodes"
     const tab = (params.get("tab") as Tab) || defaultTab
     const setTab = (t: Tab) =>
         setParams(
@@ -69,7 +69,7 @@ export default function EntryPage() {
     }
 
     const tabs: { value: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
-        { value: "episodes", label: "Library", icon: <HardDrive className="size-4" />, count: entry.localCount || undefined },
+        { value: "episodes", label: "Library", icon: <HardDrive className="size-4" />, count: entry.localCount + (entry.sharedCount ?? 0) || undefined },
         ...(status?.settings.onlineStream.enabled !== false ? [{ value: "stream" as Tab, label: "Watch online", icon: <Tv className="size-4" /> }] : []),
         { value: "torrents", label: "Torrents", icon: <Magnet className="size-4" /> },
         { value: "details", label: "Details", icon: <Info className="size-4" /> },
@@ -295,7 +295,7 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
                         image={ep.image}
                         number={ep.number}
                         title={media.format === "MOVIE" ? title(media) : ep.title || `Episode ${ep.number}`}
-                        subtitle={ep.file ? ep.file.name : `Episode ${ep.number}${ep.airDate ? ` · ${ep.airDate}` : ""}`}
+                        subtitle={ep.file ? (ep.file.hostName ? `On ${ep.file.hostName} · ${ep.file.name}` : ep.file.name) : `Episode ${ep.number}${ep.airDate ? ` · ${ep.airDate}` : ""}`}
                         runtime={ep.runtime}
                         watched={ep.watched}
                         hasFile={ep.hasFile}

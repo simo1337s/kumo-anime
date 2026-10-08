@@ -16,12 +16,14 @@ import (
 	"github.com/simo1337s/animetest/server/internal/anicli"
 	"github.com/simo1337s/animetest/server/internal/anilist"
 	"github.com/simo1337s/animetest/server/internal/config"
+	"github.com/simo1337s/animetest/server/internal/share"
 	"github.com/simo1337s/animetest/server/internal/stream"
 	"github.com/simo1337s/animetest/server/internal/util"
 )
 
 func (s *Server) routes() {
 	m := s.mux
+	s.peerRoutes()
 
 	// --- core
 	m.HandleFunc("GET /api/status", h(s.status))
@@ -82,47 +84,57 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/history", h(s.clearHistory))
 
 	// --- in-app player helpers
-	m.HandleFunc("GET /api/local/probe", h(func(r *http.Request) (any, error) {
-		return s.app.Local.Probe(r.Context(), r.URL.Query().Get("path"))
-	}))
+	// A shared file's requests go to its host (see sharing.go).
+	m.HandleFunc("GET /api/local/probe", func(w http.ResponseWriter, r *http.Request) {
+		if !s.forwardShared(w, r, "probe") {
+			h(func(r *http.Request) (any, error) { return s.app.Local.Probe(r.Context(), r.URL.Query().Get("path")) })(w, r)
+		}
+	})
 	m.HandleFunc("GET /api/local/file", func(w http.ResponseWriter, r *http.Request) {
-		s.app.Local.ServeFile(w, r, r.URL.Query().Get("path"))
+		if !s.forwardShared(w, r, "file") {
+			s.localFile(w, r)
+		}
 	})
 	m.HandleFunc("GET /api/local/transcode", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		start, _ := strconv.ParseFloat(q.Get("start"), 64)
-		audio, _ := strconv.Atoi(q.Get("audio"))
-		s.app.Local.ServeTranscode(w, r, q.Get("path"), start, audio, q.Get("method"), stream.ParseCaps(q.Get("caps")))
-	})
-	m.HandleFunc("GET /api/local/seekpoint", h(func(r *http.Request) (any, error) {
-		q := r.URL.Query()
-		t, _ := strconv.ParseFloat(q.Get("t"), 64)
-		audio, _ := strconv.Atoi(q.Get("audio"))
-		start, err := s.app.Local.SeekPoint(r.Context(), q.Get("path"), t, audio, q.Get("method"), stream.ParseCaps(q.Get("caps")), q.Get("hls") == "1")
-		if err != nil {
-			return nil, err
+		if !s.forwardShared(w, r, "transcode") {
+			s.localTranscode(w, r)
 		}
-		return map[string]float64{"start": start}, nil
-	}))
+	})
+	m.HandleFunc("GET /api/local/seekpoint", func(w http.ResponseWriter, r *http.Request) {
+		if !s.forwardShared(w, r, "seekpoint") {
+			h(s.localSeekPoint)(w, r)
+		}
+	})
 	// HLS, for Safari and iPhone/iPad (see stream.HLS).
 	m.HandleFunc("POST /api/local/hls", h(func(r *http.Request) (any, error) {
 		var req stream.HLSRequest
 		if err := decode(r, &req); err != nil {
 			return nil, err
 		}
+		if share.IsRemote(req.Path) {
+			return s.app.Share.StartHLS(r.Context(), req)
+		}
 		return s.app.HLS.Start(r.Context(), req)
 	}))
 	m.HandleFunc("GET /api/local/hls/{id}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if id := r.PathValue("id"); share.IsRemoteSession(id) {
+			s.app.Share.ForwardHLS(w, r, id, r.PathValue("name"))
+			return
+		}
 		s.app.HLS.Serve(w, r, r.PathValue("id"), r.PathValue("name"))
 	})
 	m.HandleFunc("DELETE /api/local/hls/{id}", h(func(r *http.Request) (any, error) {
+		if id := r.PathValue("id"); share.IsRemoteSession(id) {
+			s.app.Share.StopHLS(r.Context(), id)
+			return nil, nil
+		}
 		s.app.HLS.Stop(r.PathValue("id"))
 		return nil, nil
 	}))
 	m.HandleFunc("GET /api/local/subtitle", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		idx, _ := strconv.Atoi(q.Get("index"))
-		s.app.Local.ServeSubtitle(w, r, q.Get("path"), idx, q.Get("external"))
+		if !s.forwardShared(w, r, "subtitle") {
+			s.localSubtitle(w, r)
+		}
 	})
 	m.HandleFunc("GET /api/proxy", stream.ServeProxy)
 	m.Handle("GET /api/img", s.app.Images)
@@ -335,6 +347,8 @@ func (s *Server) saveSettings(r *http.Request) (any, error) {
 		// pointing the client at another host would send it the password.
 		next.Qbittorrent, next.Transmission = cur.Qbittorrent, cur.Transmission
 		next.Library.Dir, next.Library.ExtraDirs = cur.Library.Dir, cur.Library.ExtraDirs
+		// Who this computer's library is shared with is its own business.
+		next.Sharing = cur.Sharing
 	}
 	// Turning off the web UI from a browser would lock the browser out.
 	if kindOf(r) != clientShell && !next.Server.WebUI && cur.Server.WebUI && !s.ForceWebUI {

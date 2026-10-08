@@ -41,10 +41,10 @@ func New(a *app.App, ui fs.FS) *Server {
 }
 
 // ListenAddr computes the bind address from the settings: loopback only
-// unless LAN access is enabled.
+// unless LAN access or library sharing is enabled.
 func ListenAddr(cfg config.Settings) string {
 	host := "127.0.0.1"
-	if cfg.Server.AllowLAN {
+	if cfg.Server.AllowLAN || cfg.Sharing.Enabled {
 		host = "0.0.0.0"
 	}
 	return fmt.Sprintf("%s:%d", host, cfg.Server.Port)
@@ -216,6 +216,11 @@ func (s *Server) webUIEnabled() bool {
 
 func (s *Server) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Other Kumo apps (library sharing) are checked apart from browsers.
+		if strings.HasPrefix(r.URL.Path, "/api/peer/") {
+			s.servePeer(w, r, next)
+			return
+		}
 		cfg := s.app.Settings.Get()
 		ip := clientIP(r)
 		var kind clientKind

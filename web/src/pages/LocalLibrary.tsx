@@ -1,4 +1,4 @@
-import { Check, CheckCheck, ChevronDown, FolderOpen, FolderSearch, FolderSync, HardDrive, Info, LayoutGrid, List as ListIcon, Play, Search, Settings2 } from "lucide-react"
+import { Check, CheckCheck, ChevronDown, FolderOpen, FolderSearch, FolderSync, HardDrive, Info, LayoutGrid, List as ListIcon, Play, Search, Settings2, Share2 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "@/lib/toast"
@@ -9,7 +9,7 @@ import { Badge, Button, EmptyState, IconButton, Input, Progress, Select, Tabs, T
 import { api } from "@/lib/api"
 import { usePersisted } from "@/lib/hooks"
 import { usePlay } from "@/lib/play"
-import { useCollection, useEpisodeMarker, useLibraryFiles, useScan, useStatus } from "@/lib/queries"
+import { useCollection, useEpisodeMarker, useLibraryFiles, useScan, useSharedLibraries, useStatus } from "@/lib/queries"
 import { scanStore, useStore } from "@/lib/store"
 import type { CollectionItem, LocalFile } from "@/lib/types"
 import { banner, cn, cover, entryUrl, formatBytes, formatLabel, LIST_STATUS, mostCommon, relativeTime, title, totalEpisodes } from "@/lib/utils"
@@ -101,7 +101,12 @@ function buildGroups(items: CollectionItem[], files: LocalFile[]): Group[] {
 export default function LocalLibraryPage() {
     const { data: status } = useStatus()
     const { data: coll, isLoading: collLoading, error } = useCollection()
-    const { data: files, isLoading: filesLoading } = useLibraryFiles()
+    const { data: localFiles, isLoading: filesLoading } = useLibraryFiles()
+    // The libraries other Kumo apps on the network share with this one.
+    const { data: shared } = useSharedLibraries()
+    const [source, setSource] = usePersisted<string>("kumo-local-source", "local")
+    const host = source === "local" ? undefined : shared?.find(l => l.host.id === source)
+    const files = host ? host.files : localFiles
     const scan = useScan()
     const scanning = useStore(scanStore, s => s.running)
     const scanState = useStore(scanStore)
@@ -194,27 +199,42 @@ export default function LocalLibraryPage() {
                 <div className="flex flex-wrap items-end justify-between gap-6">
                     <div>
                         <h1 className="text-[1.75rem] font-semibold tracking-tight">Local library</h1>
-                        <p className="mt-1 text-muted">Only anime you have downloaded on this computer.</p>
+                        <p className="mt-1 text-muted">
+                            {host ? `Shared by ${host.host.name} over your network${host.host.online ? "" : " (not answering right now)"}.` : "Only anime you have downloaded on this computer."}
+                        </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                        {trusted && libraryDir && (
-                            <IconButton label="Open library folder" variant="subtle" onClick={() => openFolder(libraryDir)}>
-                                <FolderOpen className="size-4" />
+                    {!host && (
+                        <div className="flex items-center gap-2">
+                            {trusted && libraryDir && (
+                                <IconButton label="Open library folder" variant="subtle" onClick={() => openFolder(libraryDir)}>
+                                    <FolderOpen className="size-4" />
+                                </IconButton>
+                            )}
+                            <IconButton label="Library tools (fix matches, ignored files)" variant="subtle" onClick={() => navigate("/library")}>
+                                <Settings2 className="size-4" />
                             </IconButton>
-                        )}
-                        <IconButton label="Library tools (fix matches, ignored files)" variant="subtle" onClick={() => navigate("/library")}>
-                            <Settings2 className="size-4" />
-                        </IconButton>
-                        <Button variant="primary" loading={scanning || scan.isPending} icon={<FolderSync className="size-4" />} onClick={() => scan.mutate(false)}>
-                            {scanning ? "Scanning…" : "Scan for new files"}
-                        </Button>
-                    </div>
+                            <Button variant="primary" loading={scanning || scan.isPending} icon={<FolderSync className="size-4" />} onClick={() => scan.mutate(false)}>
+                                {scanning ? "Scanning…" : "Scan for new files"}
+                            </Button>
+                        </div>
+                    )}
                 </div>
+                {!!shared?.length && (
+                    <Tabs
+                        className="mt-6"
+                        value={host ? source : "local"}
+                        onChange={setSource}
+                        tabs={[
+                            { value: "local", label: "This computer", icon: <HardDrive className="size-4" /> },
+                            ...shared.map(l => ({ value: l.host.id, label: l.host.name, icon: <Share2 className="size-4" /> })),
+                        ]}
+                    />
+                )}
                 <div className="mt-6 flex flex-wrap items-center gap-x-8 gap-y-3">
                     <Stat label="Anime" value={loading ? "…" : String(groups.length)} />
                     <Stat label="Episodes" value={loading ? "…" : String(totals.episodes)} />
-                    <Stat label="On disk" value={loading ? "…" : formatBytes(totals.size)} />
-                    {!!coll?.unmatchedCount && (
+                    <Stat label={host ? "Size" : "On disk"} value={loading ? "…" : formatBytes(totals.size)} />
+                    {!host && !!coll?.unmatchedCount && (
                         <Link to="/library?tab=unmatched" className="flex items-center gap-2 rounded-lg bg-amber-400/10 px-3 py-2 text-sm text-amber-200 transition-colors hover:bg-amber-400/15">
                             <FolderSearch className="size-4" />
                             {coll.unmatchedCount} unmatched {coll.unmatchedCount === 1 ? "file" : "files"} — fix
@@ -242,7 +262,13 @@ export default function LocalLibraryPage() {
                     </div>
                 )}
 
-                {!loading && !scanning && groups.length === 0 && !error && (
+                {host && !loading && groups.length === 0 && (
+                    <EmptyState icon={<Share2 className="size-6" />} title="Nothing to show yet">
+                        {host.host.name} shares {host.files.length} {host.files.length === 1 ? "file" : "files"}; their anime show here once AniList answers.
+                    </EmptyState>
+                )}
+
+                {!host && !loading && !scanning && groups.length === 0 && !error && (
                     <EmptyState
                         icon={<HardDrive className="size-6" />}
                         title={libraryDir ? "No downloaded anime yet" : "Choose your library folder"}
@@ -354,7 +380,7 @@ export default function LocalLibraryPage() {
                         ) : (
                             <div className="flex flex-col gap-3">
                                 {shown.map(g => (
-                                    <LibraryRow key={g.item.media.id} group={g} trusted={trusted} onOpen={openFolder} onPlay={f => playLocal(f.path, f.mediaId, f.episode)} />
+                                    <LibraryRow key={g.item.media.id} group={g} trusted={trusted && !host} onOpen={openFolder} onPlay={f => playLocal(f.path, f.mediaId, f.episode)} />
                                 ))}
                             </div>
                         )}

@@ -19,6 +19,7 @@ import (
 	"github.com/simo1337s/animetest/server/internal/library"
 	"github.com/simo1337s/animetest/server/internal/manga"
 	"github.com/simo1337s/animetest/server/internal/player"
+	"github.com/simo1337s/animetest/server/internal/share"
 	"github.com/simo1337s/animetest/server/internal/stream"
 	"github.com/simo1337s/animetest/server/internal/torrent"
 	"github.com/simo1337s/animetest/server/internal/util"
@@ -386,6 +387,9 @@ func (s *Server) playLocal(r *http.Request) (any, error) {
 	if err := decode(r, &body); err != nil {
 		return nil, err
 	}
+	if share.IsRemote(body.Path) {
+		return s.playShared(r, body)
+	}
 	f, err := s.app.Files.Get(body.Path)
 	if err != nil {
 		return nil, notFound("file not in library")
@@ -415,6 +419,11 @@ func (s *Server) playLocal(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.builtinPlay(body, probe, title), nil
+}
+
+// builtinPlay is what the in-app player needs to open an episode.
+func (s *Server) builtinPlay(body playLocalBody, probe *stream.Probe, title string) map[string]any {
 	s.app.Local.Decide(probe, stream.CapsOf(body.Caps))
 	// The in-app player opens the episode: a new viewing, which may update
 	// progress again (rewatch).
@@ -426,7 +435,7 @@ func (s *Server) playLocal(r *http.Request) (any, error) {
 	return map[string]any{
 		"player": "builtin", "probe": probe, "title": title, "resumeAt": resume,
 		"mediaId": body.MediaID, "episode": body.Episode, "tracks": s.app.Player.Tracks.Get(body.MediaID),
-	}, nil
+	}
 }
 
 type playStreamBody struct {

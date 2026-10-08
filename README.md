@@ -13,6 +13,7 @@
 - Works with **every video format**: mkv, mp4, avi, webm, mov, wmv, flv, ts/m2ts, ogm, rmvb, vob, 3gp, divx and more.
 - **Auto refresh**: watches the folders and rescans when files appear, and refreshes on startup.
 - **Local library** page with only the anime you have on disk: recently added, filters by list status, sort by added/unwatched/size, grid or list view with downloaded episode ranges, size, resolution and release group, and one-click "play next".
+- **Library sharing** between the Kumo apps on your computers at home: they find each other by themselves (or by address). On the computer with the anime, turn on **Share my library** for the others in **Settings › Local Anime Library › Library sharing**: its anime show up on theirs (a tab on the Local library page, and on each anime's page) and play like local files, converted by the computer that has them when needed. Watching updates the list (AniList or local) of the computer you watch on, never the other's.
 - Library tools to fix matches by hand, change episode numbers, lock files and ignore junk.
 - Safe with removable drives: an unplugged or unmounted library folder keeps its matches; symlinked folders are followed.
 - **Artwork & metadata**: covers, banners, fanart, descriptions, genres, studios, characters, relations, recommendations, **episode titles, summaries and thumbnails** (AniList + ani.zip). All artwork is **downloaded to a local cache**, so it loads instantly and still shows offline.
@@ -47,7 +48,7 @@
 - **UI plugins**: trays, anime-page buttons, webviews, toasts, storage, AniList access, `$ui.register`, `ctx.state/effect/fieldRef`, … All 15 most-starred marketplace plugins load. Plugins that rewrite the app's own pages (`ctx.dom`) or need file/command access only partly work, because Kumo deliberately doesn't allow either.
 - **Manga** reader (long strip, single pages or two-page spreads, LTR / RTL) using manga provider extensions.
 
-**Extras**: updates itself from the Home page, Discord rich presence (local IPC), accent colours, spoiler blur, Ctrl+K quick search, server logs and cache viewer.
+**Extras**: keeps running in the tray (or the Dock) when its window is closed, so streaming to other devices and downloads go on; updates itself from the Home page, Discord rich presence (local IPC), accent colours, spoiler blur, Ctrl+K quick search, server logs and cache viewer.
 
 ## Closed network by design
 
@@ -56,6 +57,7 @@
 | The desktop window | Always (authenticated with a per-run token) |
 | A browser on this PC | Only when **Settings › App › Web UI** is on (`http://127.0.0.1:43211`) |
 | Devices on your home network | Only when **Allow devices on my network** is on. They can be password protected, and can't change paths/programs or browse folders. |
+| Kumo on your other computers | With **Library sharing** on: they see it, and only those you turn on get the library, and nothing else (each Kumo has its own key pair; requests are signed, and play only files of the library). |
 | Anything on the internet | **Never** (connections from public IP addresses are refused) |
 
 The server also rejects other websites' requests (Origin check) and DNS rebinding tricks (Host check). Extensions and the stream/image proxies can't connect to localhost or your LAN. Plugins get no file or command access. Nothing is sent anywhere except the services you use (AniList, ani.zip, AniSkip, the torrent and stream sites you search).

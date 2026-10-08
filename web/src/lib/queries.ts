@@ -17,6 +17,8 @@ import type {
     PluginState,
     ScheduleItem,
     Settings,
+    SharedLibrary,
+    SharingStatus,
     Status,
     StreamEpisodes,
     Torrent,
@@ -180,6 +182,16 @@ export function useDiscover() {
             return d && Date.now() / 1000 - d.fetchedAt > 30 * 60 && q.state.dataUpdateCount < 4 ? 4000 : false
         },
     })
+}
+
+// Library sharing: the Kumo apps on the network (asked again while shown).
+export function useSharing(enabled = true) {
+    return useQuery({ queryKey: ["sharing", "status"], queryFn: () => api.get<SharingStatus>("/api/sharing"), enabled, refetchInterval: 4000 })
+}
+
+// The libraries other Kumo apps share with this one.
+export function useSharedLibraries() {
+    return useQuery({ queryKey: ["sharing", "libraries"], queryFn: () => api.get<SharedLibrary[]>("/api/sharing/libraries"), refetchInterval: 30_000 })
 }
 
 export function useSchedule(days = 7) {

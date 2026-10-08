@@ -91,6 +91,9 @@ export type LocalFile = {
     locked: boolean
     ignored: boolean
     matchScore: number
+    // Shared by another Kumo app on the network (path kumo://<host>/…).
+    host?: string
+    hostName?: string
 }
 
 export type HistoryEntry = {
@@ -126,6 +129,7 @@ export type EntryView = {
     others: EpisodeView[] | null
     nextEpisode: EpisodeView | null
     localCount: number
+    sharedCount: number // files other Kumo apps share
     images: { banner: string; poster: string; fanart: string; clearlogo: string }
     mappings: { malId: number; anidbId: number; tvdbId: number }
     metadataNote?: string
@@ -213,6 +217,7 @@ export type Settings = {
     manga: { enabled: boolean; defaultProvider: string; readingMode: "long-strip" | "paged" | "double"; direction: string }
     anilist: { clientId: string; hideAdult: boolean }
     server: { host: string; port: number; allowLan: boolean; password: string; webUi: boolean }
+    sharing: { enabled: boolean; name: string }
     ui: {
         accentColor: string
         showAdult: boolean
@@ -567,3 +572,22 @@ export type UpdateStatus = {
     log: string[] | null // the last output lines
     manualCommand?: string // a command to run in a terminal
 }
+
+// Library sharing with other Kumo apps on the network.
+export type SharingPeer = {
+    id: string
+    name: string
+    address: string
+    online: boolean
+    lastSeen: number
+    version: string
+    allowed: boolean // this Kumo shares its library with it
+    shares: boolean // it shares its library with this Kumo
+    files: number
+    manual: boolean
+    error?: string
+}
+
+export type SharingStatus = { enabled: boolean; id: string; name: string; listening: boolean; peers: SharingPeer[]; addresses: string[] }
+
+export type SharedLibrary = { host: SharingPeer; files: LocalFile[] }

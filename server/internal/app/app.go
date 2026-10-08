@@ -30,6 +30,7 @@ import (
 	"github.com/simo1337s/animetest/server/internal/manga"
 	"github.com/simo1337s/animetest/server/internal/metadata"
 	"github.com/simo1337s/animetest/server/internal/player"
+	"github.com/simo1337s/animetest/server/internal/share"
 	"github.com/simo1337s/animetest/server/internal/stream"
 	"github.com/simo1337s/animetest/server/internal/torrent"
 	"github.com/simo1337s/animetest/server/internal/update"
@@ -54,6 +55,7 @@ type App struct {
 	Stream     *stream.Service
 	Local      *stream.Local
 	HLS        *stream.HLS
+	Share      *share.Service
 	Manga      *manga.Service
 	Discord    *discord.Client
 	Images     *images.Cache
@@ -135,6 +137,11 @@ func New(dataDir string) (*App, error) {
 		ctx: ctx, cancel: cancel, DataDir: dataDir,
 	}
 	a.HLS = stream.NewHLS(a.Local, hlsDir(dataDir))
+	if a.Share, err = share.New(d, settings, files, hub); err != nil {
+		return nil, fmt.Errorf("library sharing: %w", err)
+	}
+	// Libraries other Kumo apps share with this one show with its own.
+	lib.Remote = a.Share.RemoteFiles
 	a.ShellToken = randomToken()
 	a.wire()
 	return a, nil
@@ -306,6 +313,7 @@ func pickSource(srcs []stream.Source, quality string) stream.Source {
 
 // Start runs the background jobs.
 func (a *App) Start() {
+	a.Share.Start()
 	a.Extensions.LoadAll()
 	a.Downloads.Start()
 	a.Update.Start()
@@ -340,6 +348,7 @@ func (a *App) Start() {
 
 func (a *App) Shutdown() {
 	a.cancel()
+	a.Share.Stop()
 	a.Update.Stop()
 	a.HLS.Close()
 	a.Scanner.StopWatcher()

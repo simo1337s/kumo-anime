@@ -25,6 +25,10 @@ type LocalFile struct {
 	Locked       bool    `json:"locked"`
 	Ignored      bool    `json:"ignored"`
 	MatchScore   float64 `json:"matchScore"`
+	// Host: another Kumo on the network shares this file (see package
+	// share); its path is kumo://<host>/<path there>. Never stored.
+	Host     string `json:"host,omitempty"`
+	HostName string `json:"hostName,omitempty"`
 }
 
 type Store struct{ db *db.DB }

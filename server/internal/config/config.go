@@ -68,6 +68,7 @@ type Settings struct {
 	Manga        MangaSettings        `json:"manga"`
 	Anilist      AnilistSettings      `json:"anilist"`
 	Server       ServerSettings       `json:"server"`
+	Sharing      SharingSettings      `json:"sharing"`
 	UI           UISettings           `json:"ui"`
 	Discord      DiscordSettings      `json:"discord"`
 	Extensions   ExtensionSettings    `json:"extensions"`
@@ -169,6 +170,15 @@ type AnilistSettings struct {
 	ClientID string `json:"clientId"`
 	// Hide adult entries everywhere.
 	HideAdult bool `json:"hideAdult"`
+}
+
+// SharingSettings: library sharing with other Kumo apps on the home network
+// (package share). Which ones this one shares its library with is kept
+// with the Kumos it knows, not here.
+type SharingSettings struct {
+	Enabled bool `json:"enabled"`
+	// Name: what the others call this Kumo (empty: the computer's name).
+	Name string `json:"name"`
 }
 
 type ServerSettings struct {
