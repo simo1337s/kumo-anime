@@ -35,7 +35,7 @@ import { toast } from "@/lib/toast"
 import { LoginDialog } from "@/components/LoginDialog"
 import { Badge, Button, Dialog, Input, Select, Switch, Textarea } from "@/components/ui"
 import { versionName } from "@/components/UpdateBanner"
-import { api } from "@/lib/api"
+import { api, desktop, type DesktopPrefs } from "@/lib/api"
 import { useCheckUpdate, useOnlineProviders, useSaveSettings, useStatus, useUpdateStatus } from "@/lib/queries"
 import { exampleMpvPath, installHint, installSource, platformName } from "@/lib/platform"
 import type { Tool } from "@/lib/platform"
@@ -542,6 +542,8 @@ function AppSection({ draft, set }: SectionProps) {
                 {!isDesktop && !lan && <p className="px-4 py-3 text-xs text-amber-200/80">Turning the Web UI off is only possible from the desktop app, so you can't lock yourself out.</p>}
             </Group>
 
+            <DesktopGroup />
+
             <ProgramsGroup />
 
             <Group title="Extensions">
@@ -559,6 +561,45 @@ function AppSection({ draft, set }: SectionProps) {
             </Group>
             <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
         </>
+    )
+}
+
+// The desktop app's own settings, saved by the app itself (they take effect
+// at once, no Save).
+function DesktopGroup() {
+    const bridge = desktop()
+    const [prefs, setPrefs] = useState<DesktopPrefs | null>(null)
+    useEffect(() => {
+        bridge?.getPrefs?.().then(setPrefs, () => {})
+    }, [bridge])
+    if (!bridge?.setPref || !prefs) return null
+    const mac = bridge.platform === "darwin"
+    const change = async (name: keyof DesktopPrefs, value: boolean) => {
+        setPrefs({ ...prefs, [name]: value })
+        if (!(await bridge.setPref!(name, value).catch(() => false))) {
+            setPrefs(prefs)
+            toast.error("Couldn't change that setting")
+        }
+    }
+    return (
+        <Group title="Desktop app">
+            <Row
+                label="Keep running when the window is closed"
+                help={
+                    mac
+                        ? "Streaming to your other devices, downloads and the auto downloader keep going, without the window's memory. Click Kumo in the Dock to open it again; quit with Cmd+Q."
+                        : "Streaming to your other devices, downloads and the auto downloader keep going, without the window's memory. Open or quit Kumo from its tray icon, or open it again from the app menu."
+                }
+            >
+                <Switch checked={prefs.keepRunning} onChange={v => change("keepRunning", v)} />
+            </Row>
+            <Row
+                label="Free memory while the computer is locked"
+                help="After 5 minutes locked, the window lets go of the page and loads it again when you unlock. Never while a video, the manga reader or Settings is open."
+            >
+                <Switch checked={prefs.freeWhenLocked} onChange={v => change("freeWhenLocked", v)} />
+            </Row>
+        </Group>
     )
 }
 

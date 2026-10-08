@@ -5,7 +5,7 @@
 // window makes carries the per-run shell token, which is how the server
 // recognises its own desktop window when the browser Web UI is turned off.
 
-const { app, BrowserWindow, ipcMain, shell, session, Menu, dialog, nativeImage } = require("electron")
+const { app, BrowserWindow, ipcMain, shell, session, Menu, dialog, nativeImage, Tray, Notification, powerMonitor } = require("electron")
 const { spawn } = require("node:child_process")
 const fs = require("node:fs")
 const os = require("node:os")
@@ -53,6 +53,33 @@ const runtimeDir = serverRuntimeDir()
 let serverProc = null
 let mainWindow = null
 let baseUrl = null
+let tray = null
+
+// The desktop app's own preferences (Settings › App › Desktop app), kept
+// next to its browser data.
+//   keepRunning     closing the window leaves Kumo running (tray icon, or the
+//                   Dock on a Mac): streaming to other devices, downloads and
+//                   the auto downloader keep going without the window's
+//                   memory.
+//   freeWhenLocked  a few minutes after the computer is locked, the window
+//                   lets go of its page, and loads it again on unlocking.
+//   toldKeepRunning the notice about it was shown (the first time).
+const prefs = { keepRunning: true, freeWhenLocked: true, toldKeepRunning: false }
+const prefsFile = () => path.join(app.getPath("userData"), "desktop.json")
+
+function loadPrefs() {
+    const saved = readJSON(prefsFile()) || {}
+    for (const k of Object.keys(prefs)) if (typeof saved[k] === typeof prefs[k]) prefs[k] = saved[k]
+}
+
+function savePrefs() {
+    try {
+        fs.mkdirSync(path.dirname(prefsFile()), { recursive: true })
+        fs.writeFileSync(prefsFile(), JSON.stringify(prefs, null, 2))
+    } catch (err) {
+        console.error("desktop preferences:", err)
+    }
+}
 
 // Where the server writes server.json and the shell token: the same folder
 // as its config.RuntimeDir().
@@ -195,7 +222,16 @@ function startServer() {
             if (!resolved) reject(new Error(`The Kumo server exited (code ${code}).`))
             serverProc = null
             if (resolved && !app.isQuitting) {
-                dialog.showErrorBox("Kumo", "The Kumo server stopped unexpectedly. Restart Kumo to continue.")
+                const msg = "The Kumo server stopped unexpectedly. Restart Kumo to continue."
+                if (mainWindow) {
+                    dialog.showErrorBox("Kumo", msg)
+                    return
+                }
+                // Running without a window: no box that would hold up a
+                // shutdown (Windows stops the server first), just a notice.
+                if (Notification.isSupported()) new Notification({ title: "Kumo stopped", body: msg }).show()
+                app.isQuitting = true
+                app.quit()
             }
         })
         setTimeout(() => {
@@ -277,7 +313,10 @@ function createWindow() {
         if (input.type === "keyDown" && input.control && input.shift && input.key.toLowerCase() === "i") mainWindow.webContents.toggleDevTools()
         if (input.type === "keyDown" && input.control && input.key.toLowerCase() === "r") mainWindow.webContents.reload()
     })
-    mainWindow.on("closed", () => (mainWindow = null))
+    mainWindow.on("closed", () => {
+        mainWindow = null
+        parkedUrl = null
+    })
     // Windows is shutting down or signing out, which stops the server too:
     // that isn't worth an error box (the event only exists on Windows).
     mainWindow.on("query-session-end", () => (app.isQuitting = true))
@@ -335,6 +374,92 @@ ipcMain.on("kumo:open-external", (_e, url) => {
     if (typeof url === "string" && /^https?:\/\//.test(url)) shell.openExternal(url)
 })
 
+ipcMain.handle("kumo:get-prefs", () => ({ keepRunning: prefs.keepRunning, freeWhenLocked: prefs.freeWhenLocked }))
+ipcMain.handle("kumo:set-pref", (_e, name, value) => {
+    if (!["keepRunning", "freeWhenLocked"].includes(name) || typeof value !== "boolean") return false
+    prefs[name] = value
+    savePrefs()
+    updateTray()
+    return true
+})
+
+// showWindow brings Kumo's window back, or opens a new one after it was
+// closed while Kumo kept running.
+function showWindow() {
+    if (!baseUrl) return
+    if (!mainWindow) return createWindow()
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+}
+
+// The tray icon, while Kumo keeps running with its window closed (Windows
+// and Linux: on a Mac the Dock icon does it). Without a tray on the
+// desktop (GNOME without an extension), opening Kumo again shows its window.
+function updateTray() {
+    if (isMac) return
+    if (prefs.keepRunning && !tray) {
+        const icon = nativeImage.createFromPath(path.join(__dirname, "icon.png"))
+        tray = new Tray(icon.isEmpty() ? icon : icon.resize({ width: 32, height: 32, quality: "best" }))
+        tray.setToolTip("Kumo")
+        tray.setContextMenu(
+            Menu.buildFromTemplate([
+                { label: "Open Kumo", click: showWindow },
+                { type: "separator" },
+                { label: "Quit Kumo", click: () => app.quit() },
+            ]),
+        )
+        tray.on("click", showWindow)
+    } else if (!prefs.keepRunning && tray) {
+        tray.destroy()
+        tray = null
+    }
+}
+
+// The window was closed and Kumo keeps running: say so, the first time.
+function wentToBackground() {
+    if (prefs.toldKeepRunning || !Notification.isSupported()) return
+    prefs.toldKeepRunning = true
+    savePrefs()
+    new Notification({
+        title: "Kumo is still running",
+        body: isMac
+            ? "Streaming to your other devices and downloads keep going. Click Kumo in the Dock to open it, or quit it with Cmd+Q."
+            : "Streaming to your other devices and downloads keep going. Open or quit Kumo from its tray icon.",
+    }).show()
+}
+
+// Locked computer: after a few minutes the window lets go of its page (the
+// app's memory, cached images…) and loads it again when the computer is
+// unlocked. Not while the player, the manga reader or Settings are open, so
+// nothing is lost.
+const PARK_AFTER = 5 * 60_000
+const PARKED_PAGE = "data:text/html,<body style='background:%230a0a0b'></body>"
+let lockTimer = null
+let parkedUrl = null
+
+async function parkPage() {
+    if (!prefs.freeWhenLocked || !mainWindow || parkedUrl) return
+    const wc = mainWindow.webContents
+    let busy = true
+    try {
+        busy = await wc.executeJavaScript("!!document.querySelector('video') || /^\\/(manga\\/read|settings|webview)/.test(location.pathname)")
+    } catch {
+        /* keep it */
+    }
+    if (busy || !mainWindow || parkedUrl) return
+    parkedUrl = wc.getURL()
+    wc.loadURL(PARKED_PAGE)
+}
+
+function unparkPage() {
+    clearTimeout(lockTimer)
+    if (!parkedUrl) return
+    const url = parkedUrl
+    parkedUrl = null
+    if (mainWindow && isInternal(url)) mainWindow.loadURL(url)
+}
+
 // Desktop shortcuts are copies of kumo.desktop: those made before the icon
 // was renamed kumo-anime (with the new logo) ask for "kumo", which desktops
 // keep showing as the old logo. Point them at the new icon, in place, so
@@ -375,20 +500,33 @@ async function boot() {
     for (let i = 0; i < 50 && !readToken(); i++) await new Promise(r => setTimeout(r, 100))
     installShellHeader()
     createWindow()
+    updateTray()
     updateDesktopShortcuts()
+    powerMonitor.on("lock-screen", () => {
+        clearTimeout(lockTimer)
+        lockTimer = setTimeout(parkPage, PARK_AFTER)
+    })
+    powerMonitor.on("unlock-screen", unparkPage)
+    // Brought back some other way (the screen was never locked by the
+    // system's own lock, a missed event…).
+    app.on("browser-window-focus", unparkPage)
 }
 
 if (!app.requestSingleInstanceLock()) {
     app.quit()
 } else {
-    app.on("second-instance", () => {
-        if (mainWindow) {
-            if (mainWindow.isMinimized()) mainWindow.restore()
-            mainWindow.focus()
-        }
+    // Opening Kumo again shows its window, also after it was closed while
+    // Kumo kept running.
+    app.on("second-instance", showWindow)
+    app.on("activate", showWindow) // the Dock icon (macOS)
+    app.whenReady().then(() => {
+        loadPrefs()
+        return boot()
     })
-    app.whenReady().then(boot)
-    app.on("window-all-closed", () => app.quit())
+    app.on("window-all-closed", () => {
+        if (!prefs.keepRunning || app.isQuitting) return app.quit()
+        wentToBackground()
+    })
     app.on("before-quit", event => {
         app.isQuitting = true
         if (!serverProc) return

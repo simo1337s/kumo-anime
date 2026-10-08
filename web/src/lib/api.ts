@@ -65,7 +65,12 @@ export type DesktopBridge = {
     minimize?: () => void
     toggleMaximize?: () => void
     close?: () => void
+    // Missing in desktop apps older than these settings.
+    getPrefs?: () => Promise<DesktopPrefs>
+    setPref?: (name: keyof DesktopPrefs, value: boolean) => Promise<boolean>
 }
+
+export type DesktopPrefs = { keepRunning: boolean; freeWhenLocked: boolean }
 
 export function desktop(): DesktopBridge | null {
     return (window as any).kumoDesktop ?? null
