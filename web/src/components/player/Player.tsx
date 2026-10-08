@@ -51,7 +51,16 @@ const langIn = (lang: string, list: string) => list.split(",").map(s => normLang
 
 export function PlayerOverlay() {
     const [req, setReq] = useState<PlayerRequest | null>(playerStore.get())
-    useEffect(() => playerStore.subscribe(() => setReq(playerStore.get())), [])
+    useEffect(
+        () =>
+            playerStore.subscribe(() => {
+                // The episode that's playing asked for again: it goes on
+                // playing (a new request object would reload the stream).
+                const next = playerStore.get()
+                setReq(prev => (prev && next && JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+            }),
+        [],
+    )
     if (!req) return null
     return <Player key={JSON.stringify(req)} req={req} onClose={() => playerStore.set(null)} />
 }
@@ -583,15 +592,22 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
     }, [currentSkip?.type, autoSkip])
 
     // -------------------------------------------------------------- keyboard
+    // Keys go to the player, not to what had the focus on the page behind it:
+    // the episode card that opened it plays it again on Space or Enter.
     useEffect(() => {
+        containerRef.current?.focus({ preventScroll: true })
+    }, [])
+    useEffect(() => {
+        // Typing, or in one of the player's menus: the keys are theirs.
+        const theirs = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("input, textarea, select, [contenteditable], [role=menu], [role=listbox]")
         const onKey = (e: KeyboardEvent) => {
-            if ((e.target as HTMLElement)?.tagName === "INPUT") return
+            if (e.ctrlKey || e.metaKey || e.altKey || theirs(e.target)) return
             const v = videoRef.current
+            let handled = true
             switch (e.key) {
                 case " ":
                 case "k":
-                    e.preventDefault()
-                    togglePlay()
+                    if (!e.repeat) togglePlay()
                     break
                 case "ArrowLeft":
                     seekBy(-5)
@@ -606,11 +622,9 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                     seekBy(10)
                     break
                 case "ArrowUp":
-                    e.preventDefault()
                     setVolume(x => Math.min(1, x + 0.05))
                     break
                 case "ArrowDown":
-                    e.preventDefault()
                     setVolume(x => Math.max(0, x - 0.05))
                     break
                 case "f":
@@ -626,15 +640,31 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                     playNext()
                     break
                 case "Escape":
-                    if (!document.fullscreenElement) close()
+                    if (document.fullscreenElement) handled = false
+                    else close()
                     break
                 default:
                     if (/^[0-9]$/.test(e.key) && v) seekTo(((duration || v.duration) * Number(e.key)) / 10)
+                    else handled = false
+            }
+            if (handled) {
+                // The player hears keys first (capture phase): not the page
+                // behind it too, nor a focused button (Space would click it).
+                e.preventDefault()
+                e.stopPropagation()
             }
             poke()
         }
-        window.addEventListener("keydown", onKey)
-        return () => window.removeEventListener("keydown", onKey)
+        // Firefox clicks a focused button when Space comes back up anyway.
+        const onKeyUp = (e: KeyboardEvent) => {
+            if (e.key === " " && !e.ctrlKey && !e.metaKey && !e.altKey && !theirs(e.target)) e.preventDefault()
+        }
+        window.addEventListener("keydown", onKey, true)
+        window.addEventListener("keyup", onKeyUp, true)
+        return () => {
+            window.removeEventListener("keydown", onKey, true)
+            window.removeEventListener("keyup", onKeyUp, true)
+        }
     })
 
     useEffect(() => {
@@ -676,7 +706,8 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
     return (
         <div
             ref={containerRef}
-            className={cn("fixed inset-0 z-[80] bg-black fade-in", !controls && !paused && "cursor-none")}
+            tabIndex={-1}
+            className={cn("fixed inset-0 z-[80] bg-black outline-none fade-in", !controls && !paused && "cursor-none")}
             onMouseMove={poke}
             onClick={e => e.target === e.currentTarget && togglePlay()}
         >
