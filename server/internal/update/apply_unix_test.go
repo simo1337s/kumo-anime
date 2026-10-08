@@ -97,6 +97,14 @@ func readLines(t *testing.T, p string) []string {
 	return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
 }
 
+// realPath resolves the links in a path, when it exists.
+func realPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
+}
+
 func TestApplyLinux(t *testing.T) {
 	out := fakeArch(t, true)
 	gh := linuxUpdate(t)
@@ -116,6 +124,11 @@ func TestApplyLinux(t *testing.T) {
 	mk := readLines(t, filepath.Join(out, "makepkg"))
 	pkgdest := filepath.Join(c.CacheDir, "pkg")
 	want := []string{filepath.Join(c.CacheDir, "src", "o-r-2222222", "packaging", "arch"), "-f --noconfirm --nocheck", headSHA, "1.0.57", pkgdest, "C"}
+	// The folder with its links resolved, as the shell may give it: on
+	// macOS, /var is /private/var.
+	if len(mk) > 0 {
+		mk[0], want[0] = realPath(mk[0]), filepath.Join(realPath(c.CacheDir), "src", "o-r-2222222", "packaging", "arch")
+	}
 	if strings.Join(mk, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("makepkg ran as\n%q\nwant\n%q", mk, want)
 	}
