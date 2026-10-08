@@ -198,12 +198,18 @@ func (p *Platform) RefreshViewer(ctx context.Context) {
 // Collection returns the user's anime ("ANIME") or manga ("MANGA") list. The
 // result may be shared with other callers and must not be modified.
 func (p *Platform) Collection(ctx context.Context, mediaType string, refresh bool) (*Collection, error) {
-	if mediaType == "" {
-		mediaType = "ANIME"
-	}
 	maxAge := 15 * time.Minute
 	if refresh {
 		maxAge = 5 * time.Second // only reuse a fetch that just finished
+	}
+	return p.CollectionWithin(ctx, mediaType, maxAge)
+}
+
+// CollectionWithin is Collection, fetched again when the saved copy is
+// older than maxAge: progress made on another device shows up.
+func (p *Platform) CollectionWithin(ctx context.Context, mediaType string, maxAge time.Duration) (*Collection, error) {
+	if mediaType == "" {
+		mediaType = "ANIME"
 	}
 	for attempt := 1; ; attempt++ {
 		c, retry, err := p.collection(ctx, mediaType, maxAge)

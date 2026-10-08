@@ -43,6 +43,12 @@ export function connectEvents(qc: QueryClient) {
             case "sharing-updated":
                 qc.invalidateQueries({ queryKey: ["sharing"] })
                 break
+            case "history-updated":
+                // Watched on another Kumo of the same account: Continue
+                // watching and the episodes' positions.
+                qc.invalidateQueries({ queryKey: ["collection"] })
+                qc.invalidateQueries({ queryKey: ["entry"] })
+                break
             case "collection-updated":
                 qc.invalidateQueries({ queryKey: ["collection"] })
                 qc.invalidateQueries({ queryKey: ["entry"] })

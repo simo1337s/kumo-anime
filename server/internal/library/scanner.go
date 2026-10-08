@@ -48,8 +48,9 @@ func NewScanner(store *Store, p *anilist.Platform, s *config.Store, hub *events.
 
 // matcherVersion goes up when matching gets better: the files matched
 // automatically before are matched again, once, at the next scan.
-//   2: other seasons kept apart (Code Geass and R2), also when AniList
-//      can't be searched.
+//
+//	2: other seasons kept apart (Code Geass and R2), also when AniList
+//	   can't be searched.
 const (
 	matcherVersion    = 2
 	matcherVersionKey = "library:matcher-version"

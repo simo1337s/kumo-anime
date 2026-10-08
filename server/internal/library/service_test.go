@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/simo1337s/animetest/server/internal/anilist"
 	"github.com/simo1337s/animetest/server/internal/db"
@@ -166,5 +167,34 @@ func TestSharedFilesFillIn(t *testing.T) {
 	items := s.continueWatching(context.Background(), watching(map[int]int{5: 1}), map[int][]*LocalFile{5: all})
 	if len(items) != 1 || items[0].Episode != 2 || !items[0].HasFile || items[0].FilePath != "kumo://h//b/Show - 02.mkv" {
 		t.Errorf("continue watching: %+v", items)
+	}
+}
+
+// Continue watching follows the AniList account: an anime watched on
+// another device (its list entry just updated) comes before one watched
+// here long ago.
+func TestContinueWatchingFollowsTheAccount(t *testing.T) {
+	s := newTestService(t)
+	coll := watching(map[int]int{5: 3, 6: 7})
+	for _, e := range coll.Entries() {
+		e.UpdatedAt = 1000
+		if e.MediaID == 6 {
+			e.UpdatedAt = time.Now().Unix() // an episode watched on another device
+		}
+	}
+	if err := s.History.Save(history.Entry{MediaID: 5, Episode: 4, Position: 100, Duration: 1400, Source: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	// Watched here, but before the other device.
+	if _, err := s.DB.Write(`UPDATE watch_history SET updated_at = ?`, time.Now().Unix()-3600); err != nil {
+		t.Fatal(err)
+	}
+	items := s.continueWatching(context.Background(), coll, nil)
+	if len(items) != 2 || items[0].Media.ID != 6 || items[0].Episode != 8 || items[1].Media.ID != 5 {
+		var got []int
+		for _, it := range items {
+			got = append(got, it.Media.ID)
+		}
+		t.Errorf("continue watching %v, want 6 (episode 8) first", got)
 	}
 }

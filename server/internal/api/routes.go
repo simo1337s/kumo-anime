@@ -482,6 +482,12 @@ func (s *Server) openPath(r *http.Request) (any, error) {
 // Anime
 
 func (s *Server) animeCollection(r *http.Request) (any, error) {
+	// fresh: the list as AniList has it now (another device's progress), at
+	// most a minute old; and the other Kumos asked for their history.
+	if r.URL.Query().Get("fresh") == "1" {
+		_, _ = s.app.Platform.CollectionWithin(r.Context(), "ANIME", time.Minute)
+		s.app.Share.Refresh()
+	}
 	view, err := s.app.Library.Collection(r.Context(), r.URL.Query().Get("refresh") == "1")
 	if err == nil {
 		go s.app.PrefetchCollectionArt(view)

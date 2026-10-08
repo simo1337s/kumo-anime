@@ -409,11 +409,15 @@ func (s *Service) continueWatching(ctx context.Context, coll *anilist.Collection
 		out = append(out, it)
 	}
 
-	// 1) Shows being watched, ordered by most recent activity.
+	// 1) Shows being watched, ordered by most recent activity: on this
+	// computer (or another Kumo on the same account, whose history comes
+	// over), or anywhere else on the AniList account (its list entry was
+	// updated: an episode watched on another device).
 	var watching []*anilist.ListEntry
 	for _, e := range coll.Entries() {
 		if e.Status == "CURRENT" || e.Status == "REPEATING" {
 			watching = append(watching, e)
+			last[e.MediaID] = max(last[e.MediaID], e.UpdatedAt)
 		}
 	}
 	sort.SliceStable(watching, func(i, j int) bool {

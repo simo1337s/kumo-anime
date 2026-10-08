@@ -48,8 +48,16 @@ export function useSaveSettings() {
     })
 }
 
+// The list as AniList has it (at most a minute old), asked again when Kumo's
+// window comes back to the front: what was watched on another device, on
+// the same account, shows up in Continue watching.
 export function useCollection() {
-    return useQuery({ queryKey: ["collection"], queryFn: () => api.get<CollectionView>("/api/anime/collection"), staleTime: 60_000 })
+    return useQuery({
+        queryKey: ["collection"],
+        queryFn: () => api.get<CollectionView>("/api/anime/collection?fresh=1"),
+        staleTime: 60_000,
+        refetchOnWindowFocus: true,
+    })
 }
 
 export function useEntry(id: number) {

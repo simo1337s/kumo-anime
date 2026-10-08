@@ -1,6 +1,7 @@
 package share
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -23,6 +24,7 @@ import (
 	"github.com/simo1337s/animetest/server/internal/config"
 	"github.com/simo1337s/animetest/server/internal/db"
 	"github.com/simo1337s/animetest/server/internal/events"
+	"github.com/simo1337s/animetest/server/internal/history"
 	"github.com/simo1337s/animetest/server/internal/library"
 )
 
@@ -41,6 +43,13 @@ type Library interface {
 	All() ([]*library.LocalFile, error)
 }
 
+// History is the watch history (where each episode was stopped), which
+// Kumos on the same AniList account keep in step (see syncHistory).
+type History interface {
+	Since(t int64, limit int) []*history.Entry
+	Merge(e history.Entry) (bool, error)
+}
+
 type Service struct {
 	id       *Identity
 	db       *db.DB
@@ -53,6 +62,18 @@ type Service struct {
 	// OnFiles runs when the files shared with this Kumo change (in the
 	// background).
 	OnFiles func()
+	// User is the AniList account this Kumo is logged into (0: none), and
+	// History its watch history: kept in step with the Kumos it shares
+	// with on the same account. Both nil: not kept in step.
+	User    func() int
+	History History
+	// OnWatchedElsewhere runs when another Kumo on the account says an
+	// episode was finished there: AniList has the new progress.
+	OnWatchedElsewhere func()
+
+	pushMu    sync.Mutex
+	pending   map[[2]int]history.Entry
+	pushTimer *time.Timer
 
 	mu      sync.Mutex
 	peers   map[string]*peer
@@ -86,6 +107,11 @@ type peer struct {
 	asked    time.Time
 	asking   bool
 	fails    int
+	// historySince: the newest of its history entries this Kumo has.
+	historySince int64
+	// user: the AniList account it's logged into, as it told (it shares
+	// with this Kumo).
+	user int
 }
 
 func (p *peer) online(now time.Time) bool { return now.Sub(p.seen) < onlineFor }
@@ -360,18 +386,26 @@ func (s *Service) heard(b beacon, from net.IP) {
 // ---------------------------------------------------------------------------
 // The host's side: who asks
 
+// Caller is another Kumo that made a request, checked.
+type Caller struct {
+	// Allowed: this Kumo shares its library with it.
+	Allowed bool
+	// SameUser: it's logged into the same AniList account as this one.
+	SameUser bool
+}
+
 // Verify checks a request from another Kumo, and notes it as seen.
-func (s *Service) Verify(r *http.Request) (allowed bool, err error) {
+func (s *Service) Verify(r *http.Request) (Caller, error) {
 	if !s.settings.Get().Sharing.Enabled {
-		return false, errors.New("library sharing is off")
+		return Caller{}, errors.New("library sharing is off")
 	}
 	ip := remoteIP(r)
 	if !isLocalNetwork(ip) {
-		return false, errors.New("not from the local network")
+		return Caller{}, errors.New("not from the local network")
 	}
 	c, err := s.id.verify(r)
 	if err != nil {
-		return false, err
+		return Caller{}, err
 	}
 	s.mu.Lock()
 	p, known := s.peers[c.id]
@@ -388,13 +422,36 @@ func (s *Service) Verify(r *http.Request) (allowed bool, err error) {
 		p.addr, p.port = ip, c.port
 	}
 	p.seen = time.Now()
-	allowed = p.allowed
+	allowed := p.allowed
 	s.mu.Unlock()
 	if !wasOnline {
 		s.hub.Publish("sharing-updated", nil)
 	}
-	return allowed, nil
+	me := s.user()
+	return Caller{Allowed: allowed, SameUser: me > 0 && c.user == me}, nil
 }
+
+func (s *Service) user() int {
+	if s.User == nil {
+		return 0
+	}
+	return s.User()
+}
+
+// HistorySince is this Kumo's watch history after t, for another Kumo on
+// the same account (checked by the caller).
+func (s *Service) HistorySince(t int64) []*history.Entry {
+	if s.History == nil {
+		return []*history.Entry{}
+	}
+	out := s.History.Since(t, historyBatch)
+	if out == nil {
+		out = []*history.Entry{}
+	}
+	return out
+}
+
+const historyBatch = 5000
 
 func remoteIP(r *http.Request) net.IP {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -413,6 +470,9 @@ type Hello struct {
 	Shares  bool   `json:"shares"`
 	// Files changes when the shared files do.
 	Files string `json:"files,omitempty"`
+	// User: the AniList account it's logged into, told to those it shares
+	// with (their watch histories are kept in step on the same account).
+	User int `json:"user,omitempty"`
 }
 
 // Hello answers a guest (verified, see Verify).
@@ -421,6 +481,7 @@ func (s *Service) Hello(allowed bool) Hello {
 	if allowed {
 		files, _ := s.SharedFiles()
 		h.Files = filesVersion(files)
+		h.User = s.user()
 	}
 	return h
 }
@@ -545,6 +606,135 @@ func (s *Service) ask(ctx context.Context, p *peer) {
 	if visible || changed {
 		s.hub.Publish("sharing-updated", nil)
 	}
+	s.mu.Lock()
+	p.user = 0
+	if h.Shares {
+		p.user = h.User
+	}
+	s.mu.Unlock()
+	if h.Shares && h.User > 0 && h.User == s.user() {
+		s.syncHistory(ctx, p)
+	}
+}
+
+// HistoryChanged sends a position this Kumo saved to the Kumos that share
+// with it on the same AniList account (the one whose files are played,
+// most of all), as it happens: their Continue watching goes on from it.
+// Gathered for 2 seconds; at once when the episode is over.
+func (s *Service) HistoryChanged(e history.Entry) {
+	s.mu.Lock()
+	on := s.running != nil
+	s.mu.Unlock()
+	if !on || s.user() == 0 {
+		return
+	}
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
+	if s.pending == nil {
+		s.pending = map[[2]int]history.Entry{}
+	}
+	s.pending[[2]int{e.MediaID, e.Episode}] = e
+	wait := 2 * time.Second
+	if e.Percent() >= 0.85 {
+		wait = 0
+	}
+	if s.pushTimer == nil {
+		s.pushTimer = time.AfterFunc(wait, s.pushHistory)
+	} else if wait == 0 {
+		s.pushTimer.Reset(0)
+	}
+}
+
+func (s *Service) pushHistory() {
+	s.pushMu.Lock()
+	entries := make([]history.Entry, 0, len(s.pending))
+	for _, e := range s.pending {
+		entries = append(entries, e)
+	}
+	s.pending, s.pushTimer = nil, nil
+	s.pushMu.Unlock()
+	me := s.user()
+	if len(entries) == 0 || me == 0 {
+		return
+	}
+	s.mu.Lock()
+	var to []*peer
+	for _, p := range s.peers {
+		if p.shares && p.user == me && p.addr != nil && p.fails < maxFails {
+			to = append(to, p)
+		}
+	}
+	s.mu.Unlock()
+	body, _ := json.Marshal(entries)
+	for _, p := range to {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			req, err := s.request(ctx, p, http.MethodPost, "/api/peer/history", bytes.NewReader(body))
+			if err != nil {
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			if resp, err := s.api.Do(req); err == nil {
+				resp.Body.Close()
+			}
+		}()
+	}
+}
+
+// TakeHistory merges positions another Kumo on the same account sent
+// (checked by the caller), the newer ones.
+func (s *Service) TakeHistory(entries []history.Entry) {
+	if s.History == nil {
+		return
+	}
+	merged, finished := 0, false
+	for _, e := range entries {
+		if ok, err := s.History.Merge(e); err == nil && ok {
+			merged++
+			finished = finished || e.Percent() >= 0.85
+		}
+	}
+	if merged > 0 {
+		s.hub.Publish("history-updated", nil)
+	}
+	if finished && s.OnWatchedElsewhere != nil {
+		go s.OnWatchedElsewhere()
+	}
+}
+
+// syncHistory takes what's newer in a host's watch history, both being
+// logged into the same AniList account: where each episode was stopped,
+// and when it was watched. Continue watching then goes on from there,
+// to the second; the list itself (progress) is AniList's.
+func (s *Service) syncHistory(ctx context.Context, p *peer) {
+	if s.History == nil {
+		return
+	}
+	s.mu.Lock()
+	since := p.historySince
+	s.mu.Unlock()
+	var entries []*history.Entry
+	if err := s.getJSON(ctx, p, "/api/peer/history?since="+strconv.FormatInt(since, 10), &entries); err != nil {
+		return
+	}
+	merged := 0
+	newest := since
+	for _, e := range entries {
+		if e == nil {
+			continue
+		}
+		if ok, err := s.History.Merge(*e); err == nil && ok {
+			merged++
+		}
+		newest = max(newest, e.UpdatedAt)
+	}
+	s.mu.Lock()
+	p.historySince = max(p.historySince, newest)
+	s.mu.Unlock()
+	if merged > 0 {
+		s.hub.Publish("history-updated", nil)
+	}
 }
 
 // publish tells the app the shared files changed.
@@ -566,7 +756,7 @@ func (s *Service) request(ctx context.Context, p *peer, method, path string, bod
 	if err != nil {
 		return nil, err
 	}
-	if err := s.id.sign(req.Header, host, pub, s.Name(), s.settings.Get().Server.Port); err != nil {
+	if err := s.id.sign(req.Header, host, pub, s.Name(), s.settings.Get().Server.Port, s.user()); err != nil {
 		return nil, err
 	}
 	return req, nil
@@ -579,7 +769,7 @@ func (s *Service) Sign(req *http.Request, hostID, hostKey string) error {
 	if err != nil {
 		return err
 	}
-	return s.id.sign(req.Header, hostID, pub, s.Name(), s.settings.Get().Server.Port)
+	return s.id.sign(req.Header, hostID, pub, s.Name(), s.settings.Get().Server.Port, s.user())
 }
 
 func (s *Service) getJSON(ctx context.Context, p *peer, path string, out any) error {

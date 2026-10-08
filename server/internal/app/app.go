@@ -177,6 +177,23 @@ func (a *App) wire() {
 	// Kumo (prefetch.go).
 	a.Scanner.OnScanned = a.prefetchLibrary
 	a.Share.OnFiles = a.prefetchLibrary
+	// Kumos on the same AniList account keep their watch histories in step,
+	// as positions are saved.
+	a.Share.History = a.History
+	a.History.OnChange = a.Share.HistoryChanged
+	a.Share.OnWatchedElsewhere = func() {
+		ctx, cancel := context.WithTimeout(a.ctx, time.Minute)
+		defer cancel()
+		if _, err := a.Platform.Collection(ctx, "ANIME", true); err == nil {
+			a.Hub.Publish("collection-updated", nil)
+		}
+	}
+	a.Share.User = func() int {
+		if v := a.Platform.Viewer(); v != nil {
+			return v.ID
+		}
+		return 0
+	}
 
 	// Torrent search can use extension providers.
 	a.Torrents.ExtraProviders = a.Extensions.TorrentProviders

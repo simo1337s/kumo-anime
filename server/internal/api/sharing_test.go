@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simo1337s/animetest/server/internal/history"
 	"github.com/simo1337s/animetest/server/internal/library"
 	"github.com/simo1337s/animetest/server/internal/share"
 )
@@ -256,5 +257,73 @@ func TestSharingSettingsOnlyFromThisComputer(t *testing.T) {
 	}
 	if got := s.app.Settings.Get().Sharing; got.Enabled || got.Name != "" {
 		t.Errorf("the network turned sharing on: %+v", got)
+	}
+}
+
+// Two Kumos on the same AniList account keep their watch history in step:
+// where an episode was stopped on one, it goes on on the other. Not with
+// another account, nor with a Kumo that doesn't share with this one.
+func TestHistoryFollowsTheAccount(t *testing.T) {
+	const local = "127.0.0.1:5000"
+	host, hostSrv := sharingServer(t)
+	guest, _ := sharingServer(t)
+	user := func(s *Server, id int) { s.app.Share.User = func() int { return id } }
+	user(host, 42)
+	user(guest, 42)
+	if err := host.app.History.Save(history.Entry{MediaID: 21, Episode: 3, Position: 600, Duration: 1420, Source: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	addr := strings.TrimPrefix(hostSrv.URL, "http://")
+	if w := do(guest, "POST", "/api/sharing/connect", local, `{"address":"`+addr+`"}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("connect: %d %s", w.Code, w.Body)
+	}
+	eventually(t, "the host to list the guest", func() bool { return len(host.app.Share.Status().Peers) == 1 })
+	synced := func() bool {
+		do(guest, "GET", "/api/sharing", local, "", nil) // asks again
+		e := guest.app.History.Get(21, 3)
+		return e != nil && e.Position == 600
+	}
+
+	// Not shared with: nothing comes over.
+	time.Sleep(500 * time.Millisecond)
+	if synced() {
+		t.Fatal("history came from a Kumo that doesn't share with this one")
+	}
+	if err := host.app.Share.SetAllowed(guest.app.Share.ID(), true); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the history to come over", synced)
+
+	// Watching the host's files on the guest: the host's Continue watching
+	// has it as it happens (the host only shares one way, nothing asked).
+	if err := guest.app.History.Save(history.Entry{MediaID: 21, Episode: 5, Position: 400, Duration: 1420, Source: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(6 * time.Second)
+	for e := host.app.History.Get(21, 5); e == nil || e.Position != 400; e = host.app.History.Get(21, 5) {
+		if time.Now().After(deadline) {
+			t.Fatal("the position watched on the guest didn't reach the host")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Another AniList account on the guest: newer positions stay home.
+	user(guest, 43)
+	if err := host.app.History.Save(history.Entry{MediaID: 21, Episode: 4, Position: 300, Duration: 1420, Source: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 15; i++ {
+		do(guest, "GET", "/api/sharing", local, "", nil)
+		time.Sleep(300 * time.Millisecond)
+	}
+	if e := guest.app.History.Get(21, 4); e != nil {
+		t.Errorf("history went to another AniList account: %+v", e)
+	}
+	if err := guest.app.History.Save(history.Entry{MediaID: 21, Episode: 6, Position: 200, Duration: 1420, Source: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3 * time.Second)
+	if e := host.app.History.Get(21, 6); e != nil {
+		t.Errorf("a position went to another AniList account: %+v", e)
 	}
 }

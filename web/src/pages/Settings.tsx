@@ -776,7 +776,7 @@ function SharingGroup({ draft, set }: SectionProps) {
     return (
         <Group
             title="Library sharing"
-            description="Watch the libraries of Kumo on your other computers at home, and share yours with them. Each computer decides who gets its library. Watching updates the AniList account (or local list) of the computer you watch on, never the other's."
+            description="Watch the libraries of Kumo on your other computers at home, and share yours with them. Each computer decides who gets its library. Watching updates the AniList account (or local list) of the computer you watch on, never the other's. On the same AniList account, Continue watching carries over to the second: to the computer whose files you watch as you watch, and back."
         >
             <Row label="Library sharing" help="Find the Kumo apps on this network, and let them find this one. Turn it on on both computers.">
                 <Switch checked={draft.sharing.enabled} disabled={!trusted} onChange={v => set("sharing", { enabled: v })} />

@@ -118,6 +118,8 @@ const (
 	headerName  = "X-Kumo-Peer-Name"
 	headerPort  = "X-Kumo-Peer-Port"
 	headerToken = "X-Kumo-Peer-Token"
+	// The AniList account it's logged into (0: none).
+	headerUser = "X-Kumo-Peer-User"
 )
 
 // IsPeerRequest reports a request from another Kumo (which Verify checks).
@@ -125,7 +127,7 @@ func IsPeerRequest(r *http.Request) bool { return r.Header.Get(headerID) != "" }
 
 // sign adds to a request to the host (with that public key) what proves it
 // comes from this Kumo.
-func (id *Identity) sign(h http.Header, host string, hostPub []byte, name string, port int) error {
+func (id *Identity) sign(h http.Header, host string, hostPub []byte, name string, port, user int) error {
 	tok, err := id.token(hostPub, id.ID, host)
 	if err != nil {
 		return err
@@ -135,14 +137,17 @@ func (id *Identity) sign(h http.Header, host string, hostPub []byte, name string
 	h.Set(headerName, url.QueryEscape(name))
 	h.Set(headerPort, strconv.Itoa(port))
 	h.Set(headerToken, tok)
+	if user > 0 {
+		h.Set(headerUser, strconv.Itoa(user))
+	}
 	return nil
 }
 
 // caller is who sent a request, once checked.
 type caller struct {
-	id, name string
-	pub      []byte
-	port     int
+	id, name   string
+	pub        []byte
+	port, user int
 }
 
 // verify checks that a request comes from the Kumo it says.
@@ -163,6 +168,7 @@ func (id *Identity) verify(r *http.Request) (*caller, error) {
 	c.name, _ = url.QueryUnescape(r.Header.Get(headerName))
 	c.name = cleanName(c.name)
 	c.port, _ = strconv.Atoi(r.Header.Get(headerPort))
+	c.user, _ = strconv.Atoi(r.Header.Get(headerUser))
 	return c, nil
 }
 

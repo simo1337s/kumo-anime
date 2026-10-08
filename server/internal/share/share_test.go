@@ -64,7 +64,7 @@ func TestIdentityStaysAndTokensCheck(t *testing.T) {
 	// a asks b: b checks it's a.
 	bPub, _ := parsePublicKey(b.ID, b.PublicKey())
 	req, _ := http.NewRequest("GET", "http://x/api/peer/hello", nil)
-	if err := a.sign(req.Header, b.ID, bPub, "Desk PC\n", 43211); err != nil {
+	if err := a.sign(req.Header, b.ID, bPub, "Desk PC\n", 43211, 0); err != nil {
 		t.Fatal(err)
 	}
 	c, err := b.verify(req)
