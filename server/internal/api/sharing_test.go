@@ -112,7 +112,14 @@ func TestLibrarySharing(t *testing.T) {
 		t.Errorf("content type %q", ct)
 	}
 
-	// Watching on the guest never touches the host's history or player.
+	// Watching on the guest is the guest's: its history (and its list,
+	// AniList or local), never the host's.
+	if w := do(guest, "POST", "/api/playback/progress", local, `{"mediaId":21,"episode":1,"position":300,"duration":1420,"source":"local"}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("progress: %d %s", w.Code, w.Body)
+	}
+	if e := guest.app.History.Get(21, 1); e == nil || e.Position != 300 {
+		t.Errorf("the guest's history: %+v", e)
+	}
 	if h := host.app.History.Recent(10); len(h) != 0 {
 		t.Errorf("the host's history changed: %+v", h)
 	}
