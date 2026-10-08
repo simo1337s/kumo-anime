@@ -2,7 +2,7 @@
 
 <h1 align="center">Kumo</h1>
 
-<p align="center">An anime app for Arch Linux,Windows,Macos: your AniList, your local library, ani-cli streaming, torrents and an extension marketplace — in one desktop app that only ever talks to your own computer and home network.</p>
+<p align="center">An anime app for Arch Linux,Windows,Mac os: your AniList, your local library, ani-cli streaming, torrents and an extension marketplace — in one desktop app that only ever talks to your own computer and home network.</p>
 
 ---
 
