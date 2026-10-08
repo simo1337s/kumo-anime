@@ -6,7 +6,7 @@
 // recognises its own desktop window when the browser Web UI is turned off.
 
 const { app, BrowserWindow, ipcMain, shell, session, Menu, dialog, nativeImage, Tray, Notification, powerMonitor } = require("electron")
-const { spawn } = require("node:child_process")
+const { spawn, execFileSync } = require("node:child_process")
 const fs = require("node:fs")
 const os = require("node:os")
 const path = require("node:path")
@@ -60,16 +60,18 @@ let tray = null
 //   keepRunning     closing the window leaves Kumo running (tray icon, or the
 //                   Dock on a Mac): streaming to other devices, downloads and
 //                   the auto downloader keep going without the window's
-//                   memory.
+//                   memory. Off unless turned on (keepRunningChosen: it was
+//                   on by default for a while, and that doesn't count).
 //   freeWhenLocked  a few minutes after the computer is locked, the window
 //                   lets go of its page, and loads it again on unlocking.
 //   toldKeepRunning the notice about it was shown (the first time).
-const prefs = { keepRunning: true, freeWhenLocked: true, toldKeepRunning: false }
+const prefs = { keepRunning: false, keepRunningChosen: false, freeWhenLocked: true, toldKeepRunning: false }
 const prefsFile = () => path.join(app.getPath("userData"), "desktop.json")
 
 function loadPrefs() {
     const saved = readJSON(prefsFile()) || {}
     for (const k of Object.keys(prefs)) if (typeof saved[k] === typeof prefs[k]) prefs[k] = saved[k]
+    if (!prefs.keepRunningChosen) prefs.keepRunning = false
 }
 
 function savePrefs() {
@@ -429,15 +431,79 @@ ipcMain.handle("kumo:set-pref", (_e, name, value) => {
     }
     if (!["keepRunning", "freeWhenLocked"].includes(name)) return { error: "not a setting" }
     prefs[name] = value
+    if (name === "keepRunning") prefs.keepRunningChosen = true
     savePrefs()
     updateTray()
     return true
 })
 
+ipcMain.on("kumo:quit", () => app.quit())
+
+// ---------------------------------------------------------------------------
+// Updated while running: a package update (makepkg) replaces Kumo's files
+// but not the Kumo running in the background. Opened again, it restarts into
+// the version installed: the server stops asking to be started again
+// (exit code 75), and the app does, with its new files.
+
+// installedVersion is the version of the server program on disk ("1.0.94"),
+// or "" when it can't be told.
+function installedVersion() {
+    const bin = findServerBinary()
+    if (!bin) return ""
+    try {
+        const out = execFileSync(bin, ["--version"], { timeout: 5000, windowsHide: true }).toString()
+        return (/(\d+\.\d+\.\d+)/.exec(out) || [])[1] || ""
+    } catch {
+        return ""
+    }
+}
+
+// serverCall makes a request to a running Kumo server as its desktop window.
+function serverCall(url, method, p) {
+    return new Promise(resolve => {
+        const req = http.request(url + p, { method, timeout: 3000, headers: { "X-Kumo-Shell": readToken() || "", "Content-Type": "application/json" } }, res => {
+            let body = ""
+            res.setEncoding("utf8")
+            res.on("data", c => (body += c))
+            res.on("end", () => {
+                try {
+                    resolve(res.statusCode < 300 ? JSON.parse(body || "null") ?? true : null)
+                } catch {
+                    resolve(null)
+                }
+            })
+        })
+        req.on("error", () => resolve(null))
+        req.on("timeout", () => {
+            req.destroy()
+            resolve(null)
+        })
+        req.end(method === "POST" ? "{}" : undefined)
+    })
+}
+
+// restartIfOutdated restarts the Kumo running at url when it's another
+// version than the one installed, and reports whether it did.
+async function restartIfOutdated(url) {
+    if (!url) return false
+    const installed = installedVersion()
+    const running = (await serverCall(url, "GET", "/api/status"))?.version
+    if (!installed || !running || installed === running) return false
+    console.log(`Kumo ${running} is running, ${installed} is installed: restarting into it`)
+    return !!(await serverCall(url, "POST", "/api/update/restart"))
+}
+
+let restarting = false
+
 // showWindow brings Kumo's window back, or opens a new one after it was
 // closed while Kumo kept running.
-function showWindow() {
-    if (!baseUrl) return
+async function showWindow() {
+    if (!baseUrl || restarting) return
+    // Updated since it started: the new version opens instead.
+    if (await restartIfOutdated(baseUrl)) {
+        restarting = true
+        return
+    }
     if (!mainWindow) return createWindow()
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
@@ -566,7 +632,13 @@ async function boot() {
 }
 
 if (!app.requestSingleInstanceLock()) {
-    app.quit()
+    // Kumo is running already and shows its window. When it's an older
+    // version (updated while it ran in the background), it's asked to
+    // restart into this one: versions before this check only know that.
+    existingServer()
+        .then(restartIfOutdated)
+        .catch(() => {})
+        .finally(() => app.quit())
 } else {
     // Opening Kumo again shows its window, also after it was closed while
     // Kumo kept running.

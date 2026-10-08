@@ -48,7 +48,7 @@
 - **UI plugins**: trays, anime-page buttons, webviews, toasts, storage, AniList access, `$ui.register`, `ctx.state/effect/fieldRef`, … All 15 most-starred marketplace plugins load. Plugins that rewrite the app's own pages (`ctx.dom`) or need file/command access only partly work, because Kumo deliberately doesn't allow either.
 - **Manga** reader (long strip, single pages or two-page spreads, LTR / RTL) using manga provider extensions.
 
-**Extras**: keeps running in the tray (or the Dock) when its window is closed, so streaming to other devices and downloads go on, and can start in the background when you log in (Settings › App › Desktop app, off unless you turn it on); updates itself from the Home page, Discord rich presence (local IPC), accent colours, spoiler blur, Ctrl+K quick search, server logs and cache viewer.
+**Extras**: can keep running in the tray (or the Dock) when its window is closed, so streaming to other devices and downloads go on, and start in the background when you log in (Settings › App › Desktop app, both off unless you turn them on); updates itself from the Home page, Discord rich presence (local IPC), accent colours, spoiler blur, Ctrl+K quick search, server logs and cache viewer.
 
 ## Closed network by design
 

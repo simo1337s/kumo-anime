@@ -468,6 +468,7 @@ function LanAddresses({ status }: { status?: Status }) {
 
 function AppSection({ draft, set }: SectionProps) {
     const { data: status } = useStatus()
+    const [, setSearchParams] = useSearchParams()
     const [loginOpen, setLoginOpen] = useState(false)
     const qc = useQueryClient()
     const isDesktop = status?.client === "desktop"
@@ -542,6 +543,14 @@ function AppSection({ draft, set }: SectionProps) {
                 {!isDesktop && !lan && <p className="px-4 py-3 text-xs text-amber-200/80">Turning the Web UI off is only possible from the desktop app, so you can't lock yourself out.</p>}
             </Group>
 
+            <Group title="Library sharing">
+                <Row label="Share libraries with Kumo on your other computers" help={draft.sharing.enabled ? "On: who gets this computer's library, and the libraries shared with it, are in Local Anime Library." : "In Local Anime Library: turn it on there, on each computer."}>
+                    <Button size="sm" variant="ghost" onClick={() => setSearchParams({ tab: "library" })}>
+                        Open
+                    </Button>
+                </Row>
+            </Group>
+
             <DesktopGroup />
 
             <ProgramsGroup />
@@ -588,8 +597,8 @@ function DesktopGroup() {
                 label="Keep running when the window is closed"
                 help={
                     mac
-                        ? "Streaming to your other devices, downloads and the auto downloader keep going, without the window's memory. Click Kumo in the Dock to open it again; quit with Cmd+Q."
-                        : "Streaming to your other devices, downloads and the auto downloader keep going, without the window's memory. Open or quit Kumo from its tray icon, or open it again from the app menu."
+                        ? "Off: closing the window quits Kumo. On: streaming to your other devices, downloads and the auto downloader keep going, without the window's memory; click Kumo in the Dock to open it again, quit with Cmd+Q or the button below."
+                        : "Off: closing the window quits Kumo. On: streaming to your other devices, downloads and the auto downloader keep going, without the window's memory; open or quit Kumo from its tray icon, or open it again from the app menu and quit with the button below."
                 }
             >
                 <Switch checked={prefs.keepRunning} onChange={v => change("keepRunning", v)} />
@@ -612,6 +621,13 @@ function DesktopGroup() {
             >
                 <Switch checked={prefs.freeWhenLocked} onChange={v => change("freeWhenLocked", v)} />
             </Row>
+            {bridge.quit && (
+                <Row label="Quit Kumo" help="Closes the window and stops the server: streaming to other devices, downloads and library sharing stop until Kumo is opened again.">
+                    <Button size="sm" variant="ghost" onClick={() => bridge.quit!()}>
+                        Quit
+                    </Button>
+                </Row>
+            )}
         </Group>
     )
 }

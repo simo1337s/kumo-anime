@@ -98,6 +98,11 @@ export function connectEvents(qc: QueryClient) {
         }
     }
 
+    // The server's version when this page loaded: back after a restart as
+    // another version (an update installed while it ran), the page loads
+    // again, as that version's.
+    let version: string | null = null
+
     const connect = () => {
         if (closed) return
         es = new EventSource("/api/events")
@@ -109,6 +114,8 @@ export function connectEvents(qc: QueryClient) {
             fetch("/api/status", { credentials: "same-origin" })
                 .then(r => (r.ok ? r.json() : null))
                 .then(st => {
+                    if (st?.version && version && st.version !== version) window.location.reload()
+                    if (st?.version) version = st.version
                     if (st && !st.scanning) scanStore.set({ running: false, stage: "", done: 0, total: 0, message: "" })
                 })
                 .catch(() => {})

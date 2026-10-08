@@ -69,6 +69,7 @@ export type DesktopBridge = {
     getPrefs?: () => Promise<DesktopPrefs>
     // true, or what went wrong (older apps: false).
     setPref?: (name: keyof DesktopPrefs, value: boolean) => Promise<true | false | { error: string }>
+    quit?: () => void
 }
 
 export type DesktopPrefs = { keepRunning: boolean; freeWhenLocked: boolean; startAtLogin?: boolean }

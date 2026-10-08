@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld("kumoDesktop", {
     // The desktop app's own settings (Settings › App › Desktop app).
     getPrefs: () => ipcRenderer.invoke("kumo:get-prefs"),
     setPref: (name, value) => ipcRenderer.invoke("kumo:set-pref", name, value),
+    // Quits Kumo, server and all.
+    quit: () => ipcRenderer.send("kumo:quit"),
 })
