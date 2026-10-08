@@ -5,6 +5,9 @@
 #   make windows    cross-compile the Windows server (./dist/windows/kumo.exe);
 #                   the Windows installer itself is built on Windows, see
 #                   packaging/windows/README.md
+#   make macos      cross-compile the macOS servers (./dist/macos/kumo-x64 and
+#                   kumo-arm64); the app itself is built on a Mac, see
+#                   packaging/macos/README.md
 
 PREFIX ?= /usr
 GO ?= go
@@ -14,7 +17,7 @@ NPM ?= npm
 GO_BUILDFLAGS ?= -trimpath
 GO_LDFLAGS ?= -s -w
 
-.PHONY: all web embed server desktop test clean run windows
+.PHONY: all web embed server desktop test clean run windows macos
 
 all: server
 
@@ -34,6 +37,13 @@ server: embed
 windows: embed
 	mkdir -p dist/windows
 	cd server && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GO_BUILDFLAGS) -ldflags "$(GO_LDFLAGS)" -o ../dist/windows/kumo.exe ./cmd/kumo
+
+# One server for Intel Macs and one for Apple silicon: the universal app
+# (desktop/electron-builder.yml) merges them.
+macos: embed
+	mkdir -p dist/macos
+	cd server && CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build $(GO_BUILDFLAGS) -ldflags "$(GO_LDFLAGS)" -o ../dist/macos/kumo-x64 ./cmd/kumo
+	cd server && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build $(GO_BUILDFLAGS) -ldflags "$(GO_LDFLAGS)" -o ../dist/macos/kumo-arm64 ./cmd/kumo
 
 desktop:
 	cd desktop && $(NPM) ci --no-audit --no-fund

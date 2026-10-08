@@ -16,7 +16,8 @@
 # are kept: older ones are deleted, tags included.
 #
 # Windows only: the Arch Linux package is built from source with
-# packaging/arch/PKGBUILD and has nothing to do with this workflow.
+# packaging/arch/PKGBUILD and has nothing to do with this workflow, and the
+# macOS app has its own (macos.yml).
 #
 # In the pwsh steps, each program but the last checks $LASTEXITCODE: unlike
 # PowerShell's own commands, a failing program (npm, go, gh) doesn't stop the
@@ -30,6 +31,7 @@ on:
     paths-ignore:
       - "**.md"
       - "packaging/arch/**"
+      - "packaging/macos/**"
   workflow_dispatch:
     inputs:
       publish:

@@ -1,0 +1,327 @@
+# Builds, tests and packages Kumo for macOS on a real Mac, then publishes the
+# disk image and the zip of the app as the GitHub Release "Kumo <version> for
+# macOS", tagged macos-v<version> on the commit it built.
+#
+# The app is universal: one download for Apple silicon and Intel Macs. The
+# server is built for both (dist/macos/kumo-arm64 and kumo-x64) and
+# electron-builder merges them into the app's one program
+# (desktop/electron-builder.yml).
+#
+# The version is 1.0.<number of commits>, like the Windows release's (see
+# windows.yml): installed copies look for the macos-v release with the
+# highest version and offer it on the Home page (server/internal/update),
+# which downloads the zip.
+#
+# Runs on every push to the repository's default branch (except pushes that
+# only change docs, the Arch or the Windows packaging), and by hand from the
+# Actions tab. Only the newest 10 macOS releases are kept: older ones are
+# deleted, tags included.
+#
+# The app isn't signed with an Apple Developer ID nor notarized: it's signed
+# ad hoc, and the release notes say how to open it the first time.
+
+name: macOS release
+
+on:
+  # Pushes to other branches are skipped (see the job's condition).
+  push:
+    paths-ignore:
+      - "**.md"
+      - "packaging/arch/**"
+      - "packaging/windows/**"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the build as the GitHub Release macos-v<version> (otherwise it's only kept as workflow artifacts)
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: Build, test and package (macOS universal)
+    if: github.event_name != 'push' || github.ref_name == github.event.repository.default_branch
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      # The whole history: the version counts its commits.
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Read the version
+        id: version
+        run: |
+          base=$(node -p 'require("./desktop/package.json").version')
+          if ! [[ $base =~ ^([0-9]+)\.([0-9]+)\. ]]; then
+            echo "::error::desktop/package.json has no version like 1.0.0 (it says '$base')"
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$(git rev-list --count HEAD)"
+          {
+            echo "version=$version"
+            echo "tag=macos-v$version"
+            echo "dmg=Kumo-$version-macos-universal.dmg"
+            echo "zip=Kumo-$version-macos-universal.zip"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building Kumo $version for macOS"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+
+      - name: Build the web UI
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # Same as the Makefile's "embed" target.
+      - name: Embed the web UI into the server
+        run: |
+          dist=server/internal/webui/dist
+          rm -rf "$dist"
+          mkdir -p "$dist"
+          cp -R web/dist/. "$dist/"
+          touch "$dist/.keep"
+
+      # The stream tests need ffmpeg and skip themselves without it, so a
+      # failed install doesn't stop the build.
+      - name: Install ffmpeg for the tests
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          command -v ffmpeg || brew install ffmpeg
+          ffmpeg -hide_banner -version | head -1
+
+      # The setup that installs the programs Kumo uses only runs on users'
+      # Macs, in Terminal: check here that it parses in the bash macOS has.
+      - name: Check the programs setup script
+        run: |
+          /bin/bash --version | head -1
+          /bin/bash -n server/internal/macsetup/install-tools.command
+
+      - name: go vet
+        working-directory: server
+        run: go vet ./...
+
+      # A hang fails after 8 minutes with every goroutine's stack, instead of
+      # Go's default 10.
+      - name: go test
+        working-directory: server
+        run: go test -count 1 -timeout 8m ./...
+
+      # The version and the commit go into the server (config.AppVersion and
+      # config.Commit): the updater compares them with the newest release's.
+      - name: Build the servers (Apple silicon and Intel)
+        working-directory: server
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p ../dist/macos
+          config=github.com/simo1337s/animetest/server/internal/config
+          for arch in arm64 amd64; do
+            out=../dist/macos/kumo-$arch
+            [ "$arch" = amd64 ] && out=../dist/macos/kumo-x64
+            GOOS=darwin GOARCH=$arch go build -trimpath -ldflags "-s -w -X $config.AppVersion=$VERSION -X $config.Commit=$GITHUB_SHA" -o "$out" ./cmd/kumo
+          done
+          file ../dist/macos/kumo-*
+          reported=$(../dist/macos/kumo-arm64 --version)
+          echo "kumo-arm64 --version: $reported"
+          if [ "$reported" != "Kumo $VERSION" ]; then
+            echo "::error::kumo-arm64 says '$reported' instead of 'Kumo $VERSION': the version didn't make it into the build."
+            exit 1
+          fi
+          # The Intel server runs through Rosetta, when the runner has it.
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "kumo-x64 --version: $(arch -x86_64 ../dist/macos/kumo-x64 --version)"
+          fi
+
+      # electron-builder names the files and versions the app after
+      # desktop/package.json: it gets this build's version, on the runner
+      # only (nothing is committed).
+      - name: Package the desktop app (disk image and zip)
+        working-directory: desktop
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          npm ci --no-audit --no-fund
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          npx electron-builder --mac --universal --publish never -c.directories.output=../dist/macos/release
+
+      - name: Check the app
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DMG: ${{ steps.version.outputs.dmg }}
+          ZIP: ${{ steps.version.outputs.zip }}
+        run: |
+          app=dist/macos/release/mac-universal/Kumo.app
+          ls -la dist/macos/release
+          test -f "dist/macos/release/$DMG"
+          test -f "dist/macos/release/$ZIP"
+          for exe in "$app/Contents/MacOS/Kumo" "$app/Contents/Resources/kumo"; do
+            archs=$(lipo -archs "$exe")
+            echo "$exe: $archs"
+            if [[ $archs != *x86_64* || $archs != *arm64* ]]; then
+              echo "::error::$exe isn't universal ($archs)"
+              exit 1
+            fi
+          done
+          codesign --verify --deep --strict --verbose=2 "$app"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" -c "Print :LSMinimumSystemVersion" "$app/Contents/Info.plist"
+
+      # An update unpacks the zip with Kumo's own code: it must give back an
+      # app whose signature holds and whose server runs.
+      - name: Check the zip the way an update unpacks it
+        working-directory: server
+        env:
+          KUMO_MAC_APP_ZIP: ${{ github.workspace }}/dist/macos/release/${{ steps.version.outputs.zip }}
+          KUMO_MAC_APP_VERSION: ${{ steps.version.outputs.version }}
+        run: go test -count 1 -run TestReleasedMacApp -v ./internal/update
+
+      # Opens the app like a user would and waits for its server to answer,
+      # then quits it. The screenshot shows the window.
+      - name: Start the app
+        timeout-minutes: 5
+        run: |
+          app="$PWD/dist/macos/release/mac-universal/Kumo.app"
+          export KUMO_DATA_DIR="$RUNNER_TEMP/kumo-data"
+          "$app/Contents/MacOS/Kumo" > "$RUNNER_TEMP/kumo-app.log" 2>&1 &
+          pid=$!
+          info="${TMPDIR%/}/kumo/server.json"
+          port=""
+          for i in $(seq 1 90); do
+            if [ -f "$info" ]; then
+              port=$(node -p "require('$info').port" 2>/dev/null || true)
+              if [ -n "$port" ] && curl -s -o /dev/null "http://127.0.0.1:$port/api/status"; then break; fi
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "::error::Kumo quit on its own"
+              cat "$RUNNER_TEMP/kumo-app.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$port/api/status" || true)
+          echo "The server answers on port $port with HTTP $code"
+          sleep 8 # the window loads the UI
+          screencapture -x "$RUNNER_TEMP/kumo-window.png" || echo "no screenshot"
+          kill "$pid" || true
+          for i in $(seq 1 15); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          echo "--- app log"
+          cat "$RUNNER_TEMP/kumo-app.log"
+          if [ -z "$port" ] || [ "$code" = "000" ] || [ "$code" -ge 500 ]; then
+            echo "::error::Kumo's server didn't answer"
+            exit 1
+          fi
+
+      - name: Upload the screenshot
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-window
+          path: ${{ runner.temp }}/kumo-window.png
+          if-no-files-found: ignore
+
+      # archive: false uploads the files as they are (no zip around them),
+      # named after the file.
+      - name: Upload the disk image
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/macos/release/${{ steps.version.outputs.dmg }}
+          archive: false
+          overwrite: true
+          if-no-files-found: error
+
+      - name: Upload the zip
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/macos/release/${{ steps.version.outputs.zip }}
+          archive: false
+          overwrite: true
+          if-no-files-found: error
+
+      # Creates the release (and its tag, on this commit, when it doesn't
+      # exist yet), or updates it: new title and notes, and files of the same
+      # name replaced. It isn't marked as the repository's latest release,
+      # which stays the Windows one.
+      - name: Publish the GitHub Release
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          DMG: ${{ steps.version.outputs.dmg }}
+          ZIP: ${{ steps.version.outputs.zip }}
+        run: |
+          repo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          notes="$RUNNER_TEMP/release-notes.md"
+          cat > "$notes" <<EOF
+          **Kumo $VERSION for macOS 13 Ventura or newer, on Apple silicon and Intel Macs** (one app for both). On Windows and Arch Linux, see [the README]($repo/blob/$GITHUB_SHA/README.md).
+
+          | File | What it is |
+          |---|---|
+          | \`$DMG\` | **Disk image** (recommended). Open it and drag Kumo to Applications. |
+          | \`$ZIP\` | The same app in a zip (Kumo's updates download it). |
+
+          Kumo isn't notarized by Apple, so the first time macOS says it can't check it: open Kumo once, then go to **System Settings › Privacy & Security** and click **Open Anyway** (on macOS 14 and older, Control-click Kumo in Applications and choose **Open**). Or, in Terminal: \`xattr -dr com.apple.quarantine /Applications/Kumo.app\`
+
+          Kumo finds newer releases by itself and updates from its Home page (**Update**), once it's in your Applications folder.
+
+          Some features use other programs: ffmpeg (needed by the in-app player for most files), mpv, yt-dlp and ani-cli. Kumo installs them with Homebrew from **Settings › App › Programs**; see [packaging/macos/README.md]($repo/blob/$GITHUB_SHA/packaging/macos/README.md).
+
+          Built from $GITHUB_SHA by [workflow run $GITHUB_RUN_NUMBER]($repo/actions/runs/$GITHUB_RUN_ID).
+          EOF
+          files=("dist/macos/release/$DMG" "dist/macos/release/$ZIP")
+          if gh release view "$TAG" --json tagName > /dev/null 2>&1; then
+            echo "Updating the release $TAG"
+            gh release edit "$TAG" --title "Kumo $VERSION for macOS" --notes-file "$notes" --latest=false
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            echo "Creating the release $TAG"
+            gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "Kumo $VERSION for macOS" --notes-file "$notes" --latest=false
+          fi
+
+      # Keep the newest 10 macOS releases, by version (numbers compared as
+      # numbers), and delete the older ones with their tags.
+      - name: Delete old releases
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          old=$(gh release list --limit 1000 --json tagName --jq '.[].tagName' |
+            { grep -E '^macos-v[0-9]+(\.[0-9]+)*$' || true; } | sort -V -r | tail -n +11)
+          if [ -z "$old" ]; then
+            echo "No old releases to delete"
+            exit 0
+          fi
+          for tag in $old; do
+            echo "Deleting the release $tag and its tag"
+            gh release delete "$tag" --cleanup-tag --yes
+          done

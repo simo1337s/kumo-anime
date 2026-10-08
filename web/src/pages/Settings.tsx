@@ -564,7 +564,7 @@ function AppSection({ draft, set }: SectionProps) {
 
 function InstallProgramsButton() {
     const { data: status } = useStatus()
-    const install = useInstallPrograms()
+    const install = useInstallPrograms(status)
     return (
         <Button variant="primary" size="sm" loading={install.isPending} disabled={status?.setupRunning} onClick={() => install.mutate()}>
             {status?.setupRunning ? "Installing…" : "Install"}
@@ -572,8 +572,8 @@ function InstallProgramsButton() {
     )
 }
 
-// What Kumo found of the programs it uses and, on Windows, the setup that
-// installs them.
+// What Kumo found of the programs it uses and, on Windows and macOS, the
+// setup that installs them.
 function ProgramsGroup() {
     const { data: status } = useStatus()
     useWatchSetup(status)
@@ -607,7 +607,11 @@ function ProgramsGroup() {
             {canInstallPrograms(status) && (
                 <Row
                     label="Install missing programs"
-                    help="Installs Git, ani-cli, ffmpeg, mpv, yt-dlp and the rest of what Kumo uses with Scoop, for your Windows user (no administrator rights), in a PowerShell window. Programs you already have are skipped. It also offers to sign you in to GitHub, for Kumo's updates."
+                    help={
+                        status?.platform === "darwin"
+                            ? "Installs ffmpeg, mpv, yt-dlp and ani-cli with Homebrew, in a Terminal window (and Homebrew first, if it's missing: that asks for your password). Programs you already have are skipped."
+                            : "Installs Git, ani-cli, ffmpeg, mpv, yt-dlp and the rest of what Kumo uses with Scoop, for your Windows user (no administrator rights), in a PowerShell window. Programs you already have are skipped. It also offers to sign you in to GitHub, for Kumo's updates."
+                    }
                 >
                     <InstallProgramsButton />
                 </Row>
@@ -1038,7 +1042,14 @@ function StreamingSection({ draft, set }: SectionProps) {
                     </p>
                 )}
                 {!ani?.installed && canInstallPrograms(status) && (
-                    <Row label="Install ani-cli" help="With Git, whose bash runs it, and the other programs Kumo uses: Settings › App › Programs.">
+                    <Row
+                        label="Install ani-cli"
+                        help={
+                            status?.platform === "darwin"
+                                ? "With Homebrew, and the other programs Kumo uses: Settings › App › Programs."
+                                : "With Git, whose bash runs it, and the other programs Kumo uses: Settings › App › Programs."
+                        }
+                    >
                         <InstallProgramsButton />
                     </Row>
                 )}

@@ -1,6 +1,6 @@
 // Package update finds newer versions of Kumo on GitHub and installs them.
 //
-// Kumo ships two ways, and updates each its own way:
+// Kumo ships three ways, and updates each its own way:
 //   - Arch Linux builds it from source with packaging/arch/PKGBUILD, so the
 //     newest version is the head of the repository's default branch. The
 //     update downloads that source, builds it with makepkg and installs the
@@ -8,6 +8,10 @@
 //   - Windows installs the GitHub Release "Kumo <v> for Windows" (tag
 //     windows-v<v>). The update downloads the newest one's installer and
 //     runs it once Kumo has quit; the installer starts the new version.
+//   - macOS has the app from the GitHub Release "Kumo <v> for macOS" (tag
+//     macos-v<v>). The update downloads the newest one's zip of the app,
+//     unpacks it next to the app and, once Kumo has quit, puts it in the
+//     app's place and opens it (apply_mac.go).
 //
 // The requests carry the user's GitHub token when one can be found without
 // asking (see githubToken): a private repository needs one, and it raises
@@ -110,8 +114,8 @@ type Checker struct {
 	// The running build.
 	Version string
 	Commit  string
-	// GOOS decides how Kumo updates: "windows" from releases, otherwise
-	// from the default branch.
+	// GOOS decides how Kumo updates: "windows" and "darwin" from
+	// releases, otherwise from the default branch.
 	GOOS string
 	// Executable is Kumo's server program, symlinks resolved.
 	Executable func() (string, error)
@@ -125,6 +129,12 @@ type Checker struct {
 	// StartInstaller starts the Windows installer, on its own, outside
 	// Kumo's job object (see startInstaller).
 	StartInstaller func(path string, args ...string) error
+	// macOS: StartHelper starts the program that opens the new app once
+	// the desktop app (the process ParentPID) has quit, and Writable says
+	// whether Kumo may put files in a folder.
+	StartHelper func(name string, args ...string) error
+	ParentPID   func() int
+	Writable    func(dir string) bool
 	// FirstCheck is how long after Start the first check runs, Interval the
 	// time between checks.
 	FirstCheck time.Duration
@@ -132,7 +142,7 @@ type Checker struct {
 
 	mu       sync.Mutex
 	st       Status
-	asset    *asset        // Windows: the newest release's installer
+	asset    *asset        // the newest release's installer (Windows) or app (macOS)
 	inflight chan struct{} // closed when the running check ends
 	applying bool
 	pending  bool // a publish is scheduled (publishSoonLocked)
@@ -167,6 +177,9 @@ func New(hub *events.Hub, exits *lifecycle.Exits) *Checker {
 		CacheDir:       filepath.Join(cache, "kumo", "update"),
 		Token:          githubToken,
 		StartInstaller: startInstaller,
+		StartHelper:    util.Detach,
+		ParentPID:      os.Getppid,
+		Writable:       writable,
 		FirstCheck:     30 * time.Second,
 		Interval:       6 * time.Hour,
 	}
@@ -242,17 +255,25 @@ func (c *Checker) loop() {
 }
 
 // cleanup removes what the last update left (the source, the build, the
-// installer), unless an update is using it: being installed, or waiting
-// for its package to be installed by hand.
+// installer, the new app), unless an update is using it: being installed,
+// Kumo quitting for it, or its package waiting to be installed by hand.
 func (c *Checker) cleanup() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.applying || c.st.State == StateReady {
+	if c.applying || c.st.State == StateReady || c.st.State == StateInstalling {
 		return
 	}
 	// The Windows installer may still be finishing: whatever it holds
 	// stays until the next update.
 	_ = removeAll(c.CacheDir)
+	// macOS: what an update left next to the app (see apply_mac.go).
+	if c.GOOS == "darwin" {
+		if exe, err := c.Executable(); err == nil {
+			if app := macBundle(exe); app != "" {
+				_ = removeAll(macStaging(app))
+			}
+		}
+	}
 }
 
 // Stop ends the checks and an update being installed (a build is stopped).
@@ -287,8 +308,8 @@ func (c *Checker) statusLocked() Status {
 	s.Changes = append([]string{}, s.Changes...)
 	s.Log = append([]string{}, s.Log...)
 	s.CanApply, s.ApplyNote = c.applyable()
-	if s.CanApply && c.GOOS == "windows" && s.Available && c.asset == nil {
-		s.CanApply, s.ApplyNote = false, "The newest release has no installer: download Kumo from its page."
+	if s.CanApply && fromReleases(c.GOOS) && s.Available && c.asset == nil {
+		s.CanApply, s.ApplyNote = false, "The newest release has no "+releaseFile(c.GOOS)+": download Kumo from its page."
 	}
 	return s
 }
@@ -314,6 +335,8 @@ func (c *Checker) applyable() (bool, string) {
 			return false, "This is a portable copy of Kumo: to update it, download the new portable zip."
 		}
 		return true, "Kumo downloads the installer and runs it: Kumo closes, the new version installs and Kumo opens again."
+	case "darwin":
+		return c.macApplyable(exe, err)
 	}
 	return false, "Kumo can't update itself on this system."
 }
@@ -436,7 +459,7 @@ func (c *Checker) describe(err error) (string, string) {
 
 func (c *Checker) check(ctx context.Context) (result, error) {
 	g := &github{api: strings.TrimRight(c.API, "/"), repo: c.Repo, client: c.Client, token: c.Token(ctx), userAgent: "Kumo/" + c.Version}
-	if c.GOOS == "windows" {
+	if fromReleases(c.GOOS) {
 		return c.checkReleases(ctx, g)
 	}
 	return c.checkBranch(ctx, g)
@@ -504,26 +527,59 @@ func (c *Checker) checkBranch(ctx context.Context, g *github) (result, error) {
 	return res, nil
 }
 
+// fromReleases: Windows and macOS update from GitHub Releases, Linux from
+// the default branch.
+func fromReleases(goos string) bool { return goos == "windows" || goos == "darwin" }
+
+// releasePrefix starts the tags of a system's releases: <prefix><version>.
+func releasePrefix(goos string) string {
+	if goos == "darwin" {
+		return "macos-v"
+	}
+	return "windows-v"
+}
+
+// releaseAsset names the release file an update installs.
+func releaseAsset(goos, version string) string {
+	if goos == "darwin" {
+		return "Kumo-" + version + "-macos-universal.zip"
+	}
+	return "Kumo-Setup-" + version + "-windows-x64.exe"
+}
+
+// releaseFile says what that file is, for messages.
+func releaseFile(goos string) string {
+	if goos == "darwin" {
+		return "zip of the app"
+	}
+	return "installer"
+}
+
 // checkReleases: on Windows the newest version is the newest release tagged
-// windows-v<version>.
+// windows-v<version>, on macOS macos-v<version>.
 func (c *Checker) checkReleases(ctx context.Context, g *github) (result, error) {
 	var releases []release
 	if _, err := g.getJSON(ctx, "/repos/"+g.repo+"/releases?per_page=50", &releases); err != nil {
 		return result{}, err
 	}
-	best := pickRelease(releases)
+	prefix := releasePrefix(c.GOOS)
+	best := pickRelease(releases, prefix)
 	if best == nil {
-		return result{note: "There's no Kumo release for Windows yet."}, nil
+		system := "Windows"
+		if c.GOOS == "darwin" {
+			system = "macOS"
+		}
+		return result{note: "There's no Kumo release for " + system + " yet."}, nil
 	}
-	version := strings.TrimPrefix(best.TagName, "windows-v")
+	version := strings.TrimPrefix(best.TagName, prefix)
 	latest := &Version{Version: version, Date: best.PublishedAt, URL: best.HTMLURL}
 	if isSHA(best.TargetCommitish) {
 		latest.Commit = best.TargetCommitish
 	}
 	res := result{latest: latest, available: compareVersions(version, c.Version) > 0}
-	installer := "Kumo-Setup-" + version + "-windows-x64.exe"
+	file := releaseAsset(c.GOOS, version)
 	for _, a := range best.Assets {
-		if a.Name == installer {
+		if a.Name == file {
 			res.asset = &asset{ID: a.ID, Name: a.Name, Size: a.Size, Digest: a.Digest}
 		}
 	}
@@ -537,16 +593,17 @@ func (c *Checker) checkReleases(ctx context.Context, g *github) (result, error) 
 	return res, nil
 }
 
-// pickRelease returns the published release with the highest windows-v
-// version, or nil.
-func pickRelease(releases []release) *release {
+// pickRelease returns the published release with the highest version
+// tagged <prefix><version> (windows-v1.0.9), or nil.
+func pickRelease(releases []release, prefix string) *release {
 	var best *release
 	for i := range releases {
 		r := &releases[i]
-		if r.Draft || r.Prerelease || !windowsTag.MatchString(r.TagName) {
+		v, ok := strings.CutPrefix(r.TagName, prefix)
+		if r.Draft || r.Prerelease || !ok || !releaseVersion.MatchString(v) {
 			continue
 		}
-		if best == nil || compareVersions(strings.TrimPrefix(r.TagName, "windows-v"), strings.TrimPrefix(best.TagName, "windows-v")) > 0 {
+		if best == nil || compareVersions(v, strings.TrimPrefix(best.TagName, prefix)) > 0 {
 			best = r
 		}
 	}
@@ -611,11 +668,13 @@ var (
 
 // Apply starts installing the newest version, in the background: the
 // status follows it. On Linux it ends "ready" (restart Kumo to use it); on
-// Windows Kumo quits for the installer, which starts the new version.
+// Windows Kumo quits for the installer, which starts the new version, and on
+// macOS to swap in the new app, which then opens.
 func (c *Checker) Apply() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// Installing: on Windows, Kumo is quitting for the installer.
+	// Installing: on Windows and macOS, Kumo is quitting for the new
+	// version.
 	if c.applying || c.st.State == StateInstalling {
 		return ErrRunning
 	}
@@ -641,9 +700,12 @@ func (c *Checker) Apply() error {
 		defer c.wg.Done()
 		g := &github{api: strings.TrimRight(c.API, "/"), repo: c.Repo, client: c.Client, token: c.Token(c.ctx), userAgent: "Kumo/" + c.Version}
 		var err error
-		if c.GOOS == "windows" {
+		switch c.GOOS {
+		case "windows":
 			err = c.applyWindows(c.ctx, g, target, inst)
-		} else {
+		case "darwin":
+			err = c.applyMac(c.ctx, g, target, inst)
+		default:
 			err = c.applyLinux(c.ctx, g, target)
 		}
 		c.mu.Lock()

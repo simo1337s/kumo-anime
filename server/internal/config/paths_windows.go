@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 )
 
+// videosFolder is the home folder for videos (the library's default is its
+// Anime folder).
+const videosFolder = "Videos"
+
 func defaultDataDir() string {
 	if d, err := os.UserConfigDir(); err == nil { // %APPDATA%
 		return filepath.Join(d, "Kumo")

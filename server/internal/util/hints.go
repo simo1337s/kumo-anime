@@ -17,6 +17,13 @@ func InstallHint(tool string) string {
 		}
 		return "install " + tool
 	}
+	if runtime.GOOS == "darwin" {
+		switch tool {
+		case "ffmpeg", "mpv", "yt-dlp", "ani-cli":
+			return "brew install " + tool + " (Homebrew, brew.sh)"
+		}
+		return "install " + tool
+	}
 	switch tool {
 	case "ffmpeg", "mpv", "yt-dlp":
 		return "sudo pacman -S " + tool

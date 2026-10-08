@@ -99,6 +99,12 @@ Kumo also runs on Windows 10/11 (64-bit), released separately from the Arch pack
 
 What to install alongside it (ffmpeg, mpv, yt-dlp, ani-cli, qBittorrent), where it keeps its data, how to build it and how releases are made: [packaging/windows/README.md](packaging/windows/README.md).
 
+## macOS
+
+Kumo runs on macOS 13 Ventura or newer, on Apple silicon and Intel Macs (one universal app): get the disk image (`Kumo-X.Y.Z-macos-universal.dmg`) from the newest **Kumo X.Y.Z for macOS** [release](https://github.com/simo1337s/kumo-anime/releases) (tag `macos-vX.Y.Z`) and drag Kumo to Applications. It isn't notarized by Apple: the first time, allow it in System Settings › Privacy & Security (**Open Anyway**). Kumo installs the programs it uses (ffmpeg, mpv, yt-dlp, ani-cli) with Homebrew from its Settings, and updates itself from its Home page.
+
+How to open it the first time, where it keeps its data, how to build it: [packaging/macos/README.md](packaging/macos/README.md).
+
 ## Development
 
 ```bash
@@ -113,10 +119,10 @@ cd desktop && npm i && npx electron .   # desktop window (uses ../dist/kumo)
 |---|---|
 | `server/` | Go server: AniList, scanner/matcher, mpv IPC, ani-cli driver, downloads, torrents, extension runtime (goja), API |
 | `web/` | React + Tailwind UI (embedded into the binary) |
-| `desktop/` | Electron shell (system `electron` on Arch; bundled by electron-builder for Windows) |
-| `packaging/` | PKGBUILD, launcher, `.desktop`, icons, systemd user unit; `windows/`: Windows build script and notes |
+| `desktop/` | Electron shell (system `electron` on Arch; bundled by electron-builder for Windows and macOS) |
+| `packaging/` | PKGBUILD, launcher, `.desktop`, icons, systemd user unit; `windows/`: Windows build script and notes; `macos/`: the app icon and notes |
 
-Data lives in `~/.local/share/kumo` (SQLite database, artwork cache, extension storage; `%APPDATA%\Kumo` on Windows).
+Data lives in `~/.local/share/kumo` (SQLite database, artwork cache, extension storage; `%APPDATA%\Kumo` on Windows, `~/Library/Application Support/Kumo` on macOS).
 
 ## Notes
 - AniList's API may rate-limit large first scans; Kumo waits and retries automatically.

@@ -17,15 +17,17 @@ export function installHint(platform: string | undefined, tool: Tool) {
             "ani-cli": "scoop install ani-cli",
         }[tool]
     }
+    if (platform === "darwin") return `brew install ${tool}`
     return tool === "ani-cli" ? "yay -S ani-cli" : `sudo pacman -S ${tool}`
 }
 
 // Where the hint comes from, said before it.
 export function installSource(platform: string | undefined, tool: Tool) {
     if (platform === "windows") return tool === "ani-cli" ? "With Git for Windows installed (winget install Git.Git), get it with Scoop (extras bucket)" : "Install it with"
+    if (platform === "darwin") return "Install it with Homebrew (brew.sh):"
     return tool === "ani-cli" ? "Install it from the AUR with" : "Install it with"
 }
 
 export function exampleMpvPath(platform?: string) {
-    return platform === "windows" ? "C:\\Program Files\\mpv\\mpv.exe" : "/usr/bin/mpv"
+    return platform === "windows" ? "C:\\Program Files\\mpv\\mpv.exe" : platform === "darwin" ? "/opt/homebrew/bin/mpv" : "/usr/bin/mpv"
 }

@@ -57,9 +57,11 @@ export function UpdateBanner() {
     const [later, setLater] = usePersisted("kumo-update-later", "")
     const [open, setOpen] = useState(false)
     const windows = status?.platform === "windows"
+    const mac = status?.platform === "darwin"
 
-    // On Windows Kumo quits for the installer, which starts the new version.
-    const toInstaller = windows && u?.state === "installing"
+    // On Windows Kumo quits for the installer, which starts the new version;
+    // on macOS to put the new app in place, which then opens.
+    const toInstaller = (windows || mac) && u?.state === "installing"
     const version = status?.version
     useEffect(() => {
         if (toInstaller && version) waitForRestart(version)
@@ -88,7 +90,13 @@ export function UpdateBanner() {
             <Panel
                 icon={<Spin />}
                 title="Restarting Kumo…"
-                text={windows ? "The installer is updating Kumo, which then opens again. This page reloads when Kumo is back." : "This page reloads when Kumo is back."}
+                text={
+                    windows
+                        ? "The installer is updating Kumo, which then opens again. This page reloads when Kumo is back."
+                        : mac
+                          ? "Kumo is putting the new version in place, then opens again. This page reloads when Kumo is back."
+                          : "This page reloads when Kumo is back."
+                }
             />
         ) : (
             <Panel
@@ -204,7 +212,7 @@ export function UpdateBanner() {
                             Update
                         </Button>
                     ) : (
-                        windows &&
+                        (windows || mac) &&
                         u.latest?.url && (
                             <a href={u.latest.url} target="_blank" rel="noopener noreferrer">
                                 <Button size="sm" variant="primary" icon={<ExternalLink className="size-4" />}>

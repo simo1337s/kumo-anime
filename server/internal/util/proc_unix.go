@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 	"time"
 )
@@ -46,7 +47,12 @@ func Suspend(p *os.Process) error { return p.Signal(syscall.SIGSTOP) }
 func Resume(p *os.Process) error { return p.Signal(syscall.SIGCONT) }
 
 // openCommand opens a folder or a web address with the desktop's app for it.
-func openCommand(target string) *exec.Cmd { return exec.Command("xdg-open", target) }
+func openCommand(target string) *exec.Cmd {
+	if runtime.GOOS == "darwin" {
+		return exec.Command("open", target)
+	}
+	return exec.Command("xdg-open", target)
+}
 
 // DialIPC connects to a local IPC endpoint: a Unix socket here, a named pipe
 // on Windows.

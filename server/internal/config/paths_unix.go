@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package config
 
@@ -6,6 +6,10 @@ import (
 	"os"
 	"path/filepath"
 )
+
+// videosFolder is the home folder for videos (the library's default is its
+// Anime folder).
+const videosFolder = "Videos"
 
 func defaultDataDir() string {
 	if d := os.Getenv("XDG_DATA_HOME"); d != "" {

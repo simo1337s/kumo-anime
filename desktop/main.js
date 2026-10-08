@@ -13,6 +13,7 @@ const path = require("node:path")
 const http = require("node:http")
 
 const isWindows = process.platform === "win32"
+const isMac = process.platform === "darwin"
 
 // Exit codes of the server (server/internal/lifecycle): restart the app into
 // a new version, or quit for the installer that updates it.
@@ -36,6 +37,12 @@ if (isWindows && process.env.LOCALAPPDATA) {
     // folder on Windows: keep it apart, with Kumo's other local files.
     app.setPath("userData", path.join(process.env.LOCALAPPDATA, "Kumo", "electron"))
 }
+if (isMac) {
+    // Electron would keep them in ~/Library/Application Support/Kumo, which
+    // is the server's data folder on macOS: keep them in a folder of their
+    // own in it.
+    app.setPath("userData", path.join(app.getPath("appData"), "Kumo", "electron"))
+}
 
 const runtimeDir = serverRuntimeDir()
 let serverProc = null
@@ -49,6 +56,8 @@ function serverRuntimeDir() {
         const local = process.env.LOCALAPPDATA
         return local ? path.join(local, "Kumo", "run") : path.join(os.tmpdir(), "kumo")
     }
+    // macOS: $TMPDIR, the user's own temporary folder.
+    if (isMac) return path.join(os.tmpdir(), "kumo")
     return path.join(process.env.XDG_RUNTIME_DIR || os.tmpdir(), "kumo")
 }
 
@@ -58,6 +67,13 @@ function serverCandidates() {
             process.env.KUMO_SERVER,
             path.join(process.resourcesPath, "kumo.exe"), // installed or portable app: resources\kumo.exe
             path.join(__dirname, "..", "dist", "windows", "kumo.exe"), // development checkout
+        ]
+    }
+    if (isMac) {
+        return [
+            process.env.KUMO_SERVER,
+            path.join(process.resourcesPath, "kumo"), // Kumo.app/Contents/Resources/kumo
+            path.join(__dirname, "..", "dist", "kumo"), // development checkout
         ]
     }
     return [
@@ -129,7 +145,9 @@ function startServer() {
         if (!bin) {
             const msg = isWindows
                 ? "Could not find the Kumo server (kumo.exe). Reinstall Kumo or set KUMO_SERVER."
-                : "Could not find the Kumo server binary (kumo). Reinstall the package or set KUMO_SERVER."
+                : isMac
+                  ? "Could not find the Kumo server in the app. Download Kumo again or set KUMO_SERVER."
+                  : "Could not find the Kumo server binary (kumo). Reinstall the package or set KUMO_SERVER."
             return reject(new Error(msg))
         }
         // windowsHide: on Windows the server, and the ffmpeg, ffprobe and bash
@@ -159,7 +177,9 @@ function startServer() {
             // The server stopped for an update: no error box. After an
             // update was installed, the whole app starts again, so that its
             // window loads the new main.js too. On Windows an installer is
-            // replacing Kumo, and starts it when it's done.
+            // replacing Kumo, and starts it when it's done; on macOS the
+            // server has put the new app in place, and a helper opens it once
+            // this one has quit.
             if (code === EXIT_RESTART || code === EXIT_INSTALLING) {
                 serverProc = null
                 app.isQuitting = true
@@ -196,6 +216,14 @@ function isInternal(url) {
     return /^http:\/\/127\.0\.0\.1(:\d+)?\//.test(url)
 }
 
+// macOS keeps the app's menu in the menu bar, and the standard shortcuts
+// (copy and paste, Cmd+Q, Cmd+W, full screen…) only work through its items.
+// Linux and Windows show no menu.
+function appMenu() {
+    if (!isMac) return null
+    return Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }])
+}
+
 // The window's own icon. On Linux it's invisible: KDE and other desktops draw
 // it in the window's title bar, where Kumo shows none, while the taskbar and
 // the app menu take Kumo's icon from its desktop entry. On Windows the
@@ -225,7 +253,7 @@ function createWindow() {
             spellcheck: false,
         },
     })
-    Menu.setApplicationMenu(null)
+    Menu.setApplicationMenu(appMenu())
     mainWindow.once("ready-to-show", () => mainWindow.show())
 
     // External links open in the system browser; the app never navigates away.

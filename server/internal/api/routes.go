@@ -18,7 +18,6 @@ import (
 	"github.com/simo1337s/animetest/server/internal/config"
 	"github.com/simo1337s/animetest/server/internal/stream"
 	"github.com/simo1337s/animetest/server/internal/util"
-	"github.com/simo1337s/animetest/server/internal/winsetup"
 )
 
 func (s *Server) routes() {
@@ -290,7 +289,7 @@ func (s *Server) status(r *http.Request) (any, error) {
 	feat.AniCli = anicli.Ready(cfg.AniCli.Path)
 	_, feat.YtDlp = util.LookPath("yt-dlp")
 	_, feat.XdgOpen = util.LookPath("xdg-open")
-	feat.XdgOpen = feat.XdgOpen || runtime.GOOS == "windows" // Explorer
+	feat.XdgOpen = feat.XdgOpen || runtime.GOOS == "windows" || runtime.GOOS == "darwin" // Explorer, Finder
 	kind := map[clientKind]string{clientShell: "desktop", clientLocal: "local", clientLAN: "lan"}[kindOf(r)]
 	host, _ := os.Hostname()
 	var lan []string
@@ -312,7 +311,7 @@ func (s *Server) status(r *http.Request) (any, error) {
 		"listenAddr":     s.Addr(),
 		"lanUrls":        lan,
 		"webUiForced":    s.ForceWebUI,
-		"setupRunning":   winsetup.Running(),
+		"setupRunning":   setupRunning(),
 		"settings":       settingsFor(r, cfg),
 	}, nil
 }

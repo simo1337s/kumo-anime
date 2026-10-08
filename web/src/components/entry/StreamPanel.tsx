@@ -324,9 +324,11 @@ function DownloadDialog({ open, onOpenChange, provider, mediaId, dub, episodes, 
     )
 }
 
-// Windows: Kumo's setup installs ani-cli with Git (whose bash runs it).
+// Windows and macOS: Kumo's setup installs ani-cli (on Windows with Git,
+// whose bash runs it).
 function InstallAniCli({ running }: { running: boolean }) {
-    const install = useInstallPrograms()
+    const { data: status } = useStatus()
+    const install = useInstallPrograms(status)
     return (
         <Button variant="primary" size="sm" className="ml-auto" icon={<Download className="size-4" />} loading={install.isPending} disabled={running} onClick={() => install.mutate()}>
             {running ? "Installing…" : "Install"}

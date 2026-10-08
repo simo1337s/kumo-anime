@@ -209,7 +209,7 @@ type ExtensionSettings struct {
 // Defaults returns the settings used on first launch.
 func Defaults() Settings {
 	home, _ := os.UserHomeDir()
-	videos := filepath.Join(home, "Videos", "Anime")
+	videos := filepath.Join(home, videosFolder, "Anime")
 	return Settings{
 		SchemaVersion: schemaVersion,
 		Library: LibrarySettings{
@@ -477,8 +477,8 @@ func ExpandHome(p string) string { return expandHome(p) }
 
 // Paths -----------------------------------------------------------------
 
-// DataDir is ~/.local/share/kumo on Linux and %APPDATA%\Kumo on Windows,
-// or $KUMO_DATA_DIR.
+// DataDir is ~/.local/share/kumo on Linux, ~/Library/Application
+// Support/Kumo on macOS and %APPDATA%\Kumo on Windows, or $KUMO_DATA_DIR.
 func DataDir() string {
 	if d := os.Getenv("KUMO_DATA_DIR"); d != "" {
 		return d
@@ -487,8 +487,8 @@ func DataDir() string {
 }
 
 // RuntimeDir holds the server's address, the desktop window's token and
-// other temporary files: $XDG_RUNTIME_DIR/kumo on Linux,
-// %LOCALAPPDATA%\Kumo\run on Windows.
+// other temporary files: $XDG_RUNTIME_DIR/kumo on Linux, $TMPDIR/kumo on
+// macOS, %LOCALAPPDATA%\Kumo\run on Windows.
 func RuntimeDir() string {
 	dir := runtimeDir()
 	_ = os.MkdirAll(dir, 0o700)

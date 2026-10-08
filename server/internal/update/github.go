@@ -224,7 +224,9 @@ type release struct {
 	} `json:"assets"`
 }
 
-var windowsTag = regexp.MustCompile(`^windows-v\d+(\.\d+)*$`)
+// releaseVersion is the version in a release's tag, after the system's
+// prefix (windows-v, macos-v).
+var releaseVersion = regexp.MustCompile(`^\d+(\.\d+)*$`)
 
 // ---------------------------------------------------------------------------
 // Token
