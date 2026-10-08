@@ -553,10 +553,11 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         }
     }
 
-    const currentSkip = skips.find(s => ["op", "mixed-op", "recap", "ed", "mixed-ed"].includes(s.type) && time >= s.start && time < s.end - 1)
+    // The next episode's preview isn't skipped: no button, no marker.
+    const skippable = skips.filter(s => ["op", "mixed-op", "recap", "ed", "mixed-ed"].includes(s.type) && skipName(s, skips, duration) !== "preview")
+    const currentSkip = skippable.find(s => time >= s.start && time < s.end - 1)
     const skipWhat = currentSkip && skipName(currentSkip, skips, duration)
-    // The next episode's preview plays: only its button skips it.
-    const autoSkip = skipWhat === "ending" ? settings?.playback.skipOutroAniSkip : skipWhat === "opening" || skipWhat === "recap" ? settings?.playback.skipIntroAniSkip : false
+    const autoSkip = skipWhat === "ending" ? settings?.playback.skipOutroAniSkip : skipWhat ? settings?.playback.skipIntroAniSkip : false
     useEffect(() => {
         if (!currentSkip || !autoSkip || skipped.current.has(currentSkip.type)) return
         skipped.current.add(currentSkip.type)
@@ -778,7 +779,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                 >
                     <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-full bg-white/20 transition-all group-hover/seek:h-1.5">
                         <div className="absolute inset-y-0 left-0 bg-white/30" style={{ width: `${total ? Math.min(100, (buffered / total) * 100) : 0}%` }} />
-                        {skips.map(s => (
+                        {skippable.map(s => (
                             <div key={s.type} className="absolute inset-y-0 bg-amber-300/50" style={{ left: `${(s.start / total) * 100}%`, width: `${((s.end - s.start) / total) * 100}%` }} />
                         ))}
                         <div className="absolute inset-y-0 left-0 bg-brand" style={{ width: `${pct}%` }} />
