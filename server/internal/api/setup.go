@@ -11,7 +11,8 @@ import (
 
 // installPrograms opens the setup that installs the programs Kumo uses on
 // this computer: on Windows with Scoop (Git, ani-cli, ffmpeg, mpv, yt-dlp...)
-// in a PowerShell window, on macOS with Homebrew in Terminal.
+// in a PowerShell window, on macOS by downloads into Kumo's folder, in
+// Terminal.
 func (s *Server) installPrograms(r *http.Request) (any, error) {
 	if !isTrusted(r) {
 		return nil, forbidden("programs can only be installed from this computer")

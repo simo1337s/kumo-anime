@@ -27,7 +27,7 @@ export function ProgramsNotice() {
                     {running
                         ? `Follow the ${setupWindow(status)} window. Kumo picks the programs up as soon as they're installed.`
                         : status?.platform === "darwin"
-                          ? "Kumo can install them for you with Homebrew, in a Terminal window."
+                          ? "Kumo can download them for you, in a Terminal window: no Homebrew or password needed."
                           : "Kumo can install them for you with Scoop, in a PowerShell window, for your Windows user (no administrator rights)."}
                 </p>
             </div>

@@ -1,9 +1,11 @@
 //go:build !windows
 
-// Package macsetup installs the programs Kumo uses on macOS (ffmpeg, mpv,
-// yt-dlp, ani-cli) with Homebrew, installing Homebrew first when it's
-// missing: it opens install-tools.command in Terminal, where the user
-// follows it and answers it (Homebrew asks for the password).
+// Package macsetup installs the programs Kumo uses on macOS: it opens
+// install-tools.command in Terminal, where the user follows it. The script
+// downloads ready-made ffmpeg, ffprobe, yt-dlp and ani-cli for this Mac
+// (Apple silicon or Intel) into Kumo's own folder (util.ToolsDir), with no
+// Homebrew and no password, and installs mpv with Homebrew on Apple silicon
+// when Homebrew is there.
 package macsetup
 
 import (
@@ -21,6 +23,7 @@ import (
 	"time"
 
 	"github.com/simo1337s/animetest/server/internal/config"
+	"github.com/simo1337s/animetest/server/internal/util"
 )
 
 //go:embed install-tools.command
@@ -38,8 +41,9 @@ var (
 	dir = config.RuntimeDir
 	// open opens the script in Terminal, and goos is the system (variables
 	// for the tests).
-	open = func(path string) error { return exec.Command("open", path).Run() }
-	goos = runtime.GOOS
+	open     = func(path string) error { return exec.Command("open", path).Run() }
+	goos     = runtime.GOOS
+	toolsDir = util.ToolsDir
 )
 
 const (
@@ -81,6 +85,11 @@ func runningLocked() bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
+// shellQuote quotes s for the shell.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // Start opens the setup in Terminal and returns at once.
 func Start() error {
 	if goos != "darwin" {
@@ -93,7 +102,12 @@ func Start() error {
 	}
 	path := filepath.Join(dir(), name)
 	_ = os.Remove(path + ".pid")
-	if err := os.WriteFile(path, script, 0o700); err != nil {
+	bin := toolsDir()
+	if bin == "" {
+		bin = filepath.Join(config.DataDir(), "bin")
+	}
+	text := strings.Replace(string(script), "'@KUMO_BIN@'", shellQuote(bin), 1)
+	if err := os.WriteFile(path, []byte(text), 0o700); err != nil {
 		return err
 	}
 	// WriteFile keeps the mode of a file that was there.

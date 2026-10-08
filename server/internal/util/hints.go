@@ -19,10 +19,10 @@ func InstallHint(tool string) string {
 	}
 	if runtime.GOOS == "darwin" {
 		switch tool {
-		case "ffmpeg", "mpv", "yt-dlp":
-			return "brew install " + tool + " (Homebrew, brew.sh)"
-		case "ani-cli":
-			return "brew tap pystardust/ani-cli https://github.com/pystardust/ani-cli.git, then brew install ani-cli (Homebrew, brew.sh)"
+		case "ffmpeg", "yt-dlp", "ani-cli":
+			return "Settings › App › Programs › Install downloads it"
+		case "mpv":
+			return "get it from mpv.io, or brew install mpv on an Apple silicon Mac"
 		}
 		return "install " + tool
 	}

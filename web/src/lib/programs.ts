@@ -1,7 +1,7 @@
 // The programs Kumo uses and the setup that installs them: on Windows
 // server/internal/winsetup (Scoop, Git, ani-cli, ffmpeg, mpv, yt-dlp… in a
-// PowerShell window), on macOS server/internal/macsetup (Homebrew, in
-// Terminal).
+// PowerShell window), on macOS server/internal/macsetup (downloads into
+// Kumo's folder, in Terminal).
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect } from "react"
 import { toast } from "@/lib/toast"

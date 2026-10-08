@@ -139,6 +139,10 @@ func (d *Driver) Status(ctx context.Context) Status {
 	if err != nil {
 		return st
 	}
+	// ani-cli looks for a player before anything else, and stops when it
+	// finds none (on a Mac without mpv or IINA): Kumo plays the streams
+	// itself.
+	cmd.Env = append(os.Environ(), "ANI_CLI_PLAYER=true")
 	if out, err := cmd.Output(); err == nil {
 		st.Version = strings.TrimSpace(string(out))
 	}

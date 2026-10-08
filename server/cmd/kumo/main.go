@@ -45,6 +45,8 @@ func main() {
 	if err := os.MkdirAll(*dataDir, 0o700); err != nil {
 		log.Fatal(err)
 	}
+	// Programs the macOS setup installs (Settings > App > Programs).
+	util.SetToolsDir(filepath.Join(*dataDir, "bin"))
 	a, err := app.New(*dataDir)
 	if err != nil {
 		log.Fatal(err)

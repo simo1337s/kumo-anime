@@ -20,6 +20,13 @@ func init() {
 	_ = os.Setenv("PATH", withToolDirs(os.Getenv("PATH"), toolDirs, isDir))
 }
 
+// addToolsDir puts Kumo's own programs folder first on the PATH.
+func addToolsDir(dir string) {
+	if dir != "" {
+		_ = os.Setenv("PATH", withToolDirs(os.Getenv("PATH"), []string{dir}, func(string) bool { return true }))
+	}
+}
+
 // withToolDirs puts the dirs that exist and that path lacks in front of it,
 // in order.
 func withToolDirs(path string, dirs []string, exists func(string) bool) string {

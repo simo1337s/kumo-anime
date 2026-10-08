@@ -119,9 +119,10 @@ jobs:
 
       # The setup that installs the programs Kumo uses runs on users' Macs,
       # in Terminal (Settings > App > Programs): check that it parses in the
-      # bash macOS has, then run it here like a user would and check that
-      # it installed everything. A failure only warns: it may be Homebrew's
-      # or ani-cli's tap's, and shouldn't hold back the app.
+      # bash macOS has, then run it here like a user would (without
+      # Homebrew) and check that what it downloaded runs. A failure only
+      # warns: it may be a download site's, and shouldn't hold back the app.
+      # The setup-intel job does the same on an Intel Mac.
       - name: Check the programs setup script
         run: |
           /bin/bash --version | head -1
@@ -129,22 +130,8 @@ jobs:
 
       - name: Run the programs setup
         continue-on-error: true
-        timeout-minutes: 20
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-          HOMEBREW_NO_INSTALL_CLEANUP: "1"
-          TERM: dumb
-        run: |
-          server/internal/macsetup/install-tools.command < /dev/null || true
-          missing=""
-          for tool in ffmpeg mpv yt-dlp ani-cli; do
-            if path=$(command -v "$tool"); then echo "$tool: $path"; else missing="$missing $tool"; fi
-          done
-          ani-cli --version || true
-          if [ -n "$missing" ]; then
-            echo "::warning::The programs setup didn't install:$missing"
-            exit 1
-          fi
+        timeout-minutes: 15
+        run: .github/scripts/check-mac-setup.sh
 
       - name: go vet
         working-directory: server
@@ -315,7 +302,7 @@ jobs:
 
           Kumo finds newer releases by itself and updates from its Home page (**Update**), once it's in your Applications folder.
 
-          Some features use other programs: ffmpeg (needed by the in-app player for most files), mpv, yt-dlp and ani-cli. Kumo installs them with Homebrew from **Settings › App › Programs**; see [packaging/macos/README.md]($repo/blob/$GITHUB_SHA/packaging/macos/README.md).
+          Some features use other programs: ffmpeg (needed by the in-app player for most files), yt-dlp, ani-cli and mpv. Kumo downloads them for your Mac from **Settings › App › Programs**, with no Homebrew or password needed; see [packaging/macos/README.md]($repo/blob/$GITHUB_SHA/packaging/macos/README.md).
 
           Built from $GITHUB_SHA by [workflow run $GITHUB_RUN_NUMBER]($repo/actions/runs/$GITHUB_RUN_ID).
           EOF
@@ -347,3 +334,20 @@ jobs:
             echo "Deleting the release $tag and its tag"
             gh release delete "$tag" --cleanup-tag --yes
           done
+
+  # The programs setup on an Intel Mac: the downloads are for each kind of
+  # Mac. It doesn't hold back the release either.
+  setup-intel:
+    name: Programs setup (macOS Intel)
+    if: github.event_name != 'push' || github.ref_name == github.event.repository.default_branch
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Check the programs setup script
+        run: /bin/bash -n server/internal/macsetup/install-tools.command
+
+      - name: Run the programs setup
+        run: .github/scripts/check-mac-setup.sh

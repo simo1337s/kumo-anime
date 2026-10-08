@@ -32,19 +32,22 @@ Or, in Terminal, once: `xattr -dr com.apple.quarantine /Applications/Kumo.app`
 | mpv | The external player |
 | yt-dlp | Faster, more reliable episode downloads |
 
-**Settings › App › Programs › Install missing programs** installs them with
-[Homebrew](https://brew.sh) in a Terminal window, and Homebrew itself first if
-it's missing (its installer asks for your password). By hand:
+**Settings › App › Programs › Install missing programs** downloads ready-made
+ffmpeg, ffprobe, yt-dlp and ani-cli for your Mac (Apple silicon or Intel) into
+Kumo's own folder, `~/Library/Application Support/Kumo/bin`, in a Terminal
+window: no Homebrew, no password. ffmpeg comes from
+[Martin Riedl's builds](https://ffmpeg.martin-riedl.de) (and
+[evermeet.cx](https://evermeet.cx/ffmpeg/) on Intel), yt-dlp and ani-cli from
+their GitHub projects.
 
-```bash
-brew install ffmpeg mpv yt-dlp
-# ani-cli comes from its own tap
-brew tap pystardust/ani-cli https://github.com/pystardust/ani-cli.git
-brew install ani-cli
-```
+mpv, the external player, is optional (Kumo's own player doesn't need it). On
+an Apple silicon Mac with [Homebrew](https://brew.sh) the setup installs it
+with `brew install mpv`; otherwise get it from
+[mpv.io](https://mpv.io/installation/). Homebrew no longer builds ready-made
+packages for Intel Macs, so there it would compile everything for a long time.
 
-Kumo finds programs in Homebrew's folders (`/opt/homebrew/bin` on Apple
-silicon, `/usr/local/bin` on Intel) even when it's opened from the Dock, which
+Kumo also finds programs installed with Homebrew (`/opt/homebrew/bin` on Apple
+silicon, `/usr/local/bin` on Intel), even when it's opened from the Dock, which
 doesn't give apps those folders.
 
 For torrents, Kumo talks to qBittorrent's Web UI (or Transmission): install
@@ -57,6 +60,7 @@ address and login in **Settings › Torrent Client**.
 |---|---|
 | Settings, database, artwork, extensions | `~/Library/Application Support/Kumo` |
 | The window's own data (cookies of the AniList login) | `~/Library/Application Support/Kumo/electron` |
+| Programs the setup downloaded | `~/Library/Application Support/Kumo/bin` |
 | Updates being downloaded | `~/Library/Caches/kumo/update` |
 | The local library, by default | `~/Movies/Anime` |
 

@@ -609,7 +609,7 @@ function ProgramsGroup() {
                     label="Install missing programs"
                     help={
                         status?.platform === "darwin"
-                            ? "Installs ffmpeg, mpv, yt-dlp and ani-cli with Homebrew, in a Terminal window (and Homebrew first, if it's missing: that asks for your password). Programs you already have are skipped."
+                            ? "Downloads ffmpeg, yt-dlp and ani-cli for this Mac (Apple silicon or Intel) into Kumo's folder, in a Terminal window: no Homebrew or password needed. mpv, the external player, comes from Homebrew on Apple silicon Macs that have it. Programs you already have are skipped."
                             : "Installs Git, ani-cli, ffmpeg, mpv, yt-dlp and the rest of what Kumo uses with Scoop, for your Windows user (no administrator rights), in a PowerShell window. Programs you already have are skipped. It also offers to sign you in to GitHub, for Kumo's updates."
                     }
                 >
@@ -1046,7 +1046,7 @@ function StreamingSection({ draft, set }: SectionProps) {
                         label="Install ani-cli"
                         help={
                             status?.platform === "darwin"
-                                ? "With Homebrew, and the other programs Kumo uses: Settings › App › Programs."
+                                ? "With the other programs Kumo uses, downloaded into Kumo's folder: Settings › App › Programs."
                                 : "With Git, whose bash runs it, and the other programs Kumo uses: Settings › App › Programs."
                         }
                     >
