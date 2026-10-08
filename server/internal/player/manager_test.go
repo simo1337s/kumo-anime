@@ -484,20 +484,26 @@ func TestMpvSkipsWhatTheSettingsSay(t *testing.T) {
 			m, l := newTestManager(t, func(c *config.Settings) {
 				c.Playback.SkipIntroAniSkip, c.Playback.SkipOutroAniSkip = tc.intro, tc.outro
 			})
-			m.skipTimes = func(_ context.Context, mediaID, episode int) []SkipInterval {
-				if mediaID != 6 || episode != 2 {
-					t.Errorf("skip times asked for %d/%d", mediaID, episode)
+			m.skipTimes = func(_ context.Context, mediaID, episode int, length float64) []SkipInterval {
+				if mediaID != 6 || episode != 2 || length != 1420 {
+					t.Errorf("skip times asked for %d/%d, %vs long", mediaID, episode, length)
 				}
 				return skips
 			}
 			if _, err := m.PlayMpv(PlayRequest{MediaID: 6, Episode: 2, Source: "local", Target: "/anime/02.mkv"}); err != nil {
 				t.Fatal(err)
 			}
+			f := l.last()
+			// The times are asked for once the length is known.
+			time.Sleep(50 * time.Millisecond)
+			if st := m.Status(); st == nil || len(st.Skips) != 0 {
+				t.Fatal("skip times before the length was known")
+			}
+			f.prop("duration", 1420.0)
 			waitFor(t, "the skip times", func() bool {
 				st := m.Status()
 				return st != nil && len(st.Skips) == len(skips)
 			})
-			f := l.last()
 			told := func() []string {
 				var out []string
 				seeks, texts := f.sent("set_property time-pos"), f.sent("show-text")
@@ -506,7 +512,6 @@ func TestMpvSkipsWhatTheSettingsSay(t *testing.T) {
 				}
 				return out
 			}
-			f.prop("duration", 1420.0)
 			// The recap, the opening, then the ending and the preview; a seek
 			// here doesn't move the position, as no time-pos comes back.
 			for i, pos := range []float64{10, 95, 600, 1300, 1390} {

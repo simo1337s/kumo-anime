@@ -522,7 +522,8 @@ func (s *Server) skips(r *http.Request) (any, error) {
 	if err != nil || media.IDMal == nil {
 		return []player.SkipInterval{}, nil
 	}
-	out := player.SkipTimes(r.Context(), s.app.DB, *media.IDMal, ep)
+	length, _ := strconv.ParseFloat(r.URL.Query().Get("length"), 64)
+	out := player.SkipTimes(r.Context(), s.app.DB, *media.IDMal, ep, length)
 	if out == nil {
 		out = []player.SkipInterval{}
 	}

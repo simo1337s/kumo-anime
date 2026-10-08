@@ -60,7 +60,9 @@ type Session struct {
 	lastSave time.Time
 	lastEmit time.Time
 	skipped  map[string]bool
-	loopDone chan struct{} // closed once the event loop has saved everything
+	// skipsAsked: the AniSkip times were asked for (once the length is known).
+	skipsAsked bool
+	loopDone   chan struct{} // closed once the event loop has saved everything
 }
 
 // snapshot returns a copy of s that shares nothing mutable with it, safe to
@@ -143,7 +145,7 @@ type Manager struct {
 
 	// Replaced in tests.
 	launch      func(mpvPath string, opts LaunchOptions) (*Mpv, error)
-	skipTimes   func(ctx context.Context, mediaID, episode int) []SkipInterval
+	skipTimes   func(ctx context.Context, mediaID, episode int, length float64) []SkipInterval
 	trackGuard  time.Duration
 	trackSettle time.Duration
 }
@@ -267,30 +269,28 @@ func (m *Manager) playLocked(req PlayRequest) (*Session, error) {
 	c := s.snapshot()
 	m.mu.Unlock()
 
-	if (cfg.Playback.SkipIntroAniSkip || cfg.Playback.SkipOutroAniSkip) && req.MediaID > 0 && req.Episode > 0 {
-		go m.loadSkips(s)
-	}
 	go m.loop(s, mpv)
 	return c, nil
 }
 
-// loadSkips fetches the session's AniSkip intervals.
-func (m *Manager) loadSkips(s *Session) {
+// loadSkips fetches the session's AniSkip intervals, for an episode length
+// seconds long.
+func (m *Manager) loadSkips(s *Session, length float64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	skips := m.skipTimes(ctx, s.MediaID, s.Episode)
+	skips := m.skipTimes(ctx, s.MediaID, s.Episode, length)
 	m.mu.Lock()
 	s.Skips = skips
 	m.mu.Unlock()
 }
 
 // aniSkipTimes looks up an episode's AniSkip intervals.
-func (m *Manager) aniSkipTimes(ctx context.Context, mediaID, episode int) []SkipInterval {
+func (m *Manager) aniSkipTimes(ctx context.Context, mediaID, episode int, length float64) []SkipInterval {
 	media, err := m.platform.MediaLite(ctx, mediaID)
 	if err != nil || media.IDMal == nil {
 		return nil
 	}
-	return SkipTimes(ctx, m.db, *media.IDMal, episode)
+	return SkipTimes(ctx, m.db, *media.IDMal, episode, length)
 }
 
 // loop handles the session's mpv events until mpv exits.
@@ -365,6 +365,13 @@ func (m *Manager) onProperty(s *Session, mpv *Mpv, w *trackWatch, ev MpvEvent) {
 		var f float64
 		if decodeProp(ev.Data, &f) {
 			s.Duration = f
+			// AniSkip's times depend on the episode's length: ask once mpv
+			// knows it.
+			p := m.settings.Get().Playback
+			if f > 0 && !s.skipsAsked && (p.SkipIntroAniSkip || p.SkipOutroAniSkip) && s.MediaID > 0 && s.Episode > 0 {
+				s.skipsAsked = true
+				go m.loadSkips(s, f)
+			}
 		}
 	case "pause":
 		var b bool

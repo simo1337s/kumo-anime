@@ -215,7 +215,6 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                     startAt.current = res.resumeAt || 0
                     applyStreamSubs(sorted[0])
                 }
-                api.get<Skip[]>(`/api/playback/skips${qs({ mediaId, episode })}`).then(s => !cancelled && setSkips(s ?? [])).catch(() => {})
                 // Next episode
                 api.get<EntryView>(`/api/anime/${mediaId}`)
                     .then(e => {
@@ -556,6 +555,21 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         }
     }
 
+    // AniSkip's times are recorded on one version of the episode and land on
+    // random scenes in a longer or shorter one: ask for the ones that fit
+    // this one's length, once it's known.
+    const length = Number.isFinite(duration) ? Math.round(duration) : 0
+    useEffect(() => {
+        setSkips([])
+        if (length <= 0 || mediaId <= 0 || episode <= 0) return
+        let cancelled = false
+        api.get<Skip[]>(`/api/playback/skips${qs({ mediaId, episode, length })}`)
+            .then(s => !cancelled && setSkips(s ?? []))
+            .catch(() => {})
+        return () => {
+            cancelled = true
+        }
+    }, [mediaId, episode, length])
     const skippable = skips.filter(s => SKIPPED.includes(s.type))
     const currentSkip = skippable.find(s => time >= s.start && time < s.end - 1)
     const skipWhat = currentSkip && skipName(currentSkip.type)
