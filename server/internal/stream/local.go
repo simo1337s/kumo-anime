@@ -397,6 +397,12 @@ func (l *Local) SeekPoint(ctx context.Context, path string, t float64, audio int
 
 const seekMargin = 0.4
 
+// seekAhead: a keyframe this little after the time asked is taken over the
+// last one before it, further back. Skips and resumes are mostly asked for
+// at the end of a scene, and the next one starts with a keyframe: a skipped
+// ending then isn't partly heard again.
+const seekAhead = 1.5
+
 func (l *Local) startFor(ctx context.Context, path string, pl plan, t float64) float64 {
 	if t <= 0 {
 		return 0
@@ -410,7 +416,9 @@ func (l *Local) startFor(ctx context.Context, path string, pl plan, t float64) f
 	return t
 }
 
-// seekKeyframe finds the keyframe a copy asked to start at t starts at.
+// seekKeyframe finds the keyframe a copy asked to start at t starts at: the
+// last one at or before t, or the next one when it's close (seekAhead) and
+// the last one isn't.
 func (l *Local) seekKeyframe(ctx context.Context, path string, t float64) (float64, bool) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -419,7 +427,7 @@ func (l *Local) seekKeyframe(ctx context.Context, path string, t float64) (float
 		from := max(0, t-window)
 		out, err := exec.CommandContext(ctx, ffprobe, "-v", "error", "-select_streams", "v:0",
 			"-show_entries", "packet=pts_time,flags", "-of", "csv=p=0",
-			"-read_intervals", fmt.Sprintf("%.3f%%%.3f", from, t+1), path).Output()
+			"-read_intervals", fmt.Sprintf("%.3f%%%.3f", from, t+seekAhead+1), path).Output()
 		if err != nil {
 			return 0, false
 		}
@@ -440,11 +448,14 @@ func (l *Local) seekKeyframe(ctx context.Context, path string, t float64) (float
 				i = j
 			}
 		}
+		if i < 0 && from > 0 {
+			continue // look further back
+		}
+		if i+1 < len(keys) && keys[i+1]-t <= seekAhead && (i < 0 || t-keys[i] > 0.5) {
+			i++
+		}
 		if i < 0 {
-			if from == 0 {
-				return 0, true // no keyframe read before t: from the start
-			}
-			continue
+			return 0, true // no keyframe read before t: from the start
 		}
 		for i+1 < len(keys) && keys[i+1]-keys[i] < seekMargin+0.05 {
 			i++

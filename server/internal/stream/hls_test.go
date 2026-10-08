@@ -93,12 +93,20 @@ func TestSeekPointAcrossFormats(t *testing.T) {
 	}
 }
 
-// Copied video starts at the keyframe before the requested time, and the
-// player must know it, or subtitles are off by up to a keyframe interval.
+// Copied video starts at the keyframe before the requested time, or the one
+// just after it, and the player must know it, or subtitles are off by up to
+// a keyframe interval.
 func TestSeekPointIsTheKeyframe(t *testing.T) {
 	l, video := newFfmpegLocal(t, "libx264")
 	ctx := context.Background()
-	for _, tc := range []struct{ t, want float64 }{{0, 0}, {4, 0}, {10, 10}, {12, 10}, {29, 25}} {
+	// Keyframes every 5 seconds.
+	for _, tc := range []struct{ t, want float64 }{
+		{0, 0}, {10, 10}, {12, 10}, {29, 25},
+		{4, 5},     // the next one, 1s on, rather than the last, 4s back
+		{3, 0},     // the next one is 2s on: too far
+		{10.4, 10}, // the last one is right there
+		{14.9, 15}, // a skip ending just before a scene cut
+	} {
 		got, err := l.SeekPoint(ctx, video, tc.t, 0, "remux", nil, false)
 		if err != nil || got != tc.want {
 			t.Errorf("SeekPoint(%v) = %v, %v; want %v", tc.t, got, err, tc.want)

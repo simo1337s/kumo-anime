@@ -467,7 +467,9 @@ func TestMpvStartsWatchingOncePerViewing(t *testing.T) {
 }
 
 func TestMpvSkipsWhatTheSettingsSay(t *testing.T) {
-	skips := []SkipInterval{{Type: "op", Start: 90, End: 180}, {Type: "mixed-ed", Start: 1290, End: 1380}}
+	// The "recap" after the ending is the next episode's preview, which
+	// plays.
+	skips := []SkipInterval{{Type: "op", Start: 90, End: 180}, {Type: "mixed-ed", Start: 1290, End: 1380}, {Type: "recap", Start: 1385, End: 1415}}
 	cases := []struct {
 		name         string
 		intro, outro bool
@@ -505,9 +507,9 @@ func TestMpvSkipsWhatTheSettingsSay(t *testing.T) {
 				return out
 			}
 			f.prop("duration", 1420.0)
-			// The opening, then the ending; a seek here doesn't move the
-			// position, as no time-pos comes back.
-			for i, pos := range []float64{10, 95, 600, 1300} {
+			// The opening, then the ending and the preview; a seek here
+			// doesn't move the position, as no time-pos comes back.
+			for i, pos := range []float64{10, 95, 600, 1300, 1390} {
 				f.prop("time-pos", pos)
 				waitFor(t, fmt.Sprint("the position to reach ", pos), func() bool {
 					st := m.Status()

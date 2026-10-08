@@ -31,8 +31,15 @@ import { Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparat
 
 type SubOption = { key: string; label: string; lang: string; title: string; index: number; url: string; bitmap?: boolean }
 type Skip = { type: string; start: number; end: number }
-// What an AniSkip interval (op, mixed-op, recap, ed, mixed-ed) is.
-const skipName = (type: string) => (type === "ed" || type === "mixed-ed" ? "ending" : type === "recap" ? "recap" : "opening")
+// What an AniSkip interval (op, mixed-op, recap, ed, mixed-ed) is. AniSkip
+// has no type for the next episode's preview: a "recap" after the ending, or
+// in the episode's second half, is one.
+function skipName(s: Skip, skips: Skip[], duration: number) {
+    if (s.type === "ed" || s.type === "mixed-ed") return "ending"
+    if (s.type !== "recap") return "opening"
+    const afterEnding = skips.some(e => (e.type === "ed" || e.type === "mixed-ed") && e.start < s.start)
+    return afterEnding || (duration > 0 && s.start > duration / 2) ? "preview" : "recap"
+}
 
 const langNames: Record<string, string> = {
     jpn: "Japanese", ja: "Japanese", eng: "English", en: "English", spa: "Spanish", es: "Spanish", fre: "French", fra: "French", fr: "French",
@@ -547,12 +554,14 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
     }
 
     const currentSkip = skips.find(s => ["op", "mixed-op", "recap", "ed", "mixed-ed"].includes(s.type) && time >= s.start && time < s.end - 1)
-    const autoSkip = currentSkip && (skipName(currentSkip.type) === "ending" ? settings?.playback.skipOutroAniSkip : settings?.playback.skipIntroAniSkip)
+    const skipWhat = currentSkip && skipName(currentSkip, skips, duration)
+    // The next episode's preview plays: only its button skips it.
+    const autoSkip = skipWhat === "ending" ? settings?.playback.skipOutroAniSkip : skipWhat === "opening" || skipWhat === "recap" ? settings?.playback.skipIntroAniSkip : false
     useEffect(() => {
         if (!currentSkip || !autoSkip || skipped.current.has(currentSkip.type)) return
         skipped.current.add(currentSkip.type)
         seekTo(currentSkip.end)
-        toast.info(`Skipped ${skipName(currentSkip.type)}`)
+        toast.info(`Skipped ${skipWhat}`)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentSkip?.type, autoSkip])
 
@@ -916,7 +925,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
             <div className="absolute right-8 bottom-32 z-10 flex flex-col items-end gap-3">
                 {currentSkip && (
                     <button onClick={() => seekTo(currentSkip.end)} className="flex h-11 items-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black shadow-2xl rise-in hover:bg-white/90">
-                        <FastForward className="size-4 fill-black" /> Skip {skipName(currentSkip.type)}
+                        <FastForward className="size-4 fill-black" /> Skip {skipWhat}
                     </button>
                 )}
             </div>
