@@ -1,6 +1,8 @@
 package library
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/simo1337s/animetest/server/internal/anilist"
@@ -73,5 +75,50 @@ func TestEpisodeFile(t *testing.T) {
 	}
 	if f := EpisodeFile([]*LocalFile{s1, r2}, 12); f != nil {
 		t.Errorf("episode 12: %v", f)
+	}
+}
+
+// Season 1's files, with only R2 on the list: AniList finds season 1. When
+// AniList can't be searched (offline, rate limited), or matching is limited
+// to the list, R2 isn't taken instead: watching season 1 would have marked
+// R2's episodes watched.
+func TestOtherSeasonNeverTakenForLackOfBetter(t *testing.T) {
+	s1 := testMedia(1575, "Code Geass: Hangyaku no Lelouch", "Code Geass: Lelouch of the Rebellion")
+	r2 := testMedia(2904, "Code Geass: Hangyaku no Lelouch R2", "Code Geass: Lelouch of the Rebellion R2")
+	s1Files := &group{title: "Code Geass - Hangyaku no Lelouch", folderTitle: "Code Geass", kind: "main"}
+	matcher := func(outsideList bool, search func(string) ([]*anilist.Media, error)) *Matcher {
+		m := NewMatcher(nil, 0.5, outsideList)
+		m.searchFn = func(_ context.Context, q string) ([]*anilist.Media, error) { return search(q) }
+		return m
+	}
+
+	found := matcher(true, func(string) ([]*anilist.Media, error) { return []*anilist.Media{s1, r2}, nil })
+	if b := found.bestMatch(context.Background(), s1Files, []*anilist.Media{r2}); b.media != s1 {
+		t.Errorf("AniList answering: matched %v, want season 1", b.media)
+	}
+
+	down := matcher(true, func(string) ([]*anilist.Media, error) { return nil, errors.New("429 Too Many Requests") })
+	if b := down.bestMatch(context.Background(), s1Files, []*anilist.Media{r2}); b.media != nil {
+		t.Errorf("AniList not answering: matched %s, want unmatched (tried again next scan)", b.media.Title.Romaji)
+	}
+	if down.SearchFailures() == 0 {
+		t.Error("the failed search isn't counted")
+	}
+	// A failure isn't remembered: the next file asks again.
+	if _, ok := down.search(context.Background(), "Code Geass"); ok || len(down.searchCache) != 0 {
+		t.Error("a failed search was cached")
+	}
+
+	listOnly := matcher(false, func(string) ([]*anilist.Media, error) {
+		t.Error("searched AniList with matching limited to the list")
+		return nil, nil
+	})
+	if b := listOnly.bestMatch(context.Background(), s1Files, []*anilist.Media{r2}); b.media != nil {
+		t.Errorf("list only: matched %s, want unmatched", b.media.Title.Romaji)
+	}
+	// R2's own files still match R2 from the list, without a search.
+	r2Files := &group{title: "Code Geass Hangyaku no Lelouch R2", folderTitle: "Code Geass R2", kind: "main"}
+	if b := listOnly.bestMatch(context.Background(), r2Files, []*anilist.Media{s1, r2}); b.media != r2 {
+		t.Errorf("R2 files: matched %v, want R2", b.media)
 	}
 }

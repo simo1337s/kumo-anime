@@ -2,6 +2,8 @@ package library
 
 import (
 	"context"
+	"errors"
+	"github.com/simo1337s/animetest/server/internal/anilist"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -306,5 +308,77 @@ func TestFoldersExplainSkippedFolders(t *testing.T) {
 	}
 	if f := byLabel()["[Lulu] Code Geass"]; !strings.Contains(f.Problem, "ignore its 2 videos") {
 		t.Errorf("ignored by hand: %+v", f)
+	}
+}
+
+// Matching got better (matcherVersion): files matched before are matched
+// again once. Season 1's files matched to R2 go to season 1 when AniList
+// confirms it, keep their match while it can't, and aren't matched again
+// after.
+func TestScanRematchesAfterMatcherUpgrade(t *testing.T) {
+	lib := t.TempDir()
+	s, _ := newTestScanner(t, lib)
+	ep := filepath.Join(lib, "Code Geass", "Code Geass - Hangyaku no Lelouch - 01.mkv")
+	byHand := filepath.Join(lib, "Other", "Other - 01.mkv")
+	touch(t, ep)
+	touch(t, byHand)
+	scan(t, s) // indexed, not matched
+	files, _ := s.Store.All()
+	for _, f := range files {
+		f.MediaID, f.Episode, f.Kind, f.MatchScore = 2904, 1, "main", 0.86 // R2, by the old matcher
+		if f.Path == byHand {
+			f.MediaID, f.Locked = 777, true // matched by hand
+		}
+	}
+	if err := s.Store.Save(files...); err != nil {
+		t.Fatal(err)
+	}
+
+	s1 := testMedia(1575, "Code Geass: Hangyaku no Lelouch", "Code Geass: Lelouch of the Rebellion")
+	r2 := testMedia(2904, "Code Geass: Hangyaku no Lelouch R2", "Code Geass: Lelouch of the Rebellion R2")
+	aniListUp := false
+	searches := 0
+	s.newMatcher = func(threshold float64, outsideList bool) *Matcher {
+		m := NewMatcher(nil, threshold, outsideList)
+		m.listFn = func(context.Context) []*anilist.Media { return []*anilist.Media{r2} }
+		m.searchFn = func(context.Context, string) ([]*anilist.Media, error) {
+			searches++
+			if !aniListUp {
+				return nil, errors.New("AniList is down")
+			}
+			return []*anilist.Media{s1, r2}, nil
+		}
+		return m
+	}
+	matchedTo := func(path string) int {
+		f, err := s.Store.Get(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f.MediaID
+	}
+	rescan := func() {
+		t.Helper()
+		if _, err := s.Scan(context.Background(), ScanOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rescan() // AniList down: the old match stays, for now
+	if got := matchedTo(ep); got != 2904 {
+		t.Errorf("AniList down: matched to %d, want the old match (2904) kept", got)
+	}
+	aniListUp = true
+	rescan()
+	if got := matchedTo(ep); got != 1575 {
+		t.Errorf("AniList up: matched to %d, want season 1 (1575)", got)
+	}
+	if got := matchedTo(byHand); got != 777 {
+		t.Errorf("a match made by hand changed to %d", got)
+	}
+	searches = 0
+	rescan()
+	if searches != 0 || matchedTo(ep) != 1575 {
+		t.Errorf("matched again after the upgrade (%d searches)", searches)
 	}
 }

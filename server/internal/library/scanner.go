@@ -27,6 +27,8 @@ type Scanner struct {
 	hub      *events.Hub
 	// OnScanned runs after each scan that went through (in the background).
 	OnScanned func()
+	// newMatcher makes the scan's matcher (tests replace it).
+	newMatcher func(threshold float64, outsideList bool) *Matcher
 
 	mu      sync.Mutex
 	running atomic.Bool
@@ -39,8 +41,19 @@ type Scanner struct {
 }
 
 func NewScanner(store *Store, p *anilist.Platform, s *config.Store, hub *events.Hub) *Scanner {
-	return &Scanner{Store: store, platform: p, settings: s, hub: hub}
+	sc := &Scanner{Store: store, platform: p, settings: s, hub: hub}
+	sc.newMatcher = func(threshold float64, outsideList bool) *Matcher { return NewMatcher(p, threshold, outsideList) }
+	return sc
 }
+
+// matcherVersion goes up when matching gets better: the files matched
+// automatically before are matched again, once, at the next scan.
+//   2: other seasons kept apart (Code Geass and R2), also when AniList
+//      can't be searched.
+const (
+	matcherVersion    = 2
+	matcherVersionKey = "library:matcher-version"
+)
 
 type ScanOptions struct {
 	// Re-match every unlocked file, not only new/unmatched ones.
@@ -144,13 +157,19 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (res *ScanResult, 
 		byPath[f.Path] = f
 	}
 
+	// Matching got better since the files were matched: matched again,
+	// once (those matched by hand stay).
+	var version int
+	_, _ = s.Store.db.GetKV(matcherVersionKey, &version)
+	upgrade := version < matcherVersion && !opts.SkipMatching
+
 	res = &ScanResult{Total: len(found)}
 	var changed []*LocalFile
 	var toMatch []*LocalFile
 	for path, info := range found {
 		old := byPath[path]
 		if old != nil && old.Size == info.Size() && old.ModTime == info.ModTime().Unix() && !opts.Full {
-			if old.MediaID == 0 && !old.Locked && !old.Ignored {
+			if (old.MediaID == 0 || upgrade) && !old.Locked && !old.Ignored {
 				cp := *old
 				toMatch = append(toMatch, &cp)
 				changed = append(changed, &cp)
@@ -185,10 +204,29 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (res *ScanResult, 
 	res.Removed = len(removed)
 
 	if !opts.SkipMatching && len(toMatch) > 0 {
-		m := NewMatcher(s.platform, cfg.Library.MatchThreshold, cfg.Library.MatchOutsideList)
+		m := s.newMatcher(cfg.Library.MatchThreshold, cfg.Library.MatchOutsideList)
 		m.MatchFiles(ctx, toMatch, func(done, total int, title string) {
 			s.hub.Publish(events.ScanProgress, ScanProgress{Stage: "matching", Done: done, Total: total, Message: "Matching " + title})
 		})
+		if upgrade {
+			// Matched again only to do better: a file AniList couldn't
+			// confirm a match for keeps its old one, and the upgrade is
+			// done again next scan.
+			for _, f := range toMatch {
+				if old := byPath[f.Path]; f.MediaID == 0 && old != nil && old.MediaID != 0 && old.Size == f.Size && old.ModTime == f.ModTime {
+					f.MediaID, f.Episode, f.Kind, f.MatchScore = old.MediaID, old.Episode, old.Kind, old.MatchScore
+				}
+			}
+			if m.SearchFailures() == 0 && ctx.Err() == nil {
+				defer func() {
+					if err == nil {
+						_ = s.Store.db.SetKV(matcherVersionKey, matcherVersion)
+					}
+				}()
+			}
+		}
+	} else if upgrade && len(toMatch) == 0 {
+		_ = s.Store.db.SetKV(matcherVersionKey, matcherVersion)
 	}
 
 	s.hub.Publish(events.ScanProgress, ScanProgress{Stage: "saving", Message: "Saving…"})

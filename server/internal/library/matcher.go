@@ -17,25 +17,61 @@ type Matcher struct {
 	platform    *anilist.Platform
 	threshold   float64
 	outsideList bool
+	// searchFn searches AniList, listFn gives the anime of the user's list
+	// (tests replace them).
+	searchFn func(ctx context.Context, q string) ([]*anilist.Media, error)
+	listFn   func(ctx context.Context) []*anilist.Media
 
 	mu          sync.Mutex
 	searchCache map[string][]*anilist.Media
 	detailCache map[int]*anilist.Media
+	failed      int // AniList searches that failed
 }
 
 func NewMatcher(p *anilist.Platform, threshold float64, outsideList bool) *Matcher {
-	return &Matcher{
+	m := &Matcher{
 		platform:    p,
 		threshold:   threshold,
 		outsideList: outsideList,
 		searchCache: map[string][]*anilist.Media{},
 		detailCache: map[int]*anilist.Media{},
 	}
+	m.searchFn = func(ctx context.Context, q string) ([]*anilist.Media, error) {
+		page, err := p.Search(ctx, anilist.SearchParams{Search: q, PerPage: 10, Type: "ANIME"})
+		if err != nil || page == nil {
+			return nil, err
+		}
+		return page.Media, nil
+	}
+	m.listFn = func(ctx context.Context) []*anilist.Media {
+		coll, err := p.Collection(ctx, "ANIME", false)
+		if err != nil {
+			return nil
+		}
+		var pool []*anilist.Media
+		for _, e := range coll.Entries() {
+			pool = append(pool, e.Media)
+		}
+		return pool
+	}
+	return m
+}
+
+// SearchFailures is how many AniList searches failed: matches that may be
+// better when AniList answers.
+func (m *Matcher) SearchFailures() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.failed
 }
 
 type candidateScore struct {
 	media *anilist.Media
 	score float64
+	// mismatch: the media's title differs from the file's in what tells
+	// seasons apart (scored lower, see markerPenalty): "Code Geass" files
+	// and the "R2" entry.
+	mismatch bool
 }
 
 type group struct {
@@ -51,12 +87,7 @@ func (m *Matcher) MatchFiles(ctx context.Context, files []*LocalFile, progress f
 	if len(files) == 0 {
 		return
 	}
-	var pool []*anilist.Media
-	if coll, err := m.platform.Collection(ctx, "ANIME", false); err == nil {
-		for _, e := range coll.Entries() {
-			pool = append(pool, e.Media)
-		}
-	}
+	pool := m.listFn(ctx)
 
 	groups := map[string]*group{}
 	var order []string
@@ -100,14 +131,20 @@ func (m *Matcher) bestMatch(ctx context.Context, g *group, pool []*anilist.Media
 	}
 	best := scoreCandidates(queries, pool, g)
 	// Good enough from the user's own list?
-	if best.score >= 0.92 || !m.outsideList {
+	if best.score >= 0.92 && !best.mismatch {
 		return best
+	}
+	if !m.outsideList {
+		return notAnotherSeason(best)
 	}
 	// Otherwise search AniList with the most specific queries.
 	seen := map[int]bool{}
+	searched := true
 	var extra []*anilist.Media
 	for _, q := range queries[:min(2, len(queries))] {
-		for _, r := range m.search(ctx, q.text) {
+		res, ok := m.search(ctx, q.text)
+		searched = searched && ok
+		for _, r := range res {
 			if !seen[r.ID] {
 				seen[r.ID] = true
 				extra = append(extra, r)
@@ -117,26 +154,44 @@ func (m *Matcher) bestMatch(ctx context.Context, g *group, pool []*anilist.Media
 	if alt := scoreCandidates(queries, extra, g); alt.score > best.score+0.02 {
 		best = alt
 	}
+	if !searched {
+		return notAnotherSeason(best)
+	}
 	return best
 }
 
-func (m *Matcher) search(ctx context.Context, q string) []*anilist.Media {
+// notAnotherSeason keeps a match only if it isn't another season of the
+// show than the file's (only its title tells: "R2", "II", "0", "Final"…),
+// which is all an entry of the list can be when AniList can't be asked for
+// the right one. Files of the first season matched to the second update
+// the second season's progress when watched. Rather unmatched: tried again
+// at the next scan.
+func notAnotherSeason(c candidateScore) candidateScore {
+	if c.mismatch {
+		return candidateScore{score: c.score}
+	}
+	return c
+}
+
+// search searches AniList, and reports whether it could: a failure isn't
+// kept, so the next file asks again.
+func (m *Matcher) search(ctx context.Context, q string) ([]*anilist.Media, bool) {
 	key := util.NormalizeTitle(q)
 	m.mu.Lock()
 	if r, ok := m.searchCache[key]; ok {
 		m.mu.Unlock()
-		return r
+		return r, true
 	}
 	m.mu.Unlock()
-	page, err := m.platform.Search(ctx, anilist.SearchParams{Search: q, PerPage: 10, Type: "ANIME"})
-	var res []*anilist.Media
-	if err == nil && page != nil {
-		res = page.Media
-	}
+	res, err := m.searchFn(ctx, q)
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err != nil {
+		m.failed++
+		return nil, false
+	}
 	m.searchCache[key] = res
-	m.mu.Unlock()
-	return res
+	return res, true
 }
 
 type query struct {
@@ -211,11 +266,12 @@ func scoreCandidates(queries []query, pool []*anilist.Media, g *group) candidate
 			continue
 		}
 		var s float64
+		mismatch := false
 		for _, t := range media.AllTitles() {
 			penalty := markerPenalty(titleMarkers, season, util.SequelMarkers(t))
 			for _, q := range queries {
 				if v := util.Similarity(q.text, t)*q.weight - penalty; v > s {
-					s = v
+					s, mismatch = v, penalty > 0
 				}
 			}
 		}
@@ -236,7 +292,7 @@ func scoreCandidates(queries []query, pool []*anilist.Media, g *group) candidate
 			s += 0.01
 		}
 		if s > best.score {
-			best = candidateScore{media, s}
+			best = candidateScore{media, s, mismatch}
 		}
 	}
 	if best.score > 1 {
