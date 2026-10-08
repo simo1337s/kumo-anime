@@ -320,18 +320,31 @@ func (s *Scanner) StartWatcher() {
 	if !cfg.Library.AutoRefresh {
 		return
 	}
+	var dirs []string
+	for _, root := range cfg.LibraryDirs() {
+		// Same walk as the scanner, so symlinked folders are watched too.
+		if res, err := walkLibrary(root, cfg.Library.IgnorePatterns, nil); err == nil {
+			dirs = append(dirs, res.dirs...)
+		}
+	}
+	// macOS watches a folder by opening every file in it, and those count
+	// against the files Kumo may have open, its network connections too: a
+	// library bigger than that is checked for changes every few minutes
+	// instead.
+	polling := false
+	if budget := watchBudget(); budget > 0 {
+		if n, over := overBudget(dirs, budget); over {
+			log.Printf("library watcher: the library has %d+ files, more than macOS lets Kumo watch (%d): it checks for new episodes every %v instead", n, budget, pollEvery)
+			dirs, polling = nil, true
+		}
+	}
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Printf("library watcher: %v", err)
 		return
 	}
-	for _, root := range cfg.LibraryDirs() {
-		// Same walk as the scanner, so symlinked folders are watched too.
-		if res, err := walkLibrary(root, cfg.Library.IgnorePatterns, nil); err == nil {
-			for _, dir := range res.dirs {
-				_ = w.Add(dir)
-			}
-		}
+	for _, dir := range dirs {
+		_ = w.Add(dir)
 	}
 	stop := make(chan struct{})
 	s.watcherMu.Lock()
@@ -341,8 +354,16 @@ func (s *Scanner) StartWatcher() {
 	go func() {
 		var timer *time.Timer
 		trigger := make(chan struct{}, 1)
+		var poll <-chan time.Time
+		if polling {
+			t := time.NewTicker(pollEvery)
+			defer t.Stop()
+			poll = t.C
+		}
 		for {
 			select {
+			case <-poll:
+				go s.autoScan()
 			case <-stop:
 				_ = w.Close()
 				return
@@ -385,6 +406,24 @@ func (s *Scanner) StartWatcher() {
 			}
 		}
 	}()
+}
+
+// pollEvery is how often a library too big to watch is checked for changes.
+var pollEvery = 10 * time.Minute
+
+// overBudget counts the entries of dirs (and the dirs themselves), the
+// files watching them takes on macOS, until there are more than budget.
+func overBudget(dirs []string, budget int) (n int, over bool) {
+	for _, dir := range dirs {
+		n++
+		if entries, err := os.ReadDir(dir); err == nil {
+			n += len(entries)
+		}
+		if n > budget {
+			return n, true
+		}
+	}
+	return n, false
 }
 
 func (s *Scanner) StopWatcher() {

@@ -17,14 +17,14 @@ export function installHint(platform: string | undefined, tool: Tool) {
             "ani-cli": "scoop install ani-cli",
         }[tool]
     }
-    if (platform === "darwin") return `brew install ${tool}`
+    if (platform === "darwin") return tool === "ani-cli" ? "brew tap pystardust/ani-cli https://github.com/pystardust/ani-cli.git && brew install ani-cli" : `brew install ${tool}`
     return tool === "ani-cli" ? "yay -S ani-cli" : `sudo pacman -S ${tool}`
 }
 
 // Where the hint comes from, said before it.
 export function installSource(platform: string | undefined, tool: Tool) {
     if (platform === "windows") return tool === "ani-cli" ? "With Git for Windows installed (winget install Git.Git), get it with Scoop (extras bucket)" : "Install it with"
-    if (platform === "darwin") return "Install it with Homebrew (brew.sh):"
+    if (platform === "darwin") return tool === "ani-cli" ? "Install it from its Homebrew tap (brew.sh):" : "Install it with Homebrew (brew.sh):"
     return tool === "ani-cli" ? "Install it from the AUR with" : "Install it with"
 }
 

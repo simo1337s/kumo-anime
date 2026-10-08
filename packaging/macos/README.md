@@ -37,7 +37,10 @@ Or, in Terminal, once: `xattr -dr com.apple.quarantine /Applications/Kumo.app`
 it's missing (its installer asks for your password). By hand:
 
 ```bash
-brew install ffmpeg mpv yt-dlp ani-cli
+brew install ffmpeg mpv yt-dlp
+# ani-cli comes from its own tap
+brew tap pystardust/ani-cli https://github.com/pystardust/ani-cli.git
+brew install ani-cli
 ```
 
 Kumo finds programs in Homebrew's folders (`/opt/homebrew/bin` on Apple

@@ -62,6 +62,18 @@ if [ -z "$missing" ]; then
 fi
 
 title "Installing:$missing"
+case " $missing " in
+*" ani-cli "*)
+	# ani-cli isn't one of Homebrew's own formulae: it comes from its
+	# project's tap, which newer Homebrew asks to trust first.
+	if ! brew tap pystardust/ani-cli https://github.com/pystardust/ani-cli.git; then
+		title "ani-cli's Homebrew tap couldn't be added: see above."
+		finish 1
+	fi
+	brew trust pystardust/ani-cli >/dev/null 2>&1 || true
+	missing=$(echo "$missing" | sed 's| ani-cli| pystardust/ani-cli/ani-cli|')
+	;;
+esac
 # One word per program.
 # shellcheck disable=SC2086
 if ! brew install $missing; then

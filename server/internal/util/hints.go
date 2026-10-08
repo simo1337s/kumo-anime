@@ -19,8 +19,10 @@ func InstallHint(tool string) string {
 	}
 	if runtime.GOOS == "darwin" {
 		switch tool {
-		case "ffmpeg", "mpv", "yt-dlp", "ani-cli":
+		case "ffmpeg", "mpv", "yt-dlp":
 			return "brew install " + tool + " (Homebrew, brew.sh)"
+		case "ani-cli":
+			return "brew tap pystardust/ani-cli https://github.com/pystardust/ani-cli.git, then brew install ani-cli (Homebrew, brew.sh)"
 		}
 		return "install " + tool
 	}

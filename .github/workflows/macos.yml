@@ -117,12 +117,34 @@ jobs:
           command -v ffmpeg || brew install ffmpeg
           ffmpeg -hide_banner -version | head -1
 
-      # The setup that installs the programs Kumo uses only runs on users'
-      # Macs, in Terminal: check here that it parses in the bash macOS has.
+      # The setup that installs the programs Kumo uses runs on users' Macs,
+      # in Terminal (Settings > App > Programs): check that it parses in the
+      # bash macOS has, then run it here like a user would and check that
+      # it installed everything. A failure only warns: it may be Homebrew's
+      # or ani-cli's tap's, and shouldn't hold back the app.
       - name: Check the programs setup script
         run: |
           /bin/bash --version | head -1
           /bin/bash -n server/internal/macsetup/install-tools.command
+
+      - name: Run the programs setup
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          TERM: dumb
+        run: |
+          server/internal/macsetup/install-tools.command < /dev/null || true
+          missing=""
+          for tool in ffmpeg mpv yt-dlp ani-cli; do
+            if path=$(command -v "$tool"); then echo "$tool: $path"; else missing="$missing $tool"; fi
+          done
+          ani-cli --version || true
+          if [ -n "$missing" ]; then
+            echo "::warning::The programs setup didn't install:$missing"
+            exit 1
+          fi
 
       - name: go vet
         working-directory: server
