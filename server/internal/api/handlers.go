@@ -190,6 +190,7 @@ func (s *Server) match(r *http.Request) (any, error) {
 		return nil, err
 	}
 	s.app.Hub.Publish("library-updated", nil)
+	s.app.PrefetchAnime(body.MediaID)
 	return nil, nil
 }
 

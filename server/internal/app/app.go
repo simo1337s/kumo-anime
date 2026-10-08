@@ -69,6 +69,8 @@ type App struct {
 	ShellToken string
 	DataDir    string
 
+	prefetch *prefetcher
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -134,7 +136,7 @@ func New(dataDir string) (*App, error) {
 		Manga: manga.NewService(d, exts, platform), Discord: &discord.Client{}, Logs: logs,
 		Images: images.New(filepath.Join(dataDir, "images")),
 		Update: update.New(hub, exits), Exits: exits,
-		ctx: ctx, cancel: cancel, DataDir: dataDir,
+		ctx: ctx, cancel: cancel, DataDir: dataDir, prefetch: newPrefetcher(),
 	}
 	a.HLS = stream.NewHLS(a.Local, hlsDir(dataDir))
 	if a.Share, err = share.New(d, settings, files, hub); err != nil {
@@ -171,6 +173,11 @@ func (a *App) WriteShellToken() string {
 }
 
 func (a *App) wire() {
+	// Anime with files get all their data, also those shared with this
+	// Kumo (prefetch.go).
+	a.Scanner.OnScanned = a.prefetchLibrary
+	a.Share.OnFiles = a.prefetchLibrary
+
 	// Torrent search can use extension providers.
 	a.Torrents.ExtraProviders = a.Extensions.TorrentProviders
 
@@ -314,6 +321,7 @@ func pickSource(srcs []stream.Source, quality string) stream.Source {
 // Start runs the background jobs.
 func (a *App) Start() {
 	a.Share.Start()
+	go a.runPrefetch(a.ctx)
 	a.Extensions.LoadAll()
 	a.Downloads.Start()
 	a.Update.Start()
@@ -343,6 +351,8 @@ func (a *App) Start() {
 				log.Printf("startup scan: %v", err)
 			}
 		}
+		// What earlier runs didn't get to (a scan prefetches on its own).
+		a.prefetchLibrary()
 	}()
 }
 

@@ -25,6 +25,8 @@ type Scanner struct {
 	platform *anilist.Platform
 	settings *config.Store
 	hub      *events.Hub
+	// OnScanned runs after each scan that went through (in the background).
+	OnScanned func()
 
 	mu      sync.Mutex
 	running atomic.Bool
@@ -212,6 +214,9 @@ func (s *Scanner) Scan(ctx context.Context, opts ScanOptions) (res *ScanResult, 
 	res.Seconds = time.Since(start).Seconds()
 	s.hub.Publish(events.ScanDone, ScanDonePayload{ScanResult: res})
 	s.hub.Publish(events.LibraryUpdated, nil)
+	if s.OnScanned != nil {
+		go s.OnScanned()
+	}
 	return res, nil
 }
 

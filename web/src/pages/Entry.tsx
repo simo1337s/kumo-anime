@@ -240,10 +240,12 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
     const media = entry.media
 
     const withFiles = entry.episodes.filter(e => e.hasFile)
+    const hosts = [...new Set(withFiles.map(e => e.file?.hostName).filter((h): h is string => !!h))]
     const list = showAll ? entry.episodes : withFiles
     const specials = [...(entry.specials ?? []), ...(entry.others ?? [])]
 
-    if (entry.localCount === 0) {
+    // Files on this computer, or shared with it by another Kumo.
+    if (entry.localCount + (entry.sharedCount ?? 0) === 0) {
         return (
             <EmptyState
                 icon={<HardDrive className="size-6" />}
@@ -275,7 +277,8 @@ function EpisodesTab({ entry, onStream, onTorrents }: { entry: EntryView; onStre
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-4">
                     <p className="text-sm text-muted">
-                        {withFiles.length} of {entry.episodes.length || "?"} episodes downloaded
+                        {withFiles.length} of {entry.episodes.length || "?"} episodes {entry.localCount ? "downloaded" : "available"}
+                        {hosts.length > 0 && ` · ${entry.localCount ? "some " : ""}shared by ${hosts.join(", ")}`}
                     </p>
                     <LocalLanguageSwitch mediaId={media.id} samplePath={withFiles[0]?.file?.path} />
                 </div>

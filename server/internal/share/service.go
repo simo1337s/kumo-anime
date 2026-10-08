@@ -50,6 +50,10 @@ type Service struct {
 	api      *http.Client // short requests to the others
 	media    *http.Client // forwarded video: no time limit
 
+	// OnFiles runs when the files shared with this Kumo change (in the
+	// background).
+	OnFiles func()
+
 	mu      sync.Mutex
 	peers   map[string]*peer
 	running *run
@@ -547,6 +551,9 @@ func (s *Service) ask(ctx context.Context, p *peer) {
 func (s *Service) publish(changed bool) {
 	if changed {
 		s.hub.Publish("library-updated", nil)
+		if s.OnFiles != nil {
+			go s.OnFiles()
+		}
 	}
 }
 

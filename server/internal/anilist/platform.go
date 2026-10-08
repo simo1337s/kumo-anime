@@ -380,6 +380,12 @@ func (p *Platform) localCollection(mediaType string) (*Collection, error) {
 func liteKey(id int) string   { return "media-lite:" + strconv.Itoa(id) }
 func detailKey(id int) string { return "media:" + strconv.Itoa(id) }
 
+// HasDetails reports an anime whose full page data is saved (and fresh).
+func (p *Platform) HasDetails(id int) bool {
+	var m Media
+	return p.db.GetCache(detailKey(id), &m)
+}
+
 // Media returns full media details (description, relations, characters...).
 func (p *Platform) Media(ctx context.Context, id int, refresh bool) (*Media, error) {
 	var m Media
