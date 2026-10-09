@@ -144,6 +144,7 @@ func (s *Server) routes() {
 	// --- online streaming & ani-cli
 	m.HandleFunc("GET /api/onlinestream/providers", h(func(r *http.Request) (any, error) { return s.app.Stream.Providers(r.Context()), nil }))
 	m.HandleFunc("GET /api/onlinestream/episodes", h(s.osEpisodes))
+	m.HandleFunc("GET /api/onlinestream/modes", h(s.osModes))
 	m.HandleFunc("GET /api/onlinestream/sources", h(s.osSources))
 	m.HandleFunc("GET /api/onlinestream/search", h(s.osSearch))
 	m.HandleFunc("POST /api/onlinestream/mapping", h(s.osMapping))

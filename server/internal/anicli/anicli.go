@@ -421,6 +421,16 @@ type Stream struct {
 	Mode     string `json:"mode"`
 }
 
+// ErrNoSources is (wrapped in) the error of a Resolve that found the episode
+// but no stream of it in that mode: the anime isn't dubbed, in dub. ani-cli
+// 5 lists the same anime and episodes in both modes.
+var ErrNoSources = errors.New("no sources found")
+
+type noSourcesError string
+
+func (e noSourcesError) Error() string        { return "ani-cli: " + string(e) }
+func (e noSourcesError) Is(target error) bool { return target == ErrNoSources }
+
 // Resolve asks ani-cli for the stream of one episode.
 func (d *Driver) Resolve(ctx context.Context, query string, index int, episode, mode, quality string) (*Stream, error) {
 	q, err := queryArg(query)
@@ -442,7 +452,11 @@ func (d *Driver) Resolve(ctx context.Context, query string, index int, episode, 
 	defer r.cleanup()
 	raw := r.read("player.txt")
 	if strings.TrimSpace(raw) == "" {
-		return nil, fmt.Errorf("ani-cli: %s", r.lastError())
+		msg := r.lastError()
+		if strings.Contains(strings.ToLower(msg), "no sources found") {
+			return nil, noSourcesError(msg)
+		}
+		return nil, fmt.Errorf("ani-cli: %s", msg)
 	}
 	s := &Stream{Episode: episode, Mode: mode}
 	for _, a := range splitLines(raw) {

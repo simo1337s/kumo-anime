@@ -6,7 +6,7 @@ import { api, qs } from "@/lib/api"
 import { usePlay } from "@/lib/play"
 import { installHint, installSource } from "@/lib/platform"
 import { canInstallPrograms, useInstallPrograms } from "@/lib/programs"
-import { useEpisodeMarker, useLanguageMode, useOnlineProviders, useStatus, useStreamEpisodes } from "@/lib/queries"
+import { useEpisodeMarker, useLanguageMode, useOnlineProviders, useStatus, useStreamEpisodes, useStreamModes } from "@/lib/queries"
 import type { EntryView } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { EpisodeCard, WatchedToggle } from "../EpisodeCard"
@@ -21,8 +21,18 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
     // Sub/dub is remembered per anime on the server (also used by "continue
     // watching", the next-episode button and local files).
     const language = useLanguageMode(media.id)
-    const dub = language.mode ? language.mode === "dub" : settings?.aniCli.defaultMode === "dub" || !!settings?.onlineStream.preferDub
+    const wantDub = language.mode ? language.mode === "dub" : settings?.aniCli.defaultMode === "dub" || !!settings?.onlineStream.preferDub
     const setDub = (d: boolean) => language.set(d ? "dub" : "sub")
+    const prov = providers?.find(p => p.id === provider)
+    const supportsDub = prov?.supportsDub ?? true
+    // Only the versions the provider has: asked once the episodes of the
+    // chosen one are in (the server then only looks for the other).
+    const [modesFor, setModesFor] = useState("")
+    const { data: modes, error: modesError } = useStreamModes(provider, media.id, supportsDub && modesFor === provider)
+    const hasSub = !supportsDub || !modes || modes.sub
+    const hasDub = supportsDub && (!modes || modes.dub)
+    const dub = hasDub && (wantDub || !hasSub)
+    const modesKnown = !supportsDub || !!modes || !!modesError
     const [matchOpen, setMatchOpen] = useState(false)
     const [dlOpen, setDlOpen] = useState(false)
     const { playStream, streamPlayer, remote } = usePlay()
@@ -37,10 +47,13 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
         }
     }, [provider, media.id])
 
-    const prov = providers?.find(p => p.id === provider)
     // Wait for the remembered choice, or the first request would list (and
-    // remember) the default mode instead.
-    const { data, isLoading, error, refetch, isFetching } = useStreamEpisodes(provider, media.id, dub, language.loaded)
+    // remember) the default mode instead. The only version there is isn't a
+    // choice to remember.
+    const { data, isLoading, error, refetch, isFetching } = useStreamEpisodes(provider, media.id, dub, language.loaded, dub !== wantDub)
+    useEffect(() => {
+        if (language.loaded && !isLoading) setModesFor(provider)
+    }, [language.loaded, isLoading, provider])
     const progress = entry.listEntry?.progress ?? 0
 
     const episodes = useMemo(() => {
@@ -60,8 +73,12 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
     }, [data, entry.episodes, media, progress])
 
     const refresh = async () => {
-        await api.get(`/api/onlinestream/episodes${qs({ provider, mediaId: media.id, dub, refresh: 1 })}`).catch(e => toast.error(e.message))
+        await api.get(`/api/onlinestream/episodes${qs({ provider, mediaId: media.id, dub, refresh: 1, only: dub !== wantDub ? 1 : undefined })}`).catch(e => toast.error(e.message))
         qc.invalidateQueries({ queryKey: ["os-episodes", provider, media.id, dub] })
+        if (supportsDub)
+            api.get<{ sub: boolean; dub: boolean }>(`/api/onlinestream/modes${qs({ provider, mediaId: media.id, refresh: 1 })}`)
+                .then(m => qc.setQueryData(["os-modes", provider, media.id], m))
+                .catch(() => {})
     }
 
     const providerOptions = (providers ?? [{ id: "ani-cli", name: "ani-cli", builtin: true } as any]).map(p => ({ value: p.id, label: p.builtin ? "ani-cli (built-in)" : p.name }))
@@ -71,7 +88,7 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
         <div className="flex flex-col gap-6">
             <div className="flex flex-wrap items-center gap-3">
                 <Select value={provider} onChange={setProvider} options={providerOptions} className="w-60" />
-                {(prov?.supportsDub ?? true) && (
+                {hasSub && hasDub ? (
                     <div className="flex rounded-lg bg-white/[0.04] p-0.5">
                         {(["sub", "dub"] as const).map(m => (
                             <button
@@ -83,6 +100,12 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
                             </button>
                         ))}
                     </div>
+                ) : (
+                    <Tooltip content={`${prov?.name ?? provider} only has it ${dub ? "dubbed" : "with subtitles"}`}>
+                        <span className="flex rounded-lg bg-white/[0.04] p-0.5">
+                            <span className="grid h-8 place-items-center rounded-md bg-white/[0.1] px-3.5 text-[13px] font-medium uppercase text-fg">{dub ? "dub" : "sub"}</span>
+                        </span>
+                    </Tooltip>
                 )}
                 <IconButton label="Refresh episode list" variant="subtle" onClick={refresh}>
                     <RefreshCw className={cn("size-4", isFetching && "animate-spin")} />
@@ -129,7 +152,7 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
                 </div>
             )}
 
-            {isLoading && (
+            {(isLoading || (!error && data && episodes.length === 0 && !modesKnown)) && (
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-6">
                     {Array.from({ length: 6 }).map((_, i) => (
                         <Skeleton key={i} className="aspect-video" />
@@ -141,7 +164,7 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
                     {(error as Error).message}
                 </EmptyState>
             )}
-            {!isLoading && !error && data && episodes.length === 0 && (
+            {!isLoading && !error && data && episodes.length === 0 && modesKnown && (
                 <EmptyState icon={<Search className="size-6" />} title="No match found" action={<Button variant="primary" onClick={() => setMatchOpen(true)}>Search manually</Button>}>
                     {prov?.name ?? provider} didn’t return episodes for this anime{dub ? " in dub" : ""}.
                 </EmptyState>
@@ -196,7 +219,16 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
                 </div>
             )}
 
-            <ManualMatchDialog open={matchOpen} onOpenChange={setMatchOpen} provider={provider} mediaId={media.id} dub={dub} defaultQuery={media.title.english || media.title.romaji || ""} />
+            <ManualMatchDialog
+                open={matchOpen}
+                onOpenChange={setMatchOpen}
+                provider={provider}
+                mediaId={media.id}
+                dub={dub}
+                canDub={supportsDub}
+                onPicked={setDub}
+                defaultQuery={media.title.english || media.title.romaji || ""}
+            />
             <DownloadDialog
                 open={dlOpen}
                 onOpenChange={setDlOpen}
@@ -210,12 +242,35 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
     )
 }
 
-function ManualMatchDialog({ open, onOpenChange, provider, mediaId, dub, defaultQuery }: { open: boolean; onOpenChange: (v: boolean) => void; provider: string; mediaId: number; dub: boolean; defaultQuery: string }) {
+function ManualMatchDialog({
+    open,
+    onOpenChange,
+    provider,
+    mediaId,
+    dub: pageDub,
+    canDub,
+    onPicked,
+    defaultQuery,
+}: {
+    open: boolean
+    onOpenChange: (v: boolean) => void
+    provider: string
+    mediaId: number
+    dub: boolean
+    canDub: boolean
+    onPicked: (dub: boolean) => void
+    defaultQuery: string
+}) {
     const [q, setQ] = useState(defaultQuery)
     const [results, setResults] = useState<{ id: string; title: string; subOrDub?: string; query?: string; index?: number; episodes?: number }[]>([])
     const [busy, setBusy] = useState(false)
+    // Either version, also the one the page doesn't offer (not found).
+    const [dub, setDubMode] = useState(pageDub)
     const qc = useQueryClient()
     useEffect(() => setQ(defaultQuery), [defaultQuery])
+    useEffect(() => {
+        if (open) setDubMode(pageDub)
+    }, [open, pageDub])
     const search = async () => {
         setBusy(true)
         try {
@@ -231,6 +286,8 @@ function ManualMatchDialog({ open, onOpenChange, provider, mediaId, dub, default
             await api.post("/api/onlinestream/mapping", { provider, mediaId, dub, id: r.id, title: r.title, query: r.query, index: r.index })
             toast.success(`Now using “${r.title}”`)
             qc.invalidateQueries({ queryKey: ["os-episodes", provider, mediaId, dub] })
+            qc.invalidateQueries({ queryKey: ["os-modes", provider, mediaId] })
+            onPicked(dub)
             onOpenChange(false)
         } catch (e: any) {
             toast.error(e.message)
@@ -240,6 +297,22 @@ function ManualMatchDialog({ open, onOpenChange, provider, mediaId, dub, default
         <Dialog open={open} onOpenChange={onOpenChange} title="Pick the right anime" description="Search the provider and choose the matching entry. Kumo remembers your choice.">
             <div className="flex gap-2">
                 <Input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === "Enter" && search()} placeholder="Search…" icon={<Search className="size-4" />} />
+                {canDub && (
+                    <div className="flex shrink-0 rounded-lg bg-white/[0.04] p-0.5">
+                        {(["sub", "dub"] as const).map(m => (
+                            <button
+                                key={m}
+                                onClick={() => {
+                                    setDubMode(m === "dub")
+                                    setResults([])
+                                }}
+                                className={cn("rounded-md px-3 text-xs font-medium uppercase transition-colors", (m === "dub") === dub ? "bg-white/[0.1] text-fg" : "text-muted hover:text-fg")}
+                            >
+                                {m}
+                            </button>
+                        ))}
+                    </div>
+                )}
                 <Button variant="primary" loading={busy} onClick={search}>
                     Search
                 </Button>

@@ -244,13 +244,26 @@ export function useOnlineProviders() {
     return useQuery({ queryKey: ["os-providers"], queryFn: () => api.get<OnlineProvider[]>("/api/onlinestream/providers"), staleTime: 5 * 60_000 })
 }
 
-export function useStreamEpisodes(provider: string, mediaId: number, dub: boolean, enabled = true) {
+// only: the version listed is the only one there is, not a choice to remember.
+export function useStreamEpisodes(provider: string, mediaId: number, dub: boolean, enabled = true, only = false) {
     return useQuery({
         queryKey: ["os-episodes", provider, mediaId, dub],
-        queryFn: () => api.get<StreamEpisodes>(`/api/onlinestream/episodes${qs({ provider, mediaId, dub })}`),
+        queryFn: () => api.get<StreamEpisodes>(`/api/onlinestream/episodes${qs({ provider, mediaId, dub, only: only ? 1 : undefined })}`),
         enabled: enabled && mediaId > 0 && !!provider,
         retry: false,
         staleTime: 10 * 60_000,
+    })
+}
+
+// Whether the provider has the anime subtitled and dubbed (both while it's
+// not known).
+export function useStreamModes(provider: string, mediaId: number, enabled = true) {
+    return useQuery({
+        queryKey: ["os-modes", provider, mediaId],
+        queryFn: () => api.get<{ sub: boolean; dub: boolean }>(`/api/onlinestream/modes${qs({ provider, mediaId })}`),
+        enabled: enabled && mediaId > 0 && !!provider,
+        retry: false,
+        staleTime: 30 * 60_000,
     })
 }
 

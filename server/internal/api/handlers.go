@@ -562,7 +562,9 @@ func (s *Server) osEpisodes(r *http.Request) (any, error) {
 	}
 	q := r.URL.Query()
 	dub := q.Get("dub") == "1" || q.Get("dub") == "true"
-	if mode := q.Get("dub"); mode != "" {
+	// only: the provider has no other version, which is no choice of the
+	// user's (the mode is also local files' audio).
+	if mode := q.Get("dub"); mode != "" && q.Get("only") != "1" {
 		mm := "sub"
 		if dub {
 			mm = "dub"
@@ -570,6 +572,17 @@ func (s *Server) osEpisodes(r *http.Request) (any, error) {
 		_ = s.setLanguageMode(media.ID, mm)
 	}
 	return s.app.Stream.Episodes(r.Context(), util2(q.Get("provider"), stream.AniCliProvider), media, dub, q.Get("refresh") == "1")
+}
+
+// osModes tells whether the provider has the anime subtitled and dubbed: the
+// anime page offers only those.
+func (s *Server) osModes(r *http.Request) (any, error) {
+	media, err := s.mediaFromQuery(r)
+	if err != nil {
+		return nil, err
+	}
+	q := r.URL.Query()
+	return s.app.Stream.Modes(r.Context(), util2(q.Get("provider"), stream.AniCliProvider), media, q.Get("refresh") == "1"), nil
 }
 
 func proxied(src stream.Source) map[string]any {
@@ -648,6 +661,7 @@ func (s *Server) osMapping(r *http.Request) (any, error) {
 			mode = "dub"
 		}
 		s.app.DB.DeleteCachePrefix(fmt.Sprintf("os-eps:%s:%d:%s", body.Provider, body.MediaID, mode))
+		s.app.DB.DeleteCachePrefix(fmt.Sprintf("os-eps:%s:%d:modes", body.Provider, body.MediaID))
 	}
 	return nil, err
 }

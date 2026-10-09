@@ -267,6 +267,84 @@ func (s *Service) aniCliEpisodes(ctx context.Context, media *anilist.Media, dub 
 	return res, nil
 }
 
+// Modes is which versions of an anime a provider has.
+type Modes struct {
+	Sub bool `json:"sub"`
+	Dub bool `json:"dub"`
+}
+
+// A match scoring less is taken for another anime (ani-cli's Match doesn't
+// keep one either).
+const goodMatch = 0.6
+
+type availability int
+
+const (
+	unknown availability = iota
+	present
+	missing
+)
+
+// Modes tells whether a provider has an anime subtitled and dubbed, for the
+// anime page to offer only those. A version is missing when the provider has
+// no good match for it or no episode of it, or (ani-cli) no stream of its
+// first episode. One the provider couldn't be asked about counts as there,
+// and so do both when neither was found: the page then offers both, to pick
+// the anime by hand.
+func (s *Service) Modes(ctx context.Context, provider string, media *anilist.Media, refresh bool) Modes {
+	if provider != AniCliProvider {
+		if p, err := s.exts.OnlineStreamProvider(provider); err == nil && !p.Settings(ctx).SupportsDub {
+			return Modes{Sub: true}
+		}
+	}
+	key := fmt.Sprintf("os-eps:%s:%d:modes", provider, media.ID)
+	var m Modes
+	if !refresh && s.db.GetCache(key, &m) {
+		return m
+	}
+	var sub availability
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sub = s.available(ctx, provider, media, false)
+	}()
+	dub := s.available(ctx, provider, media, true)
+	wg.Wait()
+	m = Modes{Sub: sub != missing, Dub: dub != missing}
+	if !m.Sub && !m.Dub {
+		m = Modes{Sub: true, Dub: true}
+	}
+	if sub != unknown && dub != unknown {
+		s.db.SetCache(key, m, 6*time.Hour)
+	}
+	return m
+}
+
+func (s *Service) available(ctx context.Context, provider string, media *anilist.Media, dub bool) availability {
+	res, err := s.Episodes(ctx, provider, media, dub, false)
+	if err != nil {
+		return unknown
+	}
+	if res.Mapping == nil || res.Mapping.Score < goodMatch || len(res.Episodes) == 0 {
+		return missing
+	}
+	if provider != AniCliProvider {
+		return present
+	}
+	// ani-cli 5 lists the same anime and episodes in both modes: only the
+	// stream tells.
+	mp := res.Mapping
+	_, err = s.anicli.Resolve(ctx, mp.Query, mp.Index, res.Episodes[0].ID, modeOf(dub), "")
+	switch {
+	case err == nil:
+		return present
+	case errors.Is(err, anicli.ErrNoSources):
+		return missing
+	}
+	return unknown
+}
+
 // Source is a playable video.
 type Source struct {
 	URL       string            `json:"url"`
