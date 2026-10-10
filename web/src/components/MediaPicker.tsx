@@ -2,7 +2,7 @@ import { Search } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useCollection, useSearch } from "@/lib/queries"
 import type { Media } from "@/lib/types"
-import { cn, cover, formatLabel, title } from "@/lib/utils"
+import { cn, cover, formatLabel, otherTitle, title } from "@/lib/utils"
 import { Dialog, ErrorState, Input, Spinner } from "./ui"
 
 // Search AniList (and the user's list) to pick an anime.
@@ -65,7 +65,7 @@ export function MediaPicker({
                             <p className="truncate font-semibold">{title(m)}</p>
                             <p className="truncate text-sm text-muted">
                                 {[formatLabel(m.format), m.seasonYear, m.episodes ? `${m.episodes} eps` : ""].filter(Boolean).join(" · ")}
-                                {m.title.english && m.title.english !== title(m) ? ` · ${m.title.english}` : ""}
+                                {otherTitle(m) ? ` · ${otherTitle(m)}` : ""}
                             </p>
                         </div>
                         {i < fromList.length && <span className={cn("rounded-md bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand-strong")}>In your list</span>}

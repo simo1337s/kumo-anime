@@ -823,7 +823,7 @@ func (s *Server) torrentDownload(r *http.Request) (any, error) {
 	title := ""
 	if body.MediaID > 0 {
 		if media, err := s.app.Platform.MediaLite(r.Context(), body.MediaID); err == nil {
-			title = media.PreferredTitle()
+			title = media.FolderTitle()
 		}
 	}
 	var uris []string
@@ -928,7 +928,7 @@ func (s *Server) torrentAdd(r *http.Request) (any, error) {
 	title := ""
 	if body.MediaID > 0 {
 		if media, err := s.app.Platform.MediaLite(r.Context(), body.MediaID); err == nil {
-			title = media.PreferredTitle()
+			title = media.FolderTitle()
 		}
 	}
 	return nil, s.app.Torrents.Add(r.Context(), []string{body.Magnet}, s.app.Torrents.SavePathFor(title))

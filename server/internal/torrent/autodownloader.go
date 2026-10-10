@@ -284,7 +284,7 @@ func (a *AutoDownloader) grab(ctx context.Context, r *Rule, media *anilist.Media
 		eps = append(eps, ep)
 	}
 	sort.Ints(eps)
-	savePath := a.torrents.SavePathFor(media.PreferredTitle())
+	savePath := a.torrents.SavePathFor(media.FolderTitle())
 	added := 0
 	for _, ep := range eps {
 		res := best[ep]

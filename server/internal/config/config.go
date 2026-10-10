@@ -204,6 +204,8 @@ type UISettings struct {
 	ShowEpisodeTitle bool     `json:"showEpisodeTitle"`
 	BlurUnwatched    bool     `json:"blurUnwatched"` // spoiler protection
 	HomeSections     []string `json:"homeSections"`
+	// The anime titles: "english" (where AniList has one) or "romaji".
+	TitleLanguage string `json:"titleLanguage"`
 }
 
 type DiscordSettings struct {
@@ -277,6 +279,7 @@ func Defaults() Settings {
 			CardSize:         "md",
 			ShowEpisodeTitle: true,
 			HomeSections:     []string{"continue", "genres", "watching", "airing", "planning", "completed"},
+			TitleLanguage:    "english",
 		},
 		Discord:    DiscordSettings{RichPresence: false},
 		Extensions: ExtensionSettings{MarketplaceURL: DefaultMarketplaceURL},
@@ -449,6 +452,9 @@ func sanitize(s Settings) Settings {
 	}
 	if s.UI.AccentColor == "" {
 		s.UI.AccentColor = d.UI.AccentColor
+	}
+	if s.UI.TitleLanguage != "romaji" {
+		s.UI.TitleLanguage = "english"
 	}
 	if len(s.UI.HomeSections) == 0 {
 		s.UI.HomeSections = d.UI.HomeSections

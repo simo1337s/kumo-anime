@@ -25,7 +25,7 @@ import { prefersHls, randomId, videoCaps } from "@/lib/playback"
 import { useSettings } from "@/lib/queries"
 import { playerStore, type PlayerRequest } from "@/lib/store"
 import type { EntryView, Probe, StreamSource, TrackPrefs } from "@/lib/types"
-import { cn, formatDuration } from "@/lib/utils"
+import { cn, formatDuration, title as animeTitle } from "@/lib/utils"
 import { parseVTT, type Cue } from "@/lib/vtt"
 import { Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger } from "../ui"
 
@@ -217,7 +217,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                     if (cancelled) return
                     prefsRef.current = res.tracks
                     const media = await api.get<EntryView>(`/api/anime/${req.mediaId}`).catch(() => null)
-                    setTitle(`${media?.media.title.userPreferred ?? res.title ?? "Episode"} — Episode ${req.episode}${req.dub ? " (Dub)" : ""}`)
+                    setTitle(`${animeTitle(media?.media) || res.title || "Episode"} — Episode ${req.episode}${req.dub ? " (Dub)" : ""}`)
                     const sorted = [...res.sources].sort((a, b) => qualityRank(b.quality) - qualityRank(a.quality))
                     setSources(sorted)
                     setSourceIdx(0)

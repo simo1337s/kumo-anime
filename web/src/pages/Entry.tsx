@@ -32,7 +32,7 @@ import { api } from "@/lib/api"
 import { usePlay } from "@/lib/play"
 import { fetchLanguageMode, useEntry, useEpisodeMarker, useLanguageMode, useStatus } from "@/lib/queries"
 import type { EntryView, Probe } from "@/lib/types"
-import { banner, cleanDescription, cn, cover, formatLabel, img, scoreColor, seasonLabel, statusLabel, timeUntil, title, totalEpisodes } from "@/lib/utils"
+import { banner, cleanDescription, cn, cover, formatLabel, img, otherTitle, scoreColor, seasonLabel, statusLabel, timeUntil, title, totalEpisodes } from "@/lib/utils"
 
 type Tab = "episodes" | "stream" | "torrents" | "details"
 
@@ -139,7 +139,7 @@ function EntryHero({ entry, onTab }: { entry: EntryView; onTab: (t: Tab) => void
                 <div className="flex min-w-0 flex-1 flex-col justify-end gap-4 fade-in">
                     <div>
                         <h1 className="text-3xl leading-[1.1] font-semibold tracking-tight text-white md:text-[2.75rem]">{title(media)}</h1>
-                        {media.title.english && media.title.english !== title(media) && <p className="mt-2 text-base text-white/60">{media.title.english}</p>}
+                        {otherTitle(media) && <p className="mt-2 text-base text-white/60">{otherTitle(media)}</p>}
                     </div>
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-2 text-sm text-white/75">
                         {[

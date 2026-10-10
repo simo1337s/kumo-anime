@@ -732,6 +732,17 @@ function UISection({ draft, set }: SectionProps) {
                 </Row>
             </Group>
             <Group title="Content">
+                <Row label="Anime titles" help="English where AniList has an English title, or Japanese (romaji, in Latin letters)">
+                    <Select
+                        className="w-36"
+                        value={draft.ui.titleLanguage === "romaji" ? "romaji" : "english"}
+                        onChange={v => set("ui", { titleLanguage: v as "english" | "romaji" })}
+                        options={[
+                            { value: "english", label: "English" },
+                            { value: "romaji", label: "Japanese" },
+                        ]}
+                    />
+                </Row>
                 <Row label="Hide spoilers" help="Blur thumbnails of episodes you haven't watched yet">
                     <Switch checked={draft.ui.blurUnwatched} onChange={v => set("ui", { blurUnwatched: v })} />
                 </Row>

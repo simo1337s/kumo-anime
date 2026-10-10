@@ -1,6 +1,9 @@
 package anilist
 
-import "strings"
+import (
+	"strings"
+	"sync/atomic"
+)
 
 // The JSON field names mirror AniList's GraphQL schema so responses decode
 // straight into these structs and the frontend sees the familiar names.
@@ -161,9 +164,33 @@ func (m *Media) AllTitles() []string {
 	return out
 }
 
-// PreferredTitle returns the user preferred / romaji / english title.
+// The language of the anime titles Kumo shows (Settings › Interface):
+// English, where AniList has an English title, or Japanese in Latin letters
+// (romaji). AniList's own "preferred" title is romaji unless the account says
+// otherwise, and without an account.
+var romajiTitles atomic.Bool
+
+// SetTitleLanguage sets the language of PreferredTitle: "romaji", or English.
+func SetTitleLanguage(lang string) { romajiTitles.Store(lang == "romaji") }
+
+// PreferredTitle returns the title in the language chosen in the settings,
+// or another when AniList has none in it.
 func (m *Media) PreferredTitle() string {
-	for _, t := range []string{m.Title.UserPreferred, m.Title.Romaji, m.Title.English, m.Title.Native} {
+	order := []string{m.Title.English, m.Title.Romaji, m.Title.UserPreferred, m.Title.Native}
+	if romajiTitles.Load() {
+		order = []string{m.Title.Romaji, m.Title.UserPreferred, m.Title.English, m.Title.Native}
+	}
+	return firstTitle(order)
+}
+
+// FolderTitle names an anime's folder for torrents. It doesn't follow the
+// title language: changing it would start a second folder for the same anime.
+func (m *Media) FolderTitle() string {
+	return firstTitle([]string{m.Title.UserPreferred, m.Title.Romaji, m.Title.English, m.Title.Native})
+}
+
+func firstTitle(titles []string) string {
+	for _, t := range titles {
 		if t != "" {
 			return t
 		}

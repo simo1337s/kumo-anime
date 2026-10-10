@@ -309,7 +309,9 @@ func (a *App) wire() {
 
 	a.Extensions.Host = a.pluginServices()
 
+	anilist.SetTitleLanguage(a.Settings.Get().UI.TitleLanguage)
 	a.Settings.OnChange(func(old, cur config.Settings) {
+		anilist.SetTitleLanguage(cur.UI.TitleLanguage)
 		if !cur.Discord.RichPresence || cur.Discord.ClientID != old.Discord.ClientID {
 			clearPresence() // turned off: don't leave "Watching…" behind
 		}

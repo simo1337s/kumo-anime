@@ -6,9 +6,26 @@ export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
 }
 
+// The language of anime titles (Settings › Interface): English where AniList
+// has an English title, or Japanese in Latin letters (romaji). AniList's own
+// "preferred" title is romaji unless the account says otherwise.
+let romajiTitles = false
+
+export function setTitleLanguage(lang?: string) {
+    romajiTitles = lang === "romaji"
+}
+
 export function title(m?: Media | null) {
     if (!m) return ""
-    return m.title.userPreferred || m.title.romaji || m.title.english || m.title.native || ""
+    const t = m.title
+    return (romajiTitles ? t.romaji || t.userPreferred || t.english : t.english || t.romaji || t.userPreferred) || t.native || ""
+}
+
+// The title in the other language, when it's another title.
+export function otherTitle(m?: Media | null) {
+    if (!m) return ""
+    const other = romajiTitles ? m.title.english : m.title.romaji
+    return other && other !== title(m) ? other : ""
 }
 
 export function englishTitle(m?: Media | null) {

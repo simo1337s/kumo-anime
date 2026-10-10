@@ -226,6 +226,7 @@ export type Settings = {
         reducedMotion: boolean
         showEpisodeTitle: boolean
         blurUnwatched: boolean
+        titleLanguage?: "english" | "romaji"
         homeSections: string[]
     }
     discord: { richPresence: boolean; clientId: string }

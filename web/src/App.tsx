@@ -12,6 +12,7 @@ import { api, onPasswordRequired } from "./lib/api"
 import { connectEvents, setNavigate } from "./lib/events"
 import { useStatus } from "./lib/queries"
 import { accentPreviewStore, passwordStore, useStore } from "./lib/store"
+import { setTitleLanguage } from "./lib/utils"
 import HomePage from "./pages/Home"
 
 const EntryPage = lazy(() => import("./pages/Entry"))
@@ -59,6 +60,11 @@ export default function App() {
         document.documentElement.classList.toggle("reduce-motion", !!ui.reducedMotion)
     }, [ui, accentPreview])
 
+    // Anime titles in the language chosen in Settings, set before the pages
+    // render: they're drawn again when it changes (keyed by it).
+    const titleLanguage = ui?.titleLanguage === "romaji" ? "romaji" : "english"
+    setTitleLanguage(titleLanguage)
+
     // Tell plugins where the user is (ctx.screen.onNavigate).
     useEffect(() => {
         const sp = Object.fromEntries(new URLSearchParams(location.search))
@@ -81,7 +87,7 @@ export default function App() {
                                 </div>
                             }
                         >
-                            <Routes>
+                            <Routes key={titleLanguage}>
                                 <Route path="/" element={<HomePage />} />
                                 <Route path="/entry" element={<EntryPage />} />
                                 <Route path="/discover" element={<DiscoverPage />} />
