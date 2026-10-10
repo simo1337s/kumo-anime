@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"mime"
 	"net/http"
@@ -75,6 +76,11 @@ type Probe struct {
 
 var ErrNotInLibrary = errors.New("file is not part of the library")
 
+// ErrFileGone is (wrapped in) the error for a library file that isn't on
+// the disk: moved or deleted, or on a drive that isn't connected (its files
+// are kept until it is, see library.Scanner).
+var ErrFileGone = errors.New("the video file isn't there")
+
 // resolve makes sure only indexed library files can be read.
 func (l *Local) resolve(path string) (string, error) {
 	path = filepath.Clean(path)
@@ -83,9 +89,28 @@ func (l *Local) resolve(path string) (string, error) {
 		return "", ErrNotInLibrary
 	}
 	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", goneError(path)
+		}
 		return "", err
 	}
 	return path, nil
+}
+
+// goneError says why an indexed file isn't on the disk.
+func goneError(path string) error {
+	dir := filepath.Dir(path)
+	if _, err := os.Stat(dir); err == nil {
+		return fmt.Errorf("%w: it was moved or deleted (scan the library again)", ErrFileGone)
+	}
+	// Its folder is gone too: the topmost one missing is the drive's.
+	for parent := filepath.Dir(dir); parent != dir; parent = filepath.Dir(dir) {
+		if _, err := os.Stat(parent); err == nil {
+			break
+		}
+		dir = parent
+	}
+	return fmt.Errorf("%w: %s is missing (is its drive connected?)", ErrFileGone, dir)
 }
 
 func (l *Local) Probe(ctx context.Context, path string) (*Probe, error) {

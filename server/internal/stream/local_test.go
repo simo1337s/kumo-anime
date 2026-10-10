@@ -155,3 +155,22 @@ exit 1
 		t.Errorf("unreadable file: %v", err)
 	}
 }
+
+func TestGoneError(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show")
+	if err := os.Mkdir(show, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The file alone is gone.
+	err := goneError(filepath.Join(show, "Show - 01.mkv"))
+	if !errors.Is(err, ErrFileGone) || !strings.Contains(err.Error(), "moved or deleted") {
+		t.Errorf("file gone: %v", err)
+	}
+	// A whole drive: the topmost missing folder is named.
+	drive := filepath.Join(root, "big")
+	err = goneError(filepath.Join(drive, "Media", "Anime", "Show", "Show - 01.mkv"))
+	if !errors.Is(err, ErrFileGone) || !strings.Contains(err.Error(), drive+" is missing (is its drive connected?)") {
+		t.Errorf("drive gone: %v", err)
+	}
+}
