@@ -468,7 +468,7 @@ func TestDownloadsToHost(t *testing.T) {
 	// A torrent added on the guest goes to the host's torrent client (none
 	// here: its answer says so, from the host).
 	w := do(guest, "POST", "/api/torrent-client/add", local, `{"magnet":"magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567","mediaId":0}`, nil)
-	hostName := host.app.Share.Name()
+	hostName := guest.app.Share.Libraries()[0].Host.Name
 	if w.Code == http.StatusOK || !strings.HasPrefix(errorOf(w), hostName+": ") {
 		t.Fatalf("not sent to the host: %d %s", w.Code, w.Body)
 	}

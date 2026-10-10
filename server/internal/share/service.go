@@ -171,7 +171,8 @@ func (s *Service) Name() string {
 	if n := cleanName(s.settings.Get().Sharing.Name); n != "" {
 		return n
 	}
-	return Hostname()
+	// As the others see it (cleanName keeps names short).
+	return cleanName(Hostname())
 }
 
 // Hostname is the computer's name, without its domain (the device's, as
