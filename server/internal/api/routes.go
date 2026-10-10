@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/simo1337s/animetest/server/internal/anilist"
@@ -206,17 +208,26 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/autodownloader/items", h(func(r *http.Request) (any, error) { return s.app.AutoDL.Items(), nil }))
 
 	// --- extensions & plugins
-	m.HandleFunc("GET /api/extensions", h(func(r *http.Request) (any, error) { return s.app.Extensions.List(), nil }))
+	m.HandleFunc("GET /api/extensions", h(func(r *http.Request) (any, error) {
+		list := s.app.Extensions.List()
+		// Their settings may hold API keys: not for devices on the LAN.
+		if !isTrusted(r) {
+			for i := range list {
+				list[i].UserConfig.Values = map[string]string{}
+			}
+		}
+		return list, nil
+	}))
 	m.HandleFunc("GET /api/extensions/marketplace", h(func(r *http.Request) (any, error) {
 		return s.app.Extensions.Marketplace(r.Context(), r.URL.Query().Get("url"), r.URL.Query().Get("refresh") == "1")
 	}))
 	m.HandleFunc("GET /api/extensions/updates", h(func(r *http.Request) (any, error) { return s.app.Extensions.CheckUpdates(r.Context()), nil }))
-	m.HandleFunc("POST /api/extensions/install", h(s.installExtension))
-	m.HandleFunc("POST /api/extensions/{id}/enable", h(s.enableExtension))
-	m.HandleFunc("POST /api/extensions/{id}/config", h(s.configExtension))
-	m.HandleFunc("POST /api/extensions/{id}/grant", h(func(r *http.Request) (any, error) { return nil, s.app.Extensions.Grant(r.PathValue("id")) }))
-	m.HandleFunc("POST /api/extensions/{id}/update", h(func(r *http.Request) (any, error) { return s.app.Extensions.Update(r.Context(), r.PathValue("id")) }))
-	m.HandleFunc("DELETE /api/extensions/{id}", h(func(r *http.Request) (any, error) { return nil, s.app.Extensions.Uninstall(r.PathValue("id")) }))
+	m.HandleFunc("POST /api/extensions/install", h(trusted(s.installExtension)))
+	m.HandleFunc("POST /api/extensions/{id}/enable", h(trusted(s.enableExtension)))
+	m.HandleFunc("POST /api/extensions/{id}/config", h(trusted(s.configExtension)))
+	m.HandleFunc("POST /api/extensions/{id}/grant", h(trusted(func(r *http.Request) (any, error) { return nil, s.app.Extensions.Grant(r.PathValue("id")) })))
+	m.HandleFunc("POST /api/extensions/{id}/update", h(trusted(func(r *http.Request) (any, error) { return s.app.Extensions.Update(r.Context(), r.PathValue("id")) })))
+	m.HandleFunc("DELETE /api/extensions/{id}", h(trusted(func(r *http.Request) (any, error) { return nil, s.app.Extensions.Uninstall(r.PathValue("id")) })))
 	m.HandleFunc("GET /api/extensions/{id}/logs", h(func(r *http.Request) (any, error) { return s.app.Extensions.Logs(r.PathValue("id")), nil }))
 	m.HandleFunc("GET /api/plugins/ui", h(func(r *http.Request) (any, error) { return s.app.Extensions.PluginStates(), nil }))
 	m.HandleFunc("POST /api/plugins/{id}/event", h(s.pluginEvent))
@@ -379,6 +390,10 @@ func (s *Server) saveSettings(r *http.Request) (any, error) {
 		next.Library.Dir, next.Library.ExtraDirs = cur.Library.Dir, cur.Library.ExtraDirs
 		// Who this computer's library is shared with is its own business.
 		next.Sharing = cur.Sharing
+		// Where extensions come from, and the apps AniList and Discord
+		// logins go to (another's would get the AniList login).
+		next.Extensions.MarketplaceURL = cur.Extensions.MarketplaceURL
+		next.Anilist.ClientID, next.Discord.ClientID = cur.Anilist.ClientID, cur.Discord.ClientID
 	}
 	// Turning off the web UI from a browser would lock the browser out.
 	if kindOf(r) != clientShell && !next.Server.WebUI && cur.Server.WebUI && !s.ForceWebUI {
@@ -433,15 +448,83 @@ func (s *Server) serverLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	ip := clientIP(r).String()
+	if wait := s.logins.wait(ip, time.Now()); wait > 0 {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": fmt.Sprintf("too many wrong passwords: try again in %d minute(s)", int(wait.Minutes())+1)})
+		return
+	}
 	cfg := s.app.Settings.Get()
 	if cfg.Server.Password == "" || constEq(body.Password, cfg.Server.Password) {
+		s.logins.passed(ip)
 		http.SetCookie(w, &http.Cookie{Name: "kumo_session", Value: s.sessionToken(), Path: "/", HttpOnly: true,
 			SameSite: http.SameSiteStrictMode, Expires: time.Now().Add(365 * 24 * time.Hour)})
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
+	s.logins.failed(ip, time.Now())
 	time.Sleep(time.Second) // slow down guessing
 	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "wrong password"})
+}
+
+// trusted wraps a handler only this computer may use (not the LAN).
+func trusted(fn func(r *http.Request) (any, error)) func(r *http.Request) (any, error) {
+	return func(r *http.Request) (any, error) {
+		if !isTrusted(r) {
+			return nil, forbidden("only available on this computer")
+		}
+		return fn(r)
+	}
+}
+
+// loginGuard counts wrong server passwords by address: after maxWrong in a
+// row, that address waits (longer each time) before it may try again.
+type loginGuard struct {
+	mu    sync.Mutex
+	tries map[string]*loginTries
+}
+
+type loginTries struct {
+	wrong int
+	until time.Time
+}
+
+const maxWrong = 5
+
+func (g *loginGuard) wait(ip string, now time.Time) time.Duration {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if t := g.tries[ip]; t != nil && now.Before(t.until) {
+		return t.until.Sub(now)
+	}
+	return 0
+}
+
+func (g *loginGuard) failed(ip string, now time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.tries == nil {
+		g.tries = map[string]*loginTries{}
+	}
+	if len(g.tries) > 10000 {
+		clear(g.tries)
+	}
+	t := g.tries[ip]
+	if t == nil {
+		t = &loginTries{}
+		g.tries[ip] = t
+	}
+	t.wrong++
+	if t.wrong >= maxWrong {
+		// 1 minute, then 2, 4… up to an hour.
+		d := time.Minute << min(t.wrong-maxWrong, 6)
+		t.until = now.Add(min(d, time.Hour))
+	}
+}
+
+func (g *loginGuard) passed(ip string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.tries, ip)
 }
 
 func startDetached(name string, args ...string) error {

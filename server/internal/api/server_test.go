@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 	"testing/fstest"
 
 	"github.com/simo1337s/animetest/server/internal/app"
@@ -30,6 +31,10 @@ func do(s *Server, method, path, remote string, body string, mod func(r *http.Re
 		r.Header.Set("Content-Type", "application/json")
 	} else {
 		r = httptest.NewRequest(method, "http://127.0.0.1:43211"+path, nil)
+		if method == http.MethodPost {
+			// As the app sends them (api.post).
+			r.Header.Set("Content-Type", "application/json")
+		}
 	}
 	r.RemoteAddr = remote
 	if mod != nil {
@@ -202,5 +207,108 @@ func TestSettingsSlicesNotShared(t *testing.T) {
 	c.Library.ExtraDirs[0] = "/changed"
 	if s.app.Settings.Get().Library.ExtraDirs[0] != "/srv/anime-a" {
 		t.Fatal("Get returned a slice shared with the live settings")
+	}
+}
+
+// The names a request may reach this computer by: its own, not one a
+// website controls (DNS rebinding), even a home network's or Tailscale's.
+func TestHostNames(t *testing.T) {
+	was := machineName
+	machineName = func() string { return "mypc" }
+	t.Cleanup(func() { machineName = was })
+	for host, ok := range map[string]bool{
+		"127.0.0.1:43211": true, "[::1]:43211": true, "192.168.1.20": true, "localhost": true,
+		"mypc": true, "MyPC.local": true, "mypc.lan:43211": true, "mypc.home.arpa": true, "mypc.tail1234.ts.net": true, "mypc.local.": true,
+		"attacker": false, "evil.ts.net": false, "evil.tail1234.ts.net": false, "nas.lan": false, "mypc.evil.com": false,
+		"evil.example.com": false, "mypc.a.b.ts.net": false, "localhost.evil.com": false,
+	} {
+		if hostAllowed(host) != ok {
+			t.Errorf("%q: allowed %v", host, !ok)
+		}
+	}
+}
+
+// Other websites can't make this computer do things, even through a
+// browser that doesn't say where a request comes from; the app can.
+func TestNoCrossSitePosts(t *testing.T) {
+	s := newTestServer(t)
+	local := "127.0.0.1:5000"
+	form := func(r *http.Request) { r.Header.Set("Content-Type", "text/plain") }
+	if w := do(s, "POST", "/api/downloads/clear", local, "x", form); w.Code != http.StatusForbidden {
+		t.Errorf("a form post with no origin: %d", w.Code)
+	}
+	if w := do(s, "POST", "/api/downloads/clear", local, "x", func(r *http.Request) { form(r); r.Header.Set("Sec-Fetch-Site", "same-origin") }); w.Code != http.StatusOK {
+		t.Errorf("the app's own: %d %s", w.Code, w.Body)
+	}
+	if w := do(s, "POST", "/api/downloads/clear", local, "{}", nil); w.Code != http.StatusOK {
+		t.Errorf("JSON: %d %s", w.Code, w.Body)
+	}
+	// Nor show its pages in a frame.
+	if w := do(s, "GET", "/settings", local, "", nil); w.Header().Get("X-Frame-Options") != "DENY" || !strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+		t.Errorf("page headers: %v", w.Header())
+	}
+}
+
+// Devices on the LAN can't install or set up extensions (code that runs
+// here), read their settings, or choose where they come from.
+func TestExtensionsOnlyFromThisComputer(t *testing.T) {
+	s := newTestServer(t)
+	cfg := s.app.Settings.Get()
+	cfg.Server.AllowLAN, cfg.Server.Password = true, ""
+	if _, err := s.app.Settings.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	lan := "192.168.1.20:5000"
+	for _, c := range []struct{ method, path, body string }{
+		{"POST", "/api/extensions/install", `{"manifestURI":"https://evil.example.com/m.json"}`},
+		{"POST", "/api/extensions/x/enable", `{"enabled":true}`},
+		{"POST", "/api/extensions/x/config", `{}`},
+		{"POST", "/api/extensions/x/grant", `{}`},
+		{"POST", "/api/extensions/x/update", `{}`},
+		{"DELETE", "/api/extensions/x", ""},
+	} {
+		if w := do(s, c.method, c.path, lan, c.body, nil); w.Code != http.StatusForbidden {
+			t.Errorf("%s %s from the LAN: %d", c.method, c.path, w.Code)
+		}
+	}
+	evil := s.app.Settings.Get()
+	evil.Extensions.MarketplaceURL = "https://evil.example.com/market.json"
+	evil.Anilist.ClientID = "666"
+	raw, _ := json.Marshal(evil)
+	if w := do(s, "PUT", "/api/settings", lan, string(raw), nil); w.Code != http.StatusOK {
+		t.Fatalf("LAN save: %d", w.Code)
+	}
+	if got := s.app.Settings.Get(); got.Extensions.MarketplaceURL == evil.Extensions.MarketplaceURL || got.Anilist.ClientID == "666" {
+		t.Errorf("a LAN device changed where extensions or logins go: %+v %+v", got.Extensions, got.Anilist)
+	}
+}
+
+// Guessing the server password: an address that got it wrong 5 times in a
+// row waits, the others don't.
+func TestPasswordGuessing(t *testing.T) {
+	var g loginGuard
+	now := time.Now()
+	for range maxWrong {
+		if g.wait("192.168.1.30", now) > 0 {
+			t.Fatal("waits before 5 wrong passwords")
+		}
+		g.failed("192.168.1.30", now)
+	}
+	if g.wait("192.168.1.30", now) == 0 {
+		t.Error("no wait after 5 wrong passwords")
+	}
+	if g.wait("192.168.1.31", now) > 0 {
+		t.Error("another address waits")
+	}
+	if g.wait("192.168.1.30", now.Add(2*time.Minute)) > 0 {
+		t.Error("still waiting after the first minute")
+	}
+	g.failed("192.168.1.30", now.Add(2*time.Minute))
+	if d := g.wait("192.168.1.30", now.Add(2*time.Minute)); d < 2*time.Minute-time.Second {
+		t.Errorf("the next wait is %v, not longer", d)
+	}
+	g.passed("192.168.1.30")
+	if g.wait("192.168.1.30", now.Add(2*time.Minute)) > 0 {
+		t.Error("still waiting after the right password")
 	}
 }

@@ -14,6 +14,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +32,8 @@ type Server struct {
 	mu   sync.Mutex
 	srv  *http.Server
 	addr string
+	// Wrong server passwords, by address (serverLogin).
+	logins loginGuard
 	// ForceWebUI is set when no desktop shell can exist (headless mode).
 	ForceWebUI bool
 }
@@ -182,26 +186,43 @@ func isLANIP(ip net.IP) bool {
 	return false
 }
 
+// hostAllowed checks a request's Host against the names this computer goes
+// by, against DNS rebinding (a website's own name, pointed at this computer,
+// must not reach it): an IP address, localhost, or this computer's name,
+// alone or as a home network or Tailscale names it (mypc, mypc.local,
+// mypc.lan, mypc.<tailnet>.ts.net…).
 func hostAllowed(host string) bool {
 	h := host
 	if hh, _, err := net.SplitHostPort(host); err == nil {
 		h = hh
 	}
-	h = strings.Trim(strings.ToLower(h), "[]")
+	h = strings.TrimSuffix(strings.Trim(strings.ToLower(h), "[]"), ".")
 	if h == "localhost" || net.ParseIP(h) != nil {
 		return true
 	}
-	// Local hostnames only: "mypc", "mypc.local", "nas.lan", "box.home.arpa"…
-	if !strings.Contains(h, ".") {
-		return true
+	name := machineName()
+	first, rest, _ := strings.Cut(h, ".")
+	if name == "" || first != name {
+		return false
 	}
-	for _, suf := range []string{".local", ".lan", ".home", ".internal", ".home.arpa", ".localdomain", ".ts.net"} {
-		if strings.HasSuffix(h, suf) {
-			return true
-		}
+	switch {
+	case rest == "", slices.Contains([]string{"local", "lan", "home", "internal", "home.arpa", "localdomain"}, rest):
+		return true
+	case strings.HasSuffix(rest, ".ts.net") && strings.Count(rest, ".") == 2:
+		return true
 	}
 	return false
 }
+
+// machineName is this computer's name, lowercase, without its domain.
+var machineName = sync.OnceValue(func() string {
+	n, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	n, _, _ = strings.Cut(strings.ToLower(strings.TrimSpace(n)), ".")
+	return n
+})
 
 func (s *Server) sessionToken() string {
 	cfg := s.app.Settings.Get()
@@ -262,6 +283,15 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 				http.Error(w, "cross-origin request refused", http.StatusForbidden)
 				return
 			}
+			// A browser that sends neither (an old one) lets other websites
+			// post forms here: a POST that isn't JSON, which they can't send
+			// (the app always does), must be said to come from this site.
+			if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/") && !isJSON(r) {
+				if site := r.Header.Get("Sec-Fetch-Site"); site != "same-origin" && site != "none" {
+					http.Error(w, "cross-site request refused", http.StatusForbidden)
+					return
+				}
+			}
 		}
 
 		if kind != clientShell && !s.webUIEnabled() {
@@ -287,6 +317,11 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			// API responses (JSON, media, subtitles) are never pages.
 			w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+		} else {
+			// The app's pages: never in another website's frame, where it
+			// could get clicks on them (clickjacking).
+			w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'")
+			w.Header().Set("X-Frame-Options", "DENY")
 		}
 		ctx := context.WithValue(r.Context(), ctxKey{}, kind)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -353,13 +388,19 @@ func h(fn func(r *http.Request) (any, error)) http.HandlerFunc {
 	}
 }
 
+// isJSON reports a request with a JSON body (Content-Type).
+func isJSON(r *http.Request) bool {
+	ct := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
+	return strings.HasPrefix(ct, "application/json")
+}
+
 func decode(r *http.Request, v any) error {
 	if r.Body == nil {
 		return badRequest("missing body")
 	}
 	// A JSON content type can't be sent cross-site without a CORS
 	// preflight (which is never granted), unlike text/plain form posts.
-	if ct := strings.ToLower(r.Header.Get("Content-Type")); !strings.HasPrefix(strings.TrimSpace(ct), "application/json") {
+	if !isJSON(r) {
 		return badRequest("expected a JSON body (Content-Type: application/json)")
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 8<<20))
