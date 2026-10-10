@@ -58,6 +58,7 @@ type Service struct {
 	hub      *events.Hub
 	api      *http.Client // short requests to the others
 	media    *http.Client // forwarded video: no time limit
+	slow     *http.Client // requests a host takes long to answer (ani-cli)
 
 	// OnFiles runs when the files shared with this Kumo change (in the
 	// background).
@@ -70,6 +71,10 @@ type Service struct {
 	// OnWatchedElsewhere runs when another Kumo on the account says an
 	// episode was finished there: AniList has the new progress.
 	OnWatchedElsewhere func()
+	// AniCliReady reports whether ani-cli runs here, for the Kumos this one
+	// shares with (anicli.go).
+	AniCliReady func() bool
+
 	// The AniList login, for sharing it with a Kumo (as a host) and using a
 	// host's (as a guest, see account.go): its token ("" logged out), and
 	// logging in and out. Nil: not shared.
@@ -127,6 +132,8 @@ type peer struct {
 	// "" when not); hostDownloads: this Kumo may download onto it.
 	hostAccount   string
 	hostDownloads bool
+	// hostAniCli: it runs ani-cli for this Kumo.
+	hostAniCli bool
 }
 
 func (p *peer) online(now time.Time) bool { return now.Sub(p.seen) < onlineFor }
@@ -157,6 +164,7 @@ func New(d *db.DB, settings *config.Store, lib Library, hub *events.Hub) (*Servi
 		id: id, db: d, settings: settings, library: lib, hub: hub,
 		api:   &http.Client{Timeout: 15 * time.Second, Transport: transport()},
 		media: &http.Client{Transport: transport()},
+		slow:  &http.Client{Timeout: 3 * time.Minute, Transport: &http.Transport{Proxy: nil, DialContext: dialer.DialContext, MaxIdleConnsPerHost: 2}},
 		peers: map[string]*peer{},
 	}
 	s.load()
@@ -512,6 +520,8 @@ type Hello struct {
 	Account string `json:"account,omitempty"`
 	// Downloads: the guest may download onto it (downloads.go).
 	Downloads bool `json:"downloads,omitempty"`
+	// AniCli: it runs ani-cli for the guest (anicli.go).
+	AniCli bool `json:"aniCli,omitempty"`
 }
 
 // Hello answers a guest (verified, see Verify).
@@ -525,6 +535,7 @@ func (s *Service) Hello(c Caller) Hello {
 			h.Account = accountTag(s.accountToken())
 		}
 		h.Downloads = c.Downloads
+		h.AniCli = s.AniCliReady != nil && s.AniCliReady()
 	}
 	return h
 }
@@ -656,6 +667,7 @@ func (s *Service) ask(ctx context.Context, p *peer) {
 		p.user = h.User
 		tag, takes = h.Account, h.Downloads
 	}
+	p.hostAniCli = h.Shares && h.AniCli
 	accountChanged := p.hostAccount != tag
 	took := p.hostDownloads
 	p.hostAccount, p.hostDownloads = tag, takes

@@ -4,8 +4,10 @@
 // thing that can be pressed in that direction (spatial navigation), and OK
 // (Enter) presses it. Inside a dialog or the player, the focus stays there.
 // Menus move it themselves, text fields keep Left/Right for the text, and
-// the player keeps the keys it uses (see Player). Back and the media keys
-// come from the app (window.kumoBack, window.kumoKey).
+// the player keeps the keys it uses (see Player). Back, Menu (☰) and the
+// media keys come from the app (window.kumoBack, window.kumoKey).
+
+import { createStore } from "./store"
 
 // The Android app's bridge (MainActivity.java).
 type AndroidBridge = {
@@ -39,6 +41,52 @@ export const tv =
                 return false
             }
         })())
+
+// How wide the page is laid out on the TV, in CSS pixels: a 1080p TV is
+// 960 wide at the WebView's own scale (2x), which makes everything big.
+// Settings › User Interface changes it (stored on the TV).
+export const TV_WIDTHS = [
+    { value: 1600, label: "Smallest" },
+    { value: 1440, label: "Smaller" },
+    { value: 1280, label: "Default" },
+    { value: 1100, label: "Larger" },
+    { value: 960, label: "Largest" },
+]
+const TV_WIDTH_KEY = "kumo-tv-width"
+
+export function tvWidth(): number {
+    try {
+        const w = Number(localStorage.getItem(TV_WIDTH_KEY))
+        if (TV_WIDTHS.some(o => o.value === w)) return w
+    } catch {
+        /* ignore */
+    }
+    return 1280
+}
+
+export function setTvWidth(w: number) {
+    try {
+        localStorage.setItem(TV_WIDTH_KEY, String(w))
+    } catch {
+        /* ignore */
+    }
+    applyTvWidth()
+}
+
+// The app lays the page out at the viewport's width (it uses the page's
+// viewport, see MainActivity), scaled to fit the screen: the width the page
+// had at first (device-width) over the new one.
+let deviceWidth = 0
+
+function applyTvWidth() {
+    if (!androidApp) return
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]')
+    deviceWidth ||= window.innerWidth || window.screen?.width || 0
+    if (!meta || !deviceWidth) return
+    const w = tvWidth()
+    const scale = Math.round((deviceWidth / w) * 10000) / 10000
+    meta.content = `width=${w}, initial-scale=${scale}, minimum-scale=${scale}, maximum-scale=${scale}, user-scalable=no`
+}
 
 type Dir = "up" | "down" | "left" | "right"
 const DIRS: Record<string, Dir> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }
@@ -216,6 +264,45 @@ export function press(key: string, target: EventTarget = document.activeElement 
     return ev.defaultPrevented
 }
 
+// The remote's Menu key (☰) does what a right-click does: it opens the
+// focused card's menu. Where there's none, it lists what a mouse would find
+// on it (the buttons shown on hover, out of the remote's reach); in the
+// player, its menus (subtitles, audio, settings).
+export type TvMenu = { items: { label: string; el: HTMLElement }[]; rect: DOMRect; from: HTMLElement | null }
+export const tvMenuStore = createStore<TvMenu | null>(null)
+
+function labelOf(el: HTMLElement) {
+    return (el.getAttribute("aria-label") || el.title || el.textContent || "").replace(/\s*\([^)]*\)\s*$/, "").trim()
+}
+
+export function openMenu() {
+    const player = !document.querySelector('[role="dialog"], [role="alertdialog"]') ? document.querySelector<HTMLElement>("[data-tv-scope]") : null
+    const from = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
+    let items: HTMLElement[]
+    let rect: DOMRect
+    if (player) {
+        items = [...player.querySelectorAll<HTMLElement>('[aria-haspopup="menu"]')]
+        rect = (player.querySelector("[data-tv-controls]") ?? player).getBoundingClientRect()
+    } else {
+        if (!from) return
+        rect = from.getBoundingClientRect()
+        const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 3 })
+        // A menu opened (MediaCard's).
+        if (!from.dispatchEvent(ev)) return
+        items = [...from.querySelectorAll<HTMLElement>('button, a[href], [role="button"]')].filter(b => !b.matches(":disabled") && !b.closest('[aria-hidden="true"]'))
+    }
+    const list = items.map(el => ({ label: labelOf(el), el })).filter(i => i.label)
+    if (list.length) tvMenuStore.set({ items: list, rect, from })
+}
+
+// runMenuItem does what pressing it would: a menu button opens its menu.
+export function runMenuItem(el: HTMLElement) {
+    if (el.getAttribute("aria-haspopup") === "menu") {
+        el.focus({ preventScroll: true })
+        el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }))
+    } else el.click()
+}
+
 // Android updates: the server downloads the APK, the app asks Android to
 // install it, once each time Update is pressed.
 let installWanted = false
@@ -237,6 +324,7 @@ export function initTV(goBack: () => boolean) {
     if (!tv || started) return
     started = true
     document.documentElement.classList.add("tv")
+    applyTvWidth()
     window.addEventListener("keydown", onKey, true)
     // Back: a menu or dialog closes, then the player, then the page goes
     // back. false: nothing left, the app goes to the TV's home.
@@ -249,6 +337,10 @@ export function initTV(goBack: () => boolean) {
     }
     // The remote's media keys, as the player's keys.
     window.kumoKey = (key: string) => {
+        if (key === "menu") {
+            if (!tvMenuStore.get() && !document.querySelector('[role="menu"]')) openMenu()
+            return
+        }
         const k = { playpause: " ", rewind: "j", forward: "l" }[key]
         if (k && document.querySelector("[data-tv-scope]")) press(k)
     }

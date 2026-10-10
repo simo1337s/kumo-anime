@@ -33,6 +33,9 @@ func (s *Server) setLanguageMode(mediaID int, mode string) error {
 	if mode != "sub" && mode != "dub" {
 		return badRequest(`mode must be "sub" or "dub"`)
 	}
+	if err := s.followLanguage(mode); err != nil {
+		return err
+	}
 	p := s.app.Player.Tracks.Get(mediaID)
 	if p == nil {
 		p = &player.TrackPrefs{MediaID: mediaID}
@@ -46,6 +49,18 @@ func (s *Server) setLanguageMode(mediaID int, mode string) error {
 		p.SubLang, p.SubTitle, p.SubIndex, p.SubOff = "", "", 0, false
 	}
 	return s.app.Player.Tracks.Save(*p)
+}
+
+// followLanguage makes a sub/dub choice the default: anime without one of
+// their own start in the language picked last.
+func (s *Server) followLanguage(mode string) error {
+	cfg := s.app.Settings.Get()
+	if cfg.AniCli.DefaultMode == mode {
+		return nil
+	}
+	cfg.AniCli.DefaultMode = mode
+	_, err := s.app.Settings.Save(cfg)
+	return err
 }
 
 // audioFitsMode reports whether an audio track (by language tag or title)

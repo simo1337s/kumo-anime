@@ -520,8 +520,17 @@ func (s *Server) saveTracks(r *http.Request) (any, error) {
 		return nil, err
 	}
 	p.MediaID = id
-	if old := s.app.Player.Tracks.Get(id); old != nil && p.StreamMode == "" {
+	old := s.app.Player.Tracks.Get(id)
+	switch {
+	case p.StreamMode == "sub" || p.StreamMode == "dub":
+		// The audio track picked in the player is the sub/dub choice.
+		if err := s.followLanguage(p.StreamMode); err != nil {
+			return nil, err
+		}
+	case old != nil:
 		p.StreamMode = old.StreamMode
+	default:
+		p.StreamMode = ""
 	}
 	return nil, s.app.Player.Tracks.Save(p)
 }

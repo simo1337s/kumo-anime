@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import Hls from "hls.js"
 import {
     ArrowLeft,
@@ -450,8 +451,12 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         [mediaId, episode, source, duration, base, title],
     )
 
-    const saveTrackPrefs = (next: { audio?: number; sub?: string }) => {
-        if (!settings?.playback.rememberTracks || mediaId <= 0) return
+    const saveTrackPrefs = (next: { audio?: number; sub?: string; mode?: "sub" | "dub" }) => {
+        if (mediaId <= 0) return
+        if (!settings?.playback.rememberTracks) {
+            if (next.mode) api.put(`/api/anime/${mediaId}/language`, { mode: next.mode }).then(languageChanged, () => {})
+            return
+        }
         const a = next.audio ?? audioIndex
         const sk = next.sub ?? subKey
         const audio = probe?.audio?.[a]
@@ -465,9 +470,16 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
             subTitle: sub?.title ?? "",
             subIndex: sub ? (sub.index >= 1000 ? 0 : sub.index + 1) : 0,
             subOff: sk === "off",
+            streamMode: next.mode,
         }
         prefsRef.current = body
-        api.put(`/api/playback/tracks/${mediaId}`, body).catch(() => {})
+        api.put(`/api/playback/tracks/${mediaId}`, body).then(next.mode ? languageChanged : undefined, () => {})
+    }
+    // The anime page shows the sub/dub picked here, and new anime start in it.
+    const qc = useQueryClient()
+    const languageChanged = () => {
+        qc.invalidateQueries({ queryKey: ["language", mediaId] })
+        qc.invalidateQueries({ queryKey: ["status"] })
     }
 
     // --------------------------------------------------------------- actions
@@ -516,7 +528,13 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         if (method === "direct") setMethod("remux")
         startAt.current = 0
         setOffset(at)
-        saveTrackPrefs({ audio: i })
+        // English or original audio, in a file that has both: that's dub or
+        // sub for this anime from now on.
+        const audio = probe?.audio ?? []
+        const english = (a: { language: string; title: string }) => isEnglishTrack(a.language, a.title)
+        const picked = audio[i]
+        const mode = picked && audio.some(english) && audio.some(a => !english(a)) ? (english(picked) ? "dub" : "sub") : undefined
+        saveTrackPrefs({ audio: i, mode })
     }
     const changeSub = (key: string) => {
         setSubKey(key)
@@ -804,7 +822,10 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                         setMethod("transcode")
                     } else if (req.kind === "stream" && !hlsRef.current) {
                         if (sourceIdx + 1 < sources.length) setSourceIdx(i => i + 1)
-                        else setError("This video could not be played.")
+                        else setError(`This video could not be played${mediaErrorText(videoRef.current)}.`)
+                    } else if (req.kind === "local") {
+                        // Converted, and still not playable here.
+                        setError(`This device can't play the converted video${mediaErrorText(videoRef.current)}.`)
                     }
                 }}
             />
@@ -1043,6 +1064,14 @@ function qualityRank(q: string) {
     if (m) return Number(m[1])
     if (/auto|default|best/i.test(q ?? "")) return 5000
     return 0
+}
+
+// Why the video element gave up, as far as the browser says.
+function mediaErrorText(v: HTMLVideoElement | null): string {
+    const e = v?.error
+    if (!e) return ""
+    const kind = { 1: "stopped", 2: "network error", 3: "can't decode it", 4: "format not supported" }[e.code] ?? `error ${e.code}`
+    return ` (${kind}${e.message ? `: ${e.message}` : ""})`
 }
 
 // An English (dub) or Japanese (original) track, by language tag or title —

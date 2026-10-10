@@ -113,6 +113,18 @@ func (s *Server) peerRoutes() {
 		}
 		return sa, nil
 	})))
+	// ani-cli, for a Kumo where it doesn't run (Android): see share/anicli.go.
+	m.HandleFunc("POST /api/peer/anicli/{op}", shared(h(func(r *http.Request) (any, error) {
+		var req share.AniCliRequest
+		if err := decode(r, &req); err != nil {
+			return nil, err
+		}
+		a, err := share.AnswerAniCli(r.Context(), s.app.AniCli, r.PathValue("op"), req)
+		if err != nil {
+			return nil, badRequest(err.Error())
+		}
+		return a, nil
+	})))
 	// Downloads from a Kumo allowed to download onto this one.
 	m.HandleFunc("POST /api/peer/downloads/{kind}", shared(h(s.peerDownload)))
 	m.HandleFunc("GET /api/peer/local/probe", shared(h(func(r *http.Request) (any, error) {

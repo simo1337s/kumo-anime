@@ -5,6 +5,7 @@ import { Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
 import { NowPlaying, ScanIndicator } from "./components/NowPlaying"
 import { PlayerOverlay } from "./components/player/Player"
+import { TvMenu } from "./components/TvMenu"
 import { QuickSearch } from "./components/QuickSearch"
 import { KumoLogo, Sidebar } from "./components/Sidebar"
 import { Button, Input, Spinner, TooltipProvider } from "./components/ui"
@@ -12,7 +13,7 @@ import { api, onPasswordRequired } from "./lib/api"
 import { connectEvents, setNavigate } from "./lib/events"
 import { useStatus } from "./lib/queries"
 import { accentPreviewStore, passwordStore, useStore } from "./lib/store"
-import { initTV } from "./lib/tv"
+import { initTV, tv } from "./lib/tv"
 import { setTitleLanguage } from "./lib/utils"
 import HomePage from "./pages/Home"
 
@@ -129,6 +130,7 @@ export default function App() {
             <ScanIndicator />
             <QuickSearch />
             <PlayerOverlay />
+            {tv && <TvMenu />}
             <Toaster
                 theme="dark"
                 position="top-right"

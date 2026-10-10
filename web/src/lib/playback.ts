@@ -54,8 +54,9 @@ export function videoCaps(via: "mse" | "element"): string[] {
         ["vp9-10", "vp09.02.40.10"],
     ]
     for (const [cap, codecs] of tests) if (can(codecs)) caps.push(cap)
-    // Chromium plays Matroska (.mkv) files as they are; Safari doesn't.
-    if (chromium && via === "element") caps.push("mkv")
+    // Chromium plays Matroska (.mkv) files as they are; Safari doesn't, nor
+    // Android's (a TV's WebView): those get them repackaged into MP4.
+    if (chromium && via === "element" && !/Android/.test(ua)) caps.push("mkv")
     return caps
 }
 

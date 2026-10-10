@@ -24,6 +24,7 @@ import { api } from "@/lib/api"
 import { useMediaQuery } from "@/lib/hooks"
 import { useCollection, useDownloads, useStatus } from "@/lib/queries"
 import { notificationsMutedStore, searchOpenStore, torrentCountStore, useStore } from "@/lib/store"
+import { tv } from "@/lib/tv"
 import { cn, img } from "@/lib/utils"
 import { LoginDialog } from "./LoginDialog"
 import { PluginTrays } from "./plugins/PluginTrays"
@@ -126,7 +127,7 @@ export function Sidebar() {
             >
                 {it.icon}
                 {wide && <span className="truncate">{it.label}</span>}
-                {wide && it.hint && !badge && <kbd className="ml-auto font-sans text-[11px] text-subtle">{it.hint}</kbd>}
+                {wide && it.hint && !badge && !tv && <kbd className="ml-auto font-sans text-[11px] text-subtle">{it.hint}</kbd>}
                 {badge &&
                     (wide ? (
                         <span className="ml-auto rounded bg-white/[0.08] px-1.5 text-[11px] leading-[18px] text-fg/80 tabular-nums">{badge}</span>

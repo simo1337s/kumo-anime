@@ -194,6 +194,10 @@ func (a *App) wire() {
 		}
 		return 0
 	}
+	// ani-cli for the Kumos this one shares with; and where it runs for this
+	// one when it isn't here (Android).
+	a.Share.AniCliReady = a.AniCli.LocalReady
+	a.AniCli.SetRemote(a.Share.AniCliRemote())
 	// The AniList login a host shares with this Kumo, or this one shares.
 	a.Share.AccountToken = func() string {
 		if !a.Platform.LoggedIn() {

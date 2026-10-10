@@ -80,6 +80,45 @@ type Driver struct {
 	searchTTL time.Duration
 	cacheMu   sync.Mutex
 	searches  map[string]cachedSearch
+
+	// remote runs ani-cli somewhere else when it isn't here (SetRemote).
+	remote Remote
+}
+
+// Remote runs ani-cli for a Kumo that can't: Android, where the script
+// doesn't run, asks a computer that shares its library with it.
+type Remote interface {
+	// Name is the computer's name, "" when none can run it now.
+	Name() string
+	Search(ctx context.Context, query, mode string) ([]Result, error)
+	Episodes(ctx context.Context, query string, index int, mode string) ([]string, error)
+	Resolve(ctx context.Context, query string, index int, episode, mode, quality string) (*Stream, error)
+}
+
+// SetRemote sets where ani-cli runs when it isn't installed here.
+func (d *Driver) SetRemote(r Remote) { d.remote = r }
+
+// LocalReady reports whether ani-cli runs here.
+func (d *Driver) LocalReady() bool { return Ready(d.settings.Get().AniCli.Path) }
+
+// via is the Remote that runs ani-cli now, nil when it runs here (or
+// nowhere).
+func (d *Driver) via() Remote {
+	if d.remote == nil || d.LocalReady() || d.remote.Name() == "" {
+		return nil
+	}
+	return d.remote
+}
+
+// Available reports whether ani-cli runs, here or on another computer.
+func (d *Driver) Available() bool { return d.LocalReady() || d.via() != nil }
+
+// RemoteName is the computer ani-cli runs on, "" when it runs here.
+func (d *Driver) RemoteName() string {
+	if r := d.via(); r != nil {
+		return r.Name()
+	}
+	return ""
 }
 
 type cachedSearch struct {
@@ -121,6 +160,8 @@ type Status struct {
 	Version   string `json:"version"`
 	YtDlp     bool   `json:"ytDlp"`
 	Ffmpeg    bool   `json:"ffmpeg"`
+	// Remote: the computer that runs it for this Kumo, when it isn't here.
+	Remote string `json:"remote,omitempty"`
 }
 
 func (d *Driver) Status(ctx context.Context) Status {
@@ -130,6 +171,7 @@ func (d *Driver) Status(ctx context.Context) Status {
 	_, st.Ffmpeg = util.LookPath(cfg.Transcode.FfmpegPath)
 	path, ok := findScript(cfg.AniCli.Path)
 	if !ok {
+		st.Remote = d.RemoteName()
 		return st
 	}
 	st.Installed, st.Path = true, path
@@ -345,6 +387,9 @@ func (d *Driver) Search(ctx context.Context, query, mode string) ([]Result, erro
 }
 
 func (d *Driver) search(ctx context.Context, query, mode string) ([]Result, error) {
+	if r := d.via(); r != nil {
+		return r.Search(ctx, query, mode)
+	}
 	query = strings.TrimSpace(query)
 	q, err := queryArg(query)
 	if err != nil {
@@ -392,6 +437,9 @@ func (d *Driver) search(ctx context.Context, query, mode string) ([]Result, erro
 
 // Episodes returns the episode numbers available for a search result.
 func (d *Driver) Episodes(ctx context.Context, query string, index int, mode string) ([]string, error) {
+	if r := d.via(); r != nil {
+		return r.Episodes(ctx, query, index, mode)
+	}
 	q, err := queryArg(query)
 	if err != nil {
 		return nil, err
@@ -431,6 +479,10 @@ type noSourcesError string
 func (e noSourcesError) Error() string        { return "ani-cli: " + string(e) }
 func (e noSourcesError) Is(target error) bool { return target == ErrNoSources }
 
+// NoSources is the error of a Resolve that found no stream (ErrNoSources),
+// with ani-cli's message: for a Remote's answer.
+func NoSources(msg string) error { return noSourcesError(strings.TrimPrefix(msg, "ani-cli: ")) }
+
 // Resolve asks ani-cli for the stream of one episode.
 func (d *Driver) Resolve(ctx context.Context, query string, index int, episode, mode, quality string) (*Stream, error) {
 	q, err := queryArg(query)
@@ -439,6 +491,9 @@ func (d *Driver) Resolve(ctx context.Context, query string, index int, episode, 
 	}
 	if quality == "" {
 		quality = d.settings.Get().AniCli.Quality
+	}
+	if r := d.via(); r != nil {
+		return r.Resolve(ctx, query, index, episode, mode, quality)
 	}
 	args := append(modeArgs(mode), "--exit-after-play", "-S", strconv.Itoa(index), "-e", episode)
 	if quality != "" && quality != "best" {

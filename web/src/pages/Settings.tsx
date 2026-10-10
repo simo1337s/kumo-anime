@@ -41,6 +41,7 @@ import { exampleMpvPath, installHint, installSource, platformName } from "@/lib/
 import type { Tool } from "@/lib/platform"
 import { canInstallPrograms, useInstallPrograms, useWatchSetup } from "@/lib/programs"
 import { accentPreviewStore } from "@/lib/store"
+import { androidApp, setTvWidth, TV_WIDTHS, tv, tvWidth } from "@/lib/tv"
 import type { Settings, SharingPeer, Status } from "@/lib/types"
 import { cn, copyText, formatBytes, img, relativeTime } from "@/lib/utils"
 
@@ -690,6 +691,24 @@ function ProgramsGroup() {
     )
 }
 
+// How big everything is on the TV (this TV's own choice, see lib/tv.ts).
+function TvSizeRow() {
+    const [width, setWidth] = useState(tvWidth)
+    return (
+        <Row label="Size on the TV" help="Smaller fits more on the screen">
+            <Select
+                className="w-36"
+                value={String(width)}
+                onChange={v => {
+                    setWidth(Number(v))
+                    setTvWidth(Number(v))
+                }}
+                options={TV_WIDTHS.map(o => ({ value: String(o.value), label: o.label }))}
+            />
+        </Row>
+    )
+}
+
 const ACCENTS = ["#7c6cf2", "#5b8cff", "#22c3a6", "#f2557a", "#f59e0b", "#e879f9", "#38bdf8", "#a3e635"]
 
 function UISection({ draft, set }: SectionProps) {
@@ -730,6 +749,7 @@ function UISection({ draft, set }: SectionProps) {
                 <Row label="Reduce motion" help="Turn off animations">
                     <Switch checked={draft.ui.reducedMotion} onChange={v => set("ui", { reducedMotion: v })} />
                 </Row>
+                {tv && androidApp && <TvSizeRow />}
             </Group>
             <Group title="Content">
                 <Row label="Anime titles" help="English where AniList has an English title, or Japanese (romaji, in Latin letters)">

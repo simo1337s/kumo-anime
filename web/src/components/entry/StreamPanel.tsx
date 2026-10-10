@@ -129,6 +129,7 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
                 {!remote && (
                     <span className="ml-auto flex items-center gap-1.5 text-xs text-subtle">
                         <MonitorPlay className="size-3.5" /> Plays in {streamPlayer() === "mpv" ? "mpv" : "the in-app player"}
+                        {provider === "ani-cli" && status?.features.aniCliHost && <> · ani-cli runs on {status.features.aniCliHost}</>}
                     </span>
                 )}
             </div>
@@ -139,7 +140,10 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
                     <div className="text-sm">
                         <p className="font-semibold text-amber-200">{status?.platform === "android" ? "ani-cli doesn’t run on Android" : "ani-cli isn’t installed"}</p>
                         {status?.platform === "android" ? (
-                            <p className="mt-1 text-muted">Pick an extension provider from the marketplace, or watch and download from a computer’s library (Settings › Local Anime Library › Library sharing).</p>
+                            <p className="mt-1 text-muted">
+                                It runs on a computer with Kumo and ani-cli instead: there, turn on <b>Share my library</b> for this device (Settings › Local Anime Library › Library sharing). Or pick an extension
+                                provider from the marketplace.
+                            </p>
                         ) : canInstallPrograms(status) ? (
                             <p className="mt-1 text-muted">Kumo can install it, with the programs it needs, or pick an extension provider from the marketplace.</p>
                         ) : (

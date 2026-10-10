@@ -124,7 +124,12 @@ export function useLanguageMode(mediaId: number) {
     const set = useMutation({
         mutationFn: (mode: "sub" | "dub") => api.put<LanguageMode>(`/api/anime/${mediaId}/language`, { mode }),
         onMutate: mode => qc.setQueryData<LanguageMode>(["language", mediaId], { mode, saved: true }),
-        onSettled: () => qc.invalidateQueries({ queryKey: ["language", mediaId] }),
+        onSettled: () => {
+            qc.invalidateQueries({ queryKey: ["language", mediaId] })
+            // It's also the default now, for the anime without a choice.
+            qc.invalidateQueries({ queryKey: ["language"] })
+            qc.invalidateQueries({ queryKey: ["status"] })
+        },
         onError: (e: Error) => toast.error(e.message),
     })
     return { mode: query.data?.mode, saved: query.data?.saved ?? false, loaded: query.isSuccess || query.isError, set: set.mutate }

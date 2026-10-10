@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simo1337s/animetest/server/internal/anicli"
 	"github.com/simo1337s/animetest/server/internal/anilist"
 	"github.com/simo1337s/animetest/server/internal/config"
 	"github.com/simo1337s/animetest/server/internal/share"
@@ -293,8 +292,11 @@ type featureStatus struct {
 	Ffmpeg  bool `json:"ffmpeg"`
 	Ffprobe bool `json:"ffprobe"`
 	AniCli  bool `json:"aniCli"`
-	YtDlp   bool `json:"ytDlp"`
-	XdgOpen bool `json:"xdgOpen"`
+	// AniCliHost: the computer that runs ani-cli for this Kumo, when it
+	// doesn't run here (Android).
+	AniCliHost string `json:"aniCliHost,omitempty"`
+	YtDlp      bool   `json:"ytDlp"`
+	XdgOpen    bool   `json:"xdgOpen"`
 }
 
 func (s *Server) status(r *http.Request) (any, error) {
@@ -303,7 +305,8 @@ func (s *Server) status(r *http.Request) (any, error) {
 	_, feat.Mpv = util.LookPath(cfg.Mpv.Path)
 	_, feat.Ffmpeg = util.LookPath(cfg.Transcode.FfmpegPath)
 	_, feat.Ffprobe = util.LookPath(cfg.Transcode.FfprobePath)
-	feat.AniCli = anicli.Ready(cfg.AniCli.Path)
+	feat.AniCli = s.app.AniCli.Available()
+	feat.AniCliHost = s.app.AniCli.RemoteName()
 	_, feat.YtDlp = util.LookPath("yt-dlp")
 	_, feat.XdgOpen = util.LookPath("xdg-open")
 	feat.XdgOpen = feat.XdgOpen || runtime.GOOS == "windows" || runtime.GOOS == "darwin" // Explorer, Finder

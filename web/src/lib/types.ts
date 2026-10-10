@@ -251,7 +251,7 @@ export type Status = {
     user: Viewer | null
     loggedIn: boolean
     anilistAuthUrl: string
-    features: { mpv: boolean; ffmpeg: boolean; ffprobe: boolean; aniCli: boolean; ytDlp: boolean; xdgOpen: boolean }
+    features: { mpv: boolean; ffmpeg: boolean; ffprobe: boolean; aniCli: boolean; aniCliHost?: string; ytDlp: boolean; xdgOpen: boolean }
     client: "desktop" | "local" | "lan"
     hostname: string
     platform?: string // "linux", "windows"…

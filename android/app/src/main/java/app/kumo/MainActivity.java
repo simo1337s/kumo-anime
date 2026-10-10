@@ -92,6 +92,14 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
+        // The page's viewport decides the layout width (on a TV, wider than
+        // the WebView's own: everything smaller, see web/src/lib/tv.ts),
+        // scaled to fit the screen.
+        s.setUseWideViewPort(true);
+        s.setLoadWithOverviewMode(true);
+        s.setSupportZoom(false);
+        s.setBuiltInZoomControls(false);
+        s.setDisplayZoomControls(false);
         s.setUserAgentString(s.getUserAgentString() + " KumoAndroid/" + versionName() + (isTV() ? " KumoTV" : ""));
         web.addJavascriptInterface(new Bridge(), "KumoAndroid");
         web.setWebViewClient(new WebViewClient() {
@@ -250,6 +258,10 @@ public class MainActivity extends Activity {
             case KeyEvent.KEYCODE_MEDIA_PLAY:
             case KeyEvent.KEYCODE_MEDIA_PAUSE:
                 if (down && e.getRepeatCount() == 0) js("window.kumoKey&&window.kumoKey('playpause')");
+                return true;
+            case KeyEvent.KEYCODE_MENU:
+                // ☰: what a right-click opens.
+                if (down && e.getRepeatCount() == 0) js("window.kumoKey&&window.kumoKey('menu')");
                 return true;
             case KeyEvent.KEYCODE_MEDIA_REWIND:
                 if (down) js("window.kumoKey&&window.kumoKey('rewind')");
