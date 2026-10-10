@@ -29,6 +29,8 @@ on:
       - "**.md"
       - "packaging/arch/**"
       - "packaging/windows/**"
+      - "android/**"
+      - "packaging/android/**"
   workflow_dispatch:
     inputs:
       publish:

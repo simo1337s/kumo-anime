@@ -305,6 +305,38 @@ func (c *Checker) applyWindows(ctx context.Context, g *github, target Version, i
 	return nil
 }
 
+// applyAndroid downloads the new APK: the Android app asks Android to
+// install it (Status.InstallFile), which then replaces the app.
+func (c *Checker) applyAndroid(ctx context.Context, g *github, target Version, apk *asset) error {
+	if apk == nil {
+		return errors.New("the newest release has no APK")
+	}
+	dir := c.CacheDir
+	if err := removeAll(dir); err != nil {
+		return fmt.Errorf("couldn't remove the last update's files: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, filepath.Base(apk.Name))
+	err := c.download(ctx, g, "/repos/"+g.repo+"/releases/assets/"+strconv.FormatInt(apk.ID, 10), "application/octet-stream", path, apk.Size, func(done, total int64) {
+		c.progress(StateDownloading, percent(done, total), "Downloading Kumo "+display(target)+"…")
+	})
+	if err != nil {
+		return fmt.Errorf("couldn't download the APK: %w", err)
+	}
+	if err := verifyDigest(path, apk.Digest); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	c.mu.Lock()
+	c.st.State, c.st.Progress, c.st.InstallFile = StateInstalling, -1, path
+	c.st.Message = "Installing Kumo " + display(target) + ": confirm on the screen Android shows."
+	c.publishLocked()
+	c.mu.Unlock()
+	return nil
+}
+
 // verifyDigest checks a download against GitHub's digest of the asset
 // ("sha256:<hex>"). Older assets have none: nothing to check then.
 func verifyDigest(path, digest string) error {

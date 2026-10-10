@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -80,7 +81,7 @@ func shared(fn http.HandlerFunc) http.HandlerFunc {
 func (s *Server) peerRoutes() {
 	m := s.mux
 	m.HandleFunc("GET /api/peer/whoami", h(func(r *http.Request) (any, error) { return s.app.Share.Whoami(), nil }))
-	m.HandleFunc("GET /api/peer/hello", h(func(r *http.Request) (any, error) { return s.app.Share.Hello(peerAllowed(r)), nil }))
+	m.HandleFunc("GET /api/peer/hello", h(func(r *http.Request) (any, error) { return s.app.Share.Hello(peerOf(r)), nil }))
 	m.HandleFunc("GET /api/peer/files", shared(h(func(r *http.Request) (any, error) { return s.app.Share.SharedFiles() })))
 	// The watch history, for a Kumo it shares with on the same AniList
 	// account: Continue watching goes on there where it stopped here.
@@ -103,6 +104,17 @@ func (s *Server) peerRoutes() {
 		s.app.Share.TakeHistory(entries)
 		return nil, nil
 	})))
+	// This Kumo's AniList login, for a Kumo it shares it with: sealed, only
+	// that one can read it.
+	m.HandleFunc("GET /api/peer/anilist", shared(h(func(r *http.Request) (any, error) {
+		sa, err := s.app.Share.SealAccount(peerOf(r))
+		if err != nil {
+			return nil, forbidden(err.Error())
+		}
+		return sa, nil
+	})))
+	// Downloads from a Kumo allowed to download onto this one.
+	m.HandleFunc("POST /api/peer/downloads/{kind}", shared(h(s.peerDownload)))
 	m.HandleFunc("GET /api/peer/local/probe", shared(h(func(r *http.Request) (any, error) {
 		return s.app.Local.Probe(r.Context(), r.URL.Query().Get("path"))
 	})))
@@ -139,14 +151,34 @@ func (s *Server) peerRoutes() {
 		if !isTrusted(r) {
 			return nil, forbidden("only this computer decides who its library is shared with")
 		}
+		var body share.Grants
+		if err := decode(r, &body); err != nil {
+			return nil, err
+		}
+		if err := s.app.Share.SetGrants(r.PathValue("id"), body); err != nil {
+			return nil, notFound(err.Error())
+		}
+		return s.app.Share.Status(), nil
+	}))
+	// The AniList account a host shares with this Kumo: use it, or stop.
+	m.HandleFunc("POST /api/sharing/libraries/{id}/account", h(func(r *http.Request) (any, error) {
+		if !isTrusted(r) {
+			return nil, forbidden("only this device can change its AniList account")
+		}
 		var body struct {
-			Allowed bool `json:"allowed"`
+			Use bool `json:"use"`
 		}
 		if err := decode(r, &body); err != nil {
 			return nil, err
 		}
-		if err := s.app.Share.SetAllowed(r.PathValue("id"), body.Allowed); err != nil {
-			return nil, notFound(err.Error())
+		if body.Use {
+			if err := s.app.Share.UseHostAccount(r.Context(), r.PathValue("id")); err != nil {
+				return nil, badRequest(err.Error())
+			}
+		} else if s.app.Share.AccountHost() == r.PathValue("id") {
+			s.app.Platform.Logout()
+			s.app.Share.LoggedOut()
+			s.app.AccountChanged()
 		}
 		return s.app.Share.Status(), nil
 	}))
@@ -176,6 +208,52 @@ func (s *Server) peerRoutes() {
 		}
 		return v, nil
 	}))
+}
+
+// peerDownload downloads what a Kumo allowed to download onto this one asks
+// for, into this one's library (which it shares back).
+func (s *Server) peerDownload(r *http.Request) (any, error) {
+	c := peerOf(r)
+	if !c.Downloads {
+		return nil, forbidden("this Kumo doesn't take downloads from yours")
+	}
+	from := c.Name
+	if from == "" {
+		from = "Another Kumo"
+	}
+	switch r.PathValue("kind") {
+	case share.DownloadStream:
+		var body share.StreamDownload
+		if err := decode(r, &body); err != nil {
+			return nil, err
+		}
+		items, err := s.queueStreamDownload(r.Context(), body)
+		if err != nil {
+			return nil, err
+		}
+		s.app.Hub.Info(fmt.Sprintf("%s is downloading %d episode(s) here", from, len(items)))
+		return map[string]int{"queued": len(items)}, nil
+	case share.DownloadTorrent:
+		var body share.TorrentDownload
+		if err := decode(r, &body); err != nil {
+			return nil, err
+		}
+		for _, u := range body.URIs {
+			if !strings.HasPrefix(u, "magnet:") && !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+				return nil, badRequest("not a magnet link or a .torrent URL")
+			}
+		}
+		if len(body.URIs) == 0 {
+			return nil, badRequest("nothing to download")
+		}
+		save, err := s.addTorrents(r.Context(), body.MediaID, body.URIs)
+		if err != nil {
+			return nil, err
+		}
+		s.app.Hub.Info(fmt.Sprintf("%s sent %d torrent(s) to the torrent client here", from, len(body.URIs)))
+		return map[string]string{"savePath": save}, nil
+	}
+	return nil, notFound("unknown download")
 }
 
 // forwardShared forwards a player's request about a shared file to its host.

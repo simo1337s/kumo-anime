@@ -70,6 +70,14 @@ type Service struct {
 	// OnWatchedElsewhere runs when another Kumo on the account says an
 	// episode was finished there: AniList has the new progress.
 	OnWatchedElsewhere func()
+	// The AniList login, for sharing it with a Kumo (as a host) and using a
+	// host's (as a guest, see account.go): its token ("" logged out), and
+	// logging in and out. Nil: not shared.
+	AccountToken func() string
+	UseAccount   func(ctx context.Context, token string) error
+	DropAccount  func()
+
+	accountMu sync.Mutex
 
 	pushMu    sync.Mutex
 	pending   map[[2]int]history.Entry
@@ -99,6 +107,9 @@ type peer struct {
 	lastSeen          time.Time // before this run: when it was last around
 	manual            string    // the address it was added with by hand
 	allowed           bool      // this Kumo shares its library with it
+	// And with it (allowed), this Kumo's AniList login, and downloading
+	// onto this Kumo.
+	account, downloads bool
 
 	// As a host: whether it shares its library with this Kumo, and its files.
 	shares   bool
@@ -112,6 +123,10 @@ type peer struct {
 	// user: the AniList account it's logged into, as it told (it shares
 	// with this Kumo).
 	user int
+	// hostAccount: it shares its AniList login with this Kumo (a tag of it,
+	// "" when not); hostDownloads: this Kumo may download onto it.
+	hostAccount   string
+	hostDownloads bool
 }
 
 func (p *peer) online(now time.Time) bool { return now.Sub(p.seen) < onlineFor }
@@ -159,8 +174,12 @@ func (s *Service) Name() string {
 	return Hostname()
 }
 
-// Hostname is the computer's name, without its domain.
+// Hostname is the computer's name, without its domain (the device's, as
+// the Android app gives it).
 func Hostname() string {
+	if n := cleanName(os.Getenv("KUMO_DEVICE_NAME")); n != "" {
+		return n
+	}
 	h, _ := os.Hostname()
 	h, _, _ = strings.Cut(h, ".")
 	if h == "" {
@@ -183,6 +202,11 @@ type savedPeer struct {
 	Allowed bool   `json:"allowed,omitempty"`
 	Shares  bool   `json:"shares,omitempty"`
 	Seen    int64  `json:"seen"`
+	// Granted to it (allowed): this Kumo's AniList login, downloading here.
+	Account   bool `json:"account,omitempty"`
+	Downloads bool `json:"downloads,omitempty"`
+	// It takes this Kumo's downloads (it shares, see downloads.go).
+	TakesDownloads bool `json:"takesDownloads,omitempty"`
 }
 
 func (s *Service) load() {
@@ -198,6 +222,7 @@ func (s *Service) load() {
 		s.peers[id] = &peer{
 			id: id, name: sp.Name, pub: pub, addr: net.ParseIP(sp.Addr), port: sp.Port,
 			manual: sp.Manual, allowed: sp.Allowed, shares: sp.Shares, lastSeen: time.Unix(sp.Seen, 0),
+			account: sp.Account, downloads: sp.Downloads, hostDownloads: sp.TakesDownloads,
 		}
 	}
 }
@@ -211,7 +236,10 @@ func (s *Service) save() {
 		if !p.allowed && !p.shares && p.manual == "" {
 			continue
 		}
-		sp := savedPeer{Name: p.name, Key: base64.StdEncoding.EncodeToString(p.pub), Port: p.port, Manual: p.manual, Allowed: p.allowed, Shares: p.shares, Seen: p.lastAround().Unix()}
+		sp := savedPeer{
+			Name: p.name, Key: base64.StdEncoding.EncodeToString(p.pub), Port: p.port, Manual: p.manual, Allowed: p.allowed, Shares: p.shares, Seen: p.lastAround().Unix(),
+			Account: p.account, Downloads: p.downloads, TakesDownloads: p.hostDownloads,
+		}
 		if p.addr != nil {
 			sp.Addr = p.addr.String()
 		}
@@ -229,7 +257,7 @@ func (s *Service) save() {
 func (s *Service) Start() {
 	s.apply(s.settings.Get())
 	s.settings.OnChange(func(old, cur config.Settings) {
-		if old.Sharing != cur.Sharing || old.Server.Port != cur.Server.Port {
+		if old.Sharing.Enabled != cur.Sharing.Enabled || old.Sharing.Name != cur.Sharing.Name || old.Server.Port != cur.Server.Port {
 			s.apply(cur)
 		}
 	})
@@ -388,10 +416,14 @@ func (s *Service) heard(b beacon, from net.IP) {
 
 // Caller is another Kumo that made a request, checked.
 type Caller struct {
+	ID, Name string
 	// Allowed: this Kumo shares its library with it.
 	Allowed bool
 	// SameUser: it's logged into the same AniList account as this one.
 	SameUser bool
+	// Account: this Kumo shares its AniList login with it; Downloads: it
+	// may download onto this Kumo. Both only with Allowed.
+	Account, Downloads bool
 }
 
 // Verify checks a request from another Kumo, and notes it as seen.
@@ -422,13 +454,14 @@ func (s *Service) Verify(r *http.Request) (Caller, error) {
 		p.addr, p.port = ip, c.port
 	}
 	p.seen = time.Now()
-	allowed := p.allowed
+	caller := Caller{ID: p.id, Name: p.name, Allowed: p.allowed, Account: p.allowed && p.account, Downloads: p.allowed && p.downloads}
 	s.mu.Unlock()
 	if !wasOnline {
 		s.hub.Publish("sharing-updated", nil)
 	}
 	me := s.user()
-	return Caller{Allowed: allowed, SameUser: me > 0 && c.user == me}, nil
+	caller.SameUser = me > 0 && c.user == me
+	return caller, nil
 }
 
 func (s *Service) user() int {
@@ -473,15 +506,24 @@ type Hello struct {
 	// User: the AniList account it's logged into, told to those it shares
 	// with (their watch histories are kept in step on the same account).
 	User int `json:"user,omitempty"`
+	// Account: it shares its AniList login with the guest. A tag of it, which
+	// changes with it; the login itself is asked for, sealed (account.go).
+	Account string `json:"account,omitempty"`
+	// Downloads: the guest may download onto it (downloads.go).
+	Downloads bool `json:"downloads,omitempty"`
 }
 
 // Hello answers a guest (verified, see Verify).
-func (s *Service) Hello(allowed bool) Hello {
-	h := Hello{ID: s.id.ID, Name: s.Name(), Key: s.id.PublicKey(), Version: config.AppVersion, Shares: allowed}
-	if allowed {
+func (s *Service) Hello(c Caller) Hello {
+	h := Hello{ID: s.id.ID, Name: s.Name(), Key: s.id.PublicKey(), Version: config.AppVersion, Shares: c.Allowed}
+	if c.Allowed {
 		files, _ := s.SharedFiles()
 		h.Files = filesVersion(files)
 		h.User = s.user()
+		if c.Account {
+			h.Account = accountTag(s.accountToken())
+		}
+		h.Downloads = c.Downloads
 	}
 	return h
 }
@@ -608,10 +650,25 @@ func (s *Service) ask(ctx context.Context, p *peer) {
 	}
 	s.mu.Lock()
 	p.user = 0
+	tag, takes := "", false
 	if h.Shares {
 		p.user = h.User
+		tag, takes = h.Account, h.Downloads
+	}
+	accountChanged := p.hostAccount != tag
+	took := p.hostDownloads
+	p.hostAccount, p.hostDownloads = tag, takes
+	if took != takes {
+		s.save()
 	}
 	s.mu.Unlock()
+	s.followAccount(ctx, p, tag)
+	if took != takes {
+		s.downloadsGranted(p, takes)
+	}
+	if accountChanged || took != takes {
+		s.hub.Publish("sharing-updated", nil)
+	}
 	if h.Shares && h.User > 0 && h.User == s.user() {
 		s.syncHistory(ctx, p)
 	}
@@ -870,12 +927,23 @@ type PeerView struct {
 	Files  int    `json:"files"`
 	Manual bool   `json:"manual"`
 	Error  string `json:"error,omitempty"`
+	// Granted to it (with Allowed): this Kumo's AniList login, downloading
+	// onto this Kumo.
+	Account   bool `json:"account"`
+	Downloads bool `json:"downloads"`
+	// Granted by it (it shares): its AniList login, and whether this Kumo
+	// is using it; downloading onto it.
+	SharesAccount  bool `json:"sharesAccount"`
+	UsingAccount   bool `json:"usingAccount"`
+	TakesDownloads bool `json:"takesDownloads"`
 }
 
 func (s *Service) view(p *peer, now time.Time) PeerView {
 	v := PeerView{
 		ID: p.id, Name: p.name, Online: p.online(now), LastSeen: p.lastAround().Unix(), Version: p.version,
 		Allowed: p.allowed, Shares: p.shares, Files: len(p.files), Manual: p.manual != "",
+		Account: p.account, Downloads: p.downloads,
+		SharesAccount: p.shares && p.hostAccount != "", TakesDownloads: p.shares && p.hostDownloads,
 	}
 	if p.addr != nil {
 		v.Address = net.JoinHostPort(p.addr.String(), strconv.Itoa(p.port))
@@ -904,6 +972,7 @@ type Status struct {
 
 func (s *Service) Status() Status {
 	now := time.Now()
+	using := s.AccountHost()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := Status{Enabled: s.running != nil, ID: s.id.ID, Name: s.Name(), Listening: s.running != nil && s.running.disc != nil, Peers: []PeerView{}, Addresses: addresses(s.settings.Get().Server.Port)}
@@ -912,7 +981,9 @@ func (s *Service) Status() Status {
 		if !p.online(now) && !p.allowed && !p.shares && p.manual == "" {
 			continue
 		}
-		st.Peers = append(st.Peers, s.view(p, now))
+		v := s.view(p, now)
+		v.UsingAccount = v.SharesAccount && p.id == using
+		st.Peers = append(st.Peers, v)
 	}
 	sort.Slice(st.Peers, func(i, j int) bool {
 		a, b := st.Peers[i], st.Peers[j]
@@ -938,12 +1009,33 @@ func addresses(port int) []string {
 	return out
 }
 
+// Grants is what this Kumo shares with another one: its library, and with
+// it its AniList login and downloading onto this Kumo. Nil: unchanged.
+type Grants struct {
+	Allowed   *bool `json:"allowed"`
+	Account   *bool `json:"account"`
+	Downloads *bool `json:"downloads"`
+}
+
 // SetAllowed shares this Kumo's library with another one, or stops.
 func (s *Service) SetAllowed(id string, allowed bool) error {
+	return s.SetGrants(id, Grants{Allowed: &allowed})
+}
+
+// SetGrants changes what this Kumo shares with another one.
+func (s *Service) SetGrants(id string, g Grants) error {
 	s.mu.Lock()
 	p, ok := s.peers[id]
 	if ok {
-		p.allowed = allowed
+		if g.Allowed != nil {
+			p.allowed = *g.Allowed
+		}
+		if g.Account != nil {
+			p.account = *g.Account
+		}
+		if g.Downloads != nil {
+			p.downloads = *g.Downloads
+		}
 		s.save()
 	}
 	s.mu.Unlock()
@@ -1061,12 +1153,15 @@ type SharedLibrary struct {
 // Libraries are the libraries shared with this Kumo.
 func (s *Service) Libraries() []SharedLibrary {
 	now := time.Now()
+	using := s.AccountHost()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []SharedLibrary{}
 	for _, p := range s.peers {
 		if p.files != nil {
-			out = append(out, SharedLibrary{Host: s.view(p, now), Files: p.files})
+			v := s.view(p, now)
+			v.UsingAccount = v.SharesAccount && p.id == using
+			out = append(out, SharedLibrary{Host: v, Files: p.files})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Host.Name) < strings.ToLower(out[j].Host.Name) })

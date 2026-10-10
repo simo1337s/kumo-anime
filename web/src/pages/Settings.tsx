@@ -176,8 +176,8 @@ export default function SettingsPage() {
     }
 
     return (
-        <div className="flex min-h-full flex-col gap-8 px-6 pt-8 pb-24 md:px-8 lg:flex-row lg:gap-12 xl:px-10">
-            <aside className="w-full shrink-0 lg:sticky lg:top-8 lg:w-56 lg:self-start">
+        <div className="flex min-h-full flex-col gap-8 px-6 pt-8 pb-24 md:px-8 md:flex-row md:gap-8 lg:gap-12 xl:px-10">
+            <aside className="w-full shrink-0 md:sticky md:top-8 md:w-52 md:self-start lg:w-56">
                 <h1 className="mb-5 px-2.5 text-[1.75rem] font-semibold tracking-tight">Settings</h1>
                 <div className="flex flex-col gap-4">
                     {NAV.map((g, i) => (
@@ -813,7 +813,8 @@ function SharingGroup({ draft, set }: SectionProps) {
                         </p>
                     )}
                     {peers.map(p => (
-                        <div key={p.id} className="flex items-center justify-between gap-4 px-4 py-3.5">
+                        <div key={p.id} className="px-4 py-3.5">
+                        <div className="flex items-center justify-between gap-4">
                             <div className="min-w-0">
                                 <p className="flex items-center gap-2 text-sm font-medium">
                                     <span className={cn("size-2 shrink-0 rounded-full", p.online ? "bg-emerald-400" : "bg-white/20")} />
@@ -845,7 +846,54 @@ function SharingGroup({ draft, set }: SectionProps) {
                                 )}
                             </div>
                         </div>
+                        {/* With the library: this computer's AniList account,
+                            and downloading here (a TV has neither). */}
+                        {p.allowed && (
+                            <div className="mt-3 ml-1 flex flex-col gap-3 border-l border-line pl-4">
+                                <PeerGrant
+                                    label="Share my AniList account"
+                                    help="It uses your AniList account: your list, and what it watches updates your progress."
+                                    checked={p.account}
+                                    disabled={!trusted}
+                                    onChange={v => call(() => api.post(`/api/sharing/peers/${p.id}`, { account: v }))}
+                                />
+                                <PeerGrant
+                                    label="Let it download here"
+                                    help="Its downloads and torrents go to this computer's library, and come back shared. It downloads here by default from then on."
+                                    checked={p.downloads}
+                                    disabled={!trusted}
+                                    onChange={v => call(() => api.post(`/api/sharing/peers/${p.id}`, { downloads: v }))}
+                                />
+                            </div>
+                        )}
+                        {p.shares && p.sharesAccount && (
+                            <div className="mt-3 ml-1 flex items-center justify-between gap-4 border-l border-line pl-4">
+                                <div className="min-w-0">
+                                    <p className="text-sm">{p.usingAccount ? `Using ${p.name}'s AniList account` : `${p.name} shares its AniList account with you`}</p>
+                                    <p className="mt-0.5 text-xs text-subtle">
+                                        {p.usingAccount ? "Your list and progress here are that account's." : "Use it here instead of this device's own login."}
+                                    </p>
+                                </div>
+                                {trusted && (
+                                    <Button size="sm" variant={p.usingAccount ? "ghost" : "primary"} onClick={() => call(() => api.post(`/api/sharing/libraries/${p.id}/account`, { use: !p.usingAccount }))}>
+                                        {p.usingAccount ? "Stop using it" : "Use it"}
+                                    </Button>
+                                )}
+                            </div>
+                        )}
+                        </div>
                     ))}
+                    {peers.some(p => p.shares && p.takesDownloads) && (
+                        <Row label="Downloads from this device go to" help="Episodes and torrents you download here: to this device, or to a computer that lets it download there.">
+                            <Select
+                                className="w-48"
+                                value={draft.sharing.downloadTo ?? ""}
+                                disabled={!trusted}
+                                onChange={v => set("sharing", { downloadTo: v })}
+                                options={[{ value: "", label: "This device" }, ...peers.filter(p => p.shares && p.takesDownloads).map(p => ({ value: p.id, label: p.name }))]}
+                            />
+                        </Row>
+                    )}
                     {trusted && (
                         <Stack label="Add by address" help="When the computers don't find each other by themselves (some routers block it): the other computer's address, shown in its settings here.">
                             <div className="flex gap-2">
@@ -859,6 +907,18 @@ function SharingGroup({ draft, set }: SectionProps) {
                 </>
             )}
         </Group>
+    )
+}
+
+function PeerGrant({ label, help, checked, disabled, onChange }: { label: string; help: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
+    return (
+        <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+                <p className="text-sm">{label}</p>
+                <p className="mt-0.5 text-xs text-subtle">{help}</p>
+            </div>
+            <Switch checked={checked} disabled={disabled} onChange={onChange} />
+        </div>
     )
 }
 

@@ -107,6 +107,10 @@ Kumo runs on macOS 13 Ventura or newer, on Apple silicon and Intel Macs (one uni
 
 How to open it the first time, where it keeps its data, how to build it: [packaging/macos/README.md](packaging/macos/README.md).
 
+## Android / Fire TV
+
+Kumo for Android is made for TVs (a Fire TV Stick, Android TV) and plays the libraries the computers at home share, with the remote: get `Kumo-X.Y.Z-android.apk` from the newest **Kumo X.Y.Z for Android** [release](https://github.com/simo1337s/kumo-anime/releases) (tag `android-vX.Y.Z`). On a Fire TV, install the **Downloader** app, allow it in Settings › My Fire TV › Developer options › Install unknown apps, and open the APK's address in it. Then, on a computer with Kumo, turn on **Library sharing** (Settings › Local Anime Library): the TV shows up there. Turn on **Share my library** for it, and if you like **Share my AniList account** (the TV uses your account, with no login on the TV) and **Let it download here** (the TV's downloads and torrents go to that computer, and it becomes where the TV downloads by default). The app updates itself from its Home page; see [android/README.md](android/README.md).
+
 ## Development
 
 ```bash

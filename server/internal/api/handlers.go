@@ -720,17 +720,29 @@ func (s *Server) osPlay(r *http.Request) (any, error) {
 }
 
 func (s *Server) osDownload(r *http.Request) (any, error) {
-	var body struct {
-		Provider string    `json:"provider"`
-		MediaID  int       `json:"mediaId"`
-		Episodes []float64 `json:"episodes"`
-		Dub      bool      `json:"dub"`
-		Quality  string    `json:"quality"`
-	}
+	var body share.StreamDownload
 	if err := decode(r, &body); err != nil {
 		return nil, err
 	}
-	media, err := s.app.Platform.MediaLite(r.Context(), body.MediaID)
+	// Downloads go to another Kumo (a TV's, say: to the computer's).
+	if host, err := s.app.Share.SendDownload(r.Context(), share.DownloadStream, body); err != nil || host != "" {
+		if err != nil {
+			return nil, badRequest(err.Error())
+		}
+		s.app.Hub.Success(fmt.Sprintf("Downloading %d episode(s) on %s", len(body.Episodes), host))
+		return map[string]string{"host": host}, nil
+	}
+	items, err := s.queueStreamDownload(r.Context(), body)
+	if err != nil {
+		return nil, err
+	}
+	s.app.Hub.Info(fmt.Sprintf("Queued %d episode(s) for download", len(items)))
+	return items, nil
+}
+
+// queueStreamDownload queues episodes to download from a streaming provider.
+func (s *Server) queueStreamDownload(ctx context.Context, body share.StreamDownload) ([]*downloads.Item, error) {
+	media, err := s.app.Platform.MediaLite(ctx, body.MediaID)
 	if err != nil {
 		return nil, err
 	}
@@ -754,7 +766,6 @@ func (s *Server) osDownload(r *http.Request) (any, error) {
 		}
 		items = append(items, it)
 	}
-	s.app.Hub.Info(fmt.Sprintf("Queued %d episode(s) for download", len(items)))
 	return items, nil
 }
 
@@ -820,12 +831,6 @@ func (s *Server) torrentDownload(r *http.Request) (any, error) {
 	if err := decode(r, &body); err != nil {
 		return nil, err
 	}
-	title := ""
-	if body.MediaID > 0 {
-		if media, err := s.app.Platform.MediaLite(r.Context(), body.MediaID); err == nil {
-			title = media.FolderTitle()
-		}
-	}
 	var uris []string
 	for _, res := range body.Results {
 		// Results of a multi-provider search each come from their own provider.
@@ -846,12 +851,31 @@ func (s *Server) torrentDownload(r *http.Request) (any, error) {
 	if len(uris) == 0 {
 		return nil, badRequest("nothing to download")
 	}
-	save := s.torrentFolder(body.MediaID, title)
-	if err := s.app.Torrents.Add(r.Context(), uris, save); err != nil {
+	if host, err := s.app.Share.SendDownload(r.Context(), share.DownloadTorrent, share.TorrentDownload{MediaID: body.MediaID, URIs: uris}); err != nil || host != "" {
+		if err != nil {
+			return nil, badRequest(err.Error())
+		}
+		s.app.Hub.Success(fmt.Sprintf("Sent %d torrent(s) to %s", len(uris), host))
+		return map[string]string{"host": host}, nil
+	}
+	save, err := s.addTorrents(r.Context(), body.MediaID, uris)
+	if err != nil {
 		return nil, err
 	}
 	s.app.Hub.Success(fmt.Sprintf("Sent %d torrent(s) to the torrent client", len(uris)))
 	return map[string]any{"savePath": save}, nil
+}
+
+// addTorrents adds torrents to the torrent client, into the anime's folder.
+func (s *Server) addTorrents(ctx context.Context, mediaID int, uris []string) (string, error) {
+	title := ""
+	if mediaID > 0 {
+		if media, err := s.app.Platform.MediaLite(ctx, mediaID); err == nil {
+			title = media.FolderTitle()
+		}
+	}
+	save := s.torrentFolder(mediaID, title)
+	return save, s.app.Torrents.Add(ctx, uris, save)
 }
 
 func (s *Server) torrentList(r *http.Request) (any, error) {
@@ -924,6 +948,12 @@ func (s *Server) torrentAdd(r *http.Request) (any, error) {
 	}
 	if !strings.HasPrefix(body.Magnet, "magnet:") && !strings.HasPrefix(body.Magnet, "http") {
 		return nil, badRequest("enter a magnet link or a .torrent URL")
+	}
+	if host, err := s.app.Share.SendDownload(r.Context(), share.DownloadTorrent, share.TorrentDownload{MediaID: body.MediaID, URIs: []string{body.Magnet}}); err != nil || host != "" {
+		if err != nil {
+			return nil, badRequest(err.Error())
+		}
+		return map[string]string{"host": host}, nil
 	}
 	title := ""
 	if body.MediaID > 0 {

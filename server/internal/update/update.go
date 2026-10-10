@@ -84,6 +84,9 @@ type Status struct {
 	// ManualCommand is a command to run in a terminal: to install the
 	// update when Kumo can't ask for the password, or what the build needs.
 	ManualCommand string `json:"manualCommand,omitempty"`
+	// InstallFile: on Android, the downloaded APK the app asks Android to
+	// install (it's the app that can).
+	InstallFile string `json:"installFile,omitempty"`
 }
 
 const (
@@ -337,6 +340,8 @@ func (c *Checker) applyable() (bool, string) {
 		return true, "Kumo downloads the installer and runs it: Kumo closes, the new version installs and Kumo opens again."
 	case "darwin":
 		return c.macApplyable(exe, err)
+	case "android":
+		return true, "Kumo downloads the new version and Android asks you to install it."
 	}
 	return false, "Kumo can't update itself on this system."
 }
@@ -527,30 +532,41 @@ func (c *Checker) checkBranch(ctx context.Context, g *github) (result, error) {
 	return res, nil
 }
 
-// fromReleases: Windows and macOS update from GitHub Releases, Linux from
-// the default branch.
-func fromReleases(goos string) bool { return goos == "windows" || goos == "darwin" }
+// fromReleases: Windows, macOS and Android update from GitHub Releases,
+// Linux from the default branch.
+func fromReleases(goos string) bool {
+	return goos == "windows" || goos == "darwin" || goos == "android"
+}
 
 // releasePrefix starts the tags of a system's releases: <prefix><version>.
 func releasePrefix(goos string) string {
-	if goos == "darwin" {
+	switch goos {
+	case "darwin":
 		return "macos-v"
+	case "android":
+		return "android-v"
 	}
 	return "windows-v"
 }
 
 // releaseAsset names the release file an update installs.
 func releaseAsset(goos, version string) string {
-	if goos == "darwin" {
+	switch goos {
+	case "darwin":
 		return "Kumo-" + version + "-macos-universal.zip"
+	case "android":
+		return "Kumo-" + version + "-android.apk"
 	}
 	return "Kumo-Setup-" + version + "-windows-x64.exe"
 }
 
 // releaseFile says what that file is, for messages.
 func releaseFile(goos string) string {
-	if goos == "darwin" {
+	switch goos {
+	case "darwin":
 		return "zip of the app"
+	case "android":
+		return "APK"
 	}
 	return "installer"
 }
@@ -565,9 +581,9 @@ func (c *Checker) checkReleases(ctx context.Context, g *github) (result, error) 
 	prefix := releasePrefix(c.GOOS)
 	best := pickRelease(releases, prefix)
 	if best == nil {
-		system := "Windows"
-		if c.GOOS == "darwin" {
-			system = "macOS"
+		system := map[string]string{"darwin": "macOS", "android": "Android"}[c.GOOS]
+		if system == "" {
+			system = "Windows"
 		}
 		return result{note: "There's no Kumo release for " + system + " yet."}, nil
 	}
@@ -675,6 +691,12 @@ func (c *Checker) Apply() error {
 	defer c.mu.Unlock()
 	// Installing: on Windows and macOS, Kumo is quitting for the new
 	// version.
+	// Android: the APK is there, Android asks again (the last time was
+	// cancelled).
+	if c.GOOS == "android" && c.st.State == StateInstalling && c.st.InstallFile != "" && !c.applying {
+		c.publishLocked()
+		return nil
+	}
 	if c.applying || c.st.State == StateInstalling {
 		return ErrRunning
 	}
@@ -693,7 +715,7 @@ func (c *Checker) Apply() error {
 	}
 	c.applying = true
 	c.st.State, c.st.Progress, c.st.Message = StateDownloading, -1, "Downloading Kumo "+display(target)+"…"
-	c.st.Log, c.st.ManualCommand = nil, ""
+	c.st.Log, c.st.ManualCommand, c.st.InstallFile = nil, "", ""
 	c.publishLocked()
 	c.wg.Add(1)
 	go func() {
@@ -705,6 +727,8 @@ func (c *Checker) Apply() error {
 			err = c.applyWindows(c.ctx, g, target, inst)
 		case "darwin":
 			err = c.applyMac(c.ctx, g, target, inst)
+		case "android":
+			err = c.applyAndroid(c.ctx, g, target, inst)
 		default:
 			err = c.applyLinux(c.ctx, g, target)
 		}

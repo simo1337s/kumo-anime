@@ -194,6 +194,24 @@ func (a *App) wire() {
 		}
 		return 0
 	}
+	// The AniList login a host shares with this Kumo, or this one shares.
+	a.Share.AccountToken = func() string {
+		if !a.Platform.LoggedIn() {
+			return ""
+		}
+		return a.Platform.Client().Token()
+	}
+	a.Share.UseAccount = func(ctx context.Context, token string) error {
+		if _, err := a.Platform.Login(ctx, token); err != nil {
+			return err
+		}
+		a.AccountChanged()
+		return nil
+	}
+	a.Share.DropAccount = func() {
+		a.Platform.Logout()
+		a.AccountChanged()
+	}
 
 	// Torrent search can use extension providers.
 	a.Torrents.ExtraProviders = a.Extensions.TorrentProviders
@@ -335,6 +353,20 @@ func pickSource(srcs []stream.Source, quality string) stream.Source {
 		}
 	}
 	return srcs[0]
+}
+
+// AccountChanged tells the app the AniList login changed (another Kumo's
+// account shared with this one): the list comes from the new one.
+func (a *App) AccountChanged() {
+	a.Hub.Publish(events.SettingsUpdated, nil)
+	a.Hub.Publish("collection-updated", nil)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if _, err := a.Platform.Collection(ctx, "ANIME", true); err == nil {
+			a.Hub.Publish("collection-updated", nil)
+		}
+	}()
 }
 
 // Start runs the background jobs.

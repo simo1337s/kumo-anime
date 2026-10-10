@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"sync"
@@ -179,6 +180,9 @@ type SharingSettings struct {
 	Enabled bool `json:"enabled"`
 	// Name: what the others call this Kumo (empty: the computer's name).
 	Name string `json:"name"`
+	// DownloadTo: the Kumo this one's downloads and torrents go to (its ID;
+	// empty: saved here). Set when one allows it (package share).
+	DownloadTo string `json:"downloadTo,omitempty"`
 }
 
 type ServerSettings struct {
@@ -222,7 +226,7 @@ type ExtensionSettings struct {
 func Defaults() Settings {
 	home, _ := os.UserHomeDir()
 	videos := filepath.Join(home, videosFolder, "Anime")
-	return Settings{
+	s := Settings{
 		SchemaVersion: schemaVersion,
 		Library: LibrarySettings{
 			Dir:              videos,
@@ -284,6 +288,13 @@ func Defaults() Settings {
 		Discord:    DiscordSettings{RichPresence: false},
 		Extensions: ExtensionSettings{MarketplaceURL: DefaultMarketplaceURL},
 	}
+	if runtime.GOOS == "android" {
+		// The Android app (a TV's): it plays the libraries the computers
+		// share with it, and has none of its own.
+		s.Library.Dir, s.Library.RefreshOnStartup, s.Library.AutoRefresh = "", false, false
+		s.Sharing.Enabled = true
+	}
+	return s
 }
 
 // Store loads and saves settings, keeping a cached copy in memory.

@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "@/lib/toast"
 import { api, qs } from "./api"
+import { installIfWanted, wantInstall } from "./tv"
 import type {
     AutoRule,
     CollectionView,
@@ -341,8 +342,14 @@ export function useCheckUpdate() {
 export function useApplyUpdate() {
     const qc = useQueryClient()
     return useMutation({
-        mutationFn: () => api.post<UpdateStatus>("/api/update/apply"),
-        onSuccess: s => qc.setQueryData(["update"], s),
+        mutationFn: () => {
+            wantInstall()
+            return api.post<UpdateStatus>("/api/update/apply")
+        },
+        onSuccess: s => {
+            qc.setQueryData(["update"], s)
+            installIfWanted(s)
+        },
         onError: (e: Error) => toast.error(e.message),
     })
 }

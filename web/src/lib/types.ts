@@ -217,7 +217,8 @@ export type Settings = {
     manga: { enabled: boolean; defaultProvider: string; readingMode: "long-strip" | "paged" | "double"; direction: string }
     anilist: { clientId: string; hideAdult: boolean }
     server: { host: string; port: number; allowLan: boolean; password: string; webUi: boolean }
-    sharing: { enabled: boolean; name: string }
+    // downloadTo: the Kumo this one's downloads go to (its ID; "" here).
+    sharing: { enabled: boolean; name: string; downloadTo?: string }
     ui: {
         accentColor: string
         showAdult: boolean
@@ -572,6 +573,7 @@ export type UpdateStatus = {
     message?: string
     log: string[] | null // the last output lines
     manualCommand?: string // a command to run in a terminal
+    installFile?: string // Android: the downloaded APK the app installs
 }
 
 // Library sharing with other Kumo apps on the network.
@@ -587,6 +589,14 @@ export type SharingPeer = {
     files: number
     manual: boolean
     error?: string
+    // Granted to it (with allowed): this Kumo's AniList account, downloading here.
+    account: boolean
+    downloads: boolean
+    // Granted by it (it shares): its AniList account (and whether this Kumo
+    // uses it), downloading there.
+    sharesAccount: boolean
+    usingAccount: boolean
+    takesDownloads: boolean
 }
 
 export type SharingStatus = { enabled: boolean; id: string; name: string; listening: boolean; peers: SharingPeer[]; addresses: string[] }

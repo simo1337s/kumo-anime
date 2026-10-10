@@ -1,0 +1,239 @@
+# Builds Kumo for Android (made for TVs: a Fire TV Stick, mainly for the
+# libraries the computers at home share) and publishes the APK as the GitHub
+# Release "Kumo <version> for Android", tagged android-v<version> on the
+# commit it built.
+#
+# The app (android/) runs Kumo's server, built here for Android with the NDK
+# (32-bit ARM, which most Fire TV sticks run, and 64-bit), and shows its web
+# UI. The version is 1.0.<number of commits>, like the other releases':
+# installed copies look for the android-v release with the highest version
+# and update from their Home page (server/internal/update).
+#
+# The APK is signed with packaging/android/kumo.jks (updates must be signed
+# with the same key), or with the repository's ANDROID_KEYSTORE_BASE64,
+# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD
+# secrets when they're set.
+#
+# Runs on every push to the repository's default branch (except pushes that
+# only change docs or another system's packaging), and by hand from the
+# Actions tab. Only the newest 10 Android releases are kept.
+
+name: Android release
+
+on:
+  # Pushes to other branches are skipped (see the job's condition).
+  push:
+    paths-ignore:
+      - "**.md"
+      - "desktop/**"
+      - "packaging/arch/**"
+      - "packaging/macos/**"
+      - "packaging/windows/**"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the build as the GitHub Release android-v<version> (otherwise it's only kept as a workflow artifact)
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    name: Build and package (Android)
+    if: github.event_name != 'push' || github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # The whole history: the version counts its commits.
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Read the version
+        id: version
+        run: |
+          base=$(node -p 'require("./desktop/package.json").version')
+          if ! [[ $base =~ ^([0-9]+)\.([0-9]+)\. ]]; then
+            echo "::error::desktop/package.json has no version like 1.0.0 (it says '$base')"
+            exit 1
+          fi
+          count=$(git rev-list --count HEAD)
+          version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$count"
+          {
+            echo "version=$version"
+            echo "code=$count"
+            echo "tag=android-v$version"
+            echo "apk=Kumo-$version-android.apk"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building Kumo $version for Android"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the web UI
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # Same as the Makefile's "embed" target.
+      - name: Embed the web UI into the server
+        run: |
+          dist=server/internal/webui/dist
+          rm -rf "$dist"
+          mkdir -p "$dist"
+          cp -R web/dist/. "$dist/"
+          touch "$dist/.keep"
+
+      # With the NDK (cgo): Go needs it for 32-bit ARM, and it makes the
+      # server use Android's own DNS. The app ships it as its "native
+      # library" libkumo.so, for each kind of device.
+      - name: Build the server for Android
+        working-directory: server
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-}}"
+          if [ ! -d "$ndk" ]; then
+            ndk=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)
+          fi
+          echo "NDK: $ndk"
+          tc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          config=github.com/simo1337s/animetest/server/internal/config
+          libs=../android/app/src/main/jniLibs
+          build() {
+            local abi=$1 goarch=$2 cc=$3 goarm=${4:-}
+            mkdir -p "$libs/$abi"
+            CGO_ENABLED=1 GOOS=android GOARCH=$goarch GOARM=$goarm CC="$tc/$cc" \
+              go build -trimpath -ldflags "-s -w -X $config.AppVersion=$VERSION -X $config.Commit=$GITHUB_SHA" -o "$libs/$abi/libkumo.so" ./cmd/kumo
+          }
+          build armeabi-v7a arm armv7a-linux-androideabi21-clang 7
+          build arm64-v8a arm64 aarch64-linux-android21-clang
+          file "$libs"/*/libkumo.so
+          ls -la "$libs"/*/
+
+      - name: Set up Gradle and the Android SDK
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/gradle.zip" https://services.gradle.org/distributions/gradle-8.11.1-bin.zip
+          unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gradle-8.11.1/bin" >> "$GITHUB_PATH"
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" "platforms;android-35" "build-tools;34.0.0" > /dev/null
+
+      - name: Build the APK
+        env:
+          KUMO_VERSION: ${{ steps.version.outputs.version }}
+          KUMO_VERSION_CODE: ${{ steps.version.outputs.code }}
+          APK: ${{ steps.version.outputs.apk }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KUMO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KUMO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KUMO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/kumo.jks"
+            export KUMO_KEYSTORE="$RUNNER_TEMP/kumo.jks"
+          fi
+          gradle --no-daemon -p android assembleRelease
+          mkdir -p dist/android
+          cp android/app/build/outputs/apk/release/app-release.apk "dist/android/$APK"
+
+      # The server must be in it, stored so that Android extracts it, and
+      # the APK signed.
+      - name: Check the APK
+        env:
+          APK: ${{ steps.version.outputs.apk }}
+        run: |
+          apk="dist/android/$APK"
+          unzip -lv "$apk" | grep -E "lib/(armeabi-v7a|arm64-v8a)/libkumo.so"
+          for abi in armeabi-v7a arm64-v8a; do
+            unzip -lv "$apk" "lib/$abi/libkumo.so" | grep -q " Defl:N \| Stored " || { echo "::error::lib/$abi/libkumo.so is missing"; exit 1; }
+          done
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$bt/apksigner" verify --print-certs "$apk"
+          "$bt/aapt2" dump badging "$apk" | grep -E "^(package|sdkVersion|targetSdkVersion|leanback|native-code|application-label)"
+          ls -la "$apk"
+
+      - name: Upload the APK (workflow artifact)
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/android/${{ steps.version.outputs.apk }}
+          archive: false
+          overwrite: true
+          if-no-files-found: error
+
+      # Creates the release (and its tag, on this commit, when it doesn't
+      # exist yet), or updates it. It isn't marked as the repository's latest
+      # release, which stays the Windows one.
+      - name: Publish the GitHub Release
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          APK: ${{ steps.version.outputs.apk }}
+        run: |
+          repo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          url="$repo/releases/download/$TAG/$APK"
+          notes="$RUNNER_TEMP/release-notes.md"
+          cat > "$notes" <<EOF
+          **Kumo $VERSION for Android**, made for TVs (Fire TV Stick, Android TV) and working on phones and tablets too: it plays the libraries the computers at home share, driven by the remote.
+
+          **On a Fire TV:** install the **Downloader** app, allow it in **Settings › My Fire TV › Developer options › Install unknown apps**, and open this address in it:
+
+          \`$url\`
+
+          Then open Kumo, and on a computer with Kumo turn on **Settings › Local Anime Library › Library sharing**: the TV shows up there. Turn on **Share my library** for it, and if you like **Share my AniList account** (the TV uses it) and **Let it download here** (its downloads and torrents go to that computer).
+
+          Kumo finds newer releases by itself and updates from its Home page (**Update**); Android asks before installing.
+
+          Built from $GITHUB_SHA by [workflow run $GITHUB_RUN_NUMBER]($repo/actions/runs/$GITHUB_RUN_ID).
+          EOF
+          files=("dist/android/$APK")
+          if gh release view "$TAG" --json tagName > /dev/null 2>&1; then
+            echo "Updating the release $TAG"
+            gh release edit "$TAG" --title "Kumo $VERSION for Android" --notes-file "$notes" --latest=false
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            echo "Creating the release $TAG"
+            gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "Kumo $VERSION for Android" --notes-file "$notes" --latest=false
+          fi
+
+      # Keep the newest 10 Android releases, by version (numbers compared as
+      # numbers), and delete the older ones with their tags.
+      - name: Delete old releases
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          old=$(gh release list --limit 1000 --json tagName --jq '.[].tagName' |
+            { grep -E '^android-v[0-9]+(\.[0-9]+)*$' || true; } | sort -V -r | tail -n +11)
+          if [ -z "$old" ]; then
+            echo "No old releases to delete"
+            exit 0
+          fi
+          for tag in $old; do
+            echo "Deleting the release $tag and its tag"
+            gh release delete "$tag" --cleanup-tag --yes
+          done

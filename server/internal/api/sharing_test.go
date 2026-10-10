@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -326,4 +328,163 @@ func TestHistoryFollowsTheAccount(t *testing.T) {
 	if e := host.app.History.Get(21, 6); e != nil {
 		t.Errorf("a position went to another AniList account: %+v", e)
 	}
+}
+
+// A host shares its AniList login with a Kumo (a TV, say): sealed on the
+// way, followed when it changes, dropped when the host stops. Logged out by
+// hand, the guest doesn't take it again by itself.
+func TestAccountShared(t *testing.T) {
+	const local = "127.0.0.1:5000"
+	host, hostSrv := sharingServer(t)
+	guest, _ := sharingServer(t)
+	var mu sync.Mutex
+	hostToken := "host-anilist-token"
+	host.app.Share.AccountToken = func() string { mu.Lock(); defer mu.Unlock(); return hostToken }
+	var guestToken string
+	guestLogin := func() string { mu.Lock(); defer mu.Unlock(); return guestToken }
+	guest.app.Share.AccountToken = guestLogin
+	guest.app.Share.UseAccount = func(_ context.Context, tok string) error { mu.Lock(); guestToken = tok; mu.Unlock(); return nil }
+	guest.app.Share.DropAccount = func() { mu.Lock(); guestToken = ""; mu.Unlock() }
+
+	addr := strings.TrimPrefix(hostSrv.URL, "http://")
+	if w := do(guest, "POST", "/api/sharing/connect", local, `{"address":"`+addr+`"}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("connect: %d %s", w.Code, w.Body)
+	}
+	eventually(t, "the host to list the guest", func() bool { return len(host.app.Share.Status().Peers) == 1 })
+	gid, hid := guest.app.Share.ID(), host.app.Share.ID()
+	grant := func(body string) {
+		t.Helper()
+		if w := do(host, "POST", "/api/sharing/peers/"+gid, local, body, nil); w.Code != http.StatusOK {
+			t.Fatalf("grant %s: %d %s", body, w.Code, w.Body)
+		}
+	}
+	asked := func(ok func() bool) func() bool {
+		return func() bool { do(guest, "GET", "/api/sharing", local, "", nil); return ok() }
+	}
+
+	// The library alone: not the account.
+	grant(`{"allowed":true}`)
+	eventually(t, "the library", asked(func() bool { return len(guest.app.Share.Libraries()) == 1 }))
+	time.Sleep(time.Second)
+	if guestLogin() != "" {
+		t.Fatal("logged in with an account that isn't shared")
+	}
+	// Nor for a Kumo that isn't allowed: the endpoint checks.
+	if w := do(host, "GET", "/api/peer/anilist", "192.168.1.30:5000", "", nil); w.Code == http.StatusOK {
+		t.Fatalf("anyone got the account: %s", w.Body)
+	}
+
+	grant(`{"account":true}`)
+	eventually(t, "the guest to use the host's account", asked(func() bool { return guestLogin() == "host-anilist-token" }))
+	if h := guest.app.Share.AccountHost(); h != hid {
+		t.Errorf("account host %q, want %q", h, hid)
+	}
+	if lib := guest.app.Share.Libraries(); !lib[0].Host.SharesAccount || !lib[0].Host.UsingAccount {
+		t.Errorf("library view: %+v", lib[0].Host)
+	}
+
+	// Sealed: what crosses the network isn't the token.
+	sa, err := host.app.Share.SealAccount(share.Caller{ID: gid, Allowed: true, Account: true})
+	if err != nil || sa.Token == "" || strings.Contains(sa.Token, "host-anilist-token") {
+		t.Fatalf("sealed: %+v %v", sa, err)
+	}
+
+	// Logged in again on the host: followed.
+	mu.Lock()
+	hostToken = "host-anilist-token-2"
+	mu.Unlock()
+	eventually(t, "the new login", asked(func() bool { return guestLogin() == "host-anilist-token-2" }))
+
+	// Not shared any more: logged out.
+	grant(`{"account":false}`)
+	eventually(t, "the logout", asked(func() bool { return guestLogin() == "" }))
+
+	// Shared again, then logged out of by hand: not taken again by itself...
+	grant(`{"account":true}`)
+	eventually(t, "the account again", asked(func() bool { return guestLogin() == "host-anilist-token-2" }))
+	if w := do(guest, "POST", "/api/auth/logout", local, "", nil); w.Code != http.StatusOK {
+		t.Fatalf("logout: %d %s", w.Code, w.Body)
+	}
+	guest.app.Share.DropAccount()
+	for i := 0; i < 8; i++ {
+		do(guest, "GET", "/api/sharing", local, "", nil)
+		time.Sleep(250 * time.Millisecond)
+	}
+	if guestLogin() != "" {
+		t.Fatal("logged in again after logging out by hand")
+	}
+	// ...but in Settings.
+	if w := do(guest, "POST", "/api/sharing/libraries/"+hid+"/account", local, `{"use":true}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("use: %d %s", w.Code, w.Body)
+	}
+	if guestLogin() != "host-anilist-token-2" {
+		t.Fatal("not logged in with the host's account from Settings")
+	}
+	// Only from that device itself.
+	if w := do(guest, "POST", "/api/sharing/libraries/"+hid+"/account", "192.168.1.30:5000", `{"use":false}`, nil); w.Code == http.StatusOK {
+		t.Fatal("another device changed the account")
+	}
+}
+
+// A host lets a Kumo download onto it: it becomes where that Kumo's
+// downloads go, and they're sent there.
+func TestDownloadsToHost(t *testing.T) {
+	const local = "127.0.0.1:5000"
+	host, hostSrv := sharingServer(t)
+	guest, _ := sharingServer(t)
+	addr := strings.TrimPrefix(hostSrv.URL, "http://")
+	if w := do(guest, "POST", "/api/sharing/connect", local, `{"address":"`+addr+`"}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("connect: %d %s", w.Code, w.Body)
+	}
+	eventually(t, "the host to list the guest", func() bool { return len(host.app.Share.Status().Peers) == 1 })
+	gid, hid := guest.app.Share.ID(), host.app.Share.ID()
+	asked := func(ok func() bool) func() bool {
+		return func() bool { do(guest, "GET", "/api/sharing", local, "", nil); return ok() }
+	}
+	if err := host.app.Share.SetAllowed(gid, true); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the library", asked(func() bool { return len(guest.app.Share.Libraries()) == 1 }))
+	if to := guest.app.Settings.Get().Sharing.DownloadTo; to != "" {
+		t.Fatalf("downloads go to %q before the host allowed it", to)
+	}
+	// Not allowed: a Kumo can't download onto the host by itself.
+	body := `{"mediaId":21,"uris":["magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"]}`
+	req, _ := http.NewRequest("POST", hostSrv.URL+"/api/peer/downloads/torrent", strings.NewReader(body))
+	if err := guest.app.Share.Sign(req, hid, host.app.Share.Whoami().Key); err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("download without permission: %v %v", resp, err)
+	}
+
+	yes := true
+	if err := host.app.Share.SetGrants(gid, share.Grants{Downloads: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "downloads to go to the host", asked(func() bool { return guest.app.Settings.Get().Sharing.DownloadTo == hid }))
+
+	// A torrent added on the guest goes to the host's torrent client (none
+	// here: its answer says so, from the host).
+	w := do(guest, "POST", "/api/torrent-client/add", local, `{"magnet":"magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567","mediaId":0}`, nil)
+	hostName := host.app.Share.Name()
+	if w.Code == http.StatusOK || !strings.HasPrefix(errorOf(w), hostName+": ") {
+		t.Fatalf("not sent to the host: %d %s", w.Code, w.Body)
+	}
+
+	// Not allowed any more: saved here again.
+	no := false
+	if err := host.app.Share.SetGrants(gid, share.Grants{Downloads: &no}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "downloads to stay here", asked(func() bool { return guest.app.Settings.Get().Sharing.DownloadTo == "" }))
+}
+
+func errorOf(w *httptest.ResponseRecorder) string {
+	var e struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &e)
+	return e.Error
 }

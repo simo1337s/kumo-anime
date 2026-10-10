@@ -227,3 +227,14 @@ video::cue {
 @source inline("{text,bg,border}-{gray,zinc,neutral,slate,red,green,blue,yellow,orange,purple,indigo,pink,emerald,sky,amber,rose,violet}-{100,200,300,400,500,600,700,800,900,950}");
 @source inline("{bg,border}-{white,black,transparent}{,/5,/10,/20,/30,/50}");
 @source inline("hover:{bg-white/10,bg-gray-800,text-white,underline,opacity-80}");
+
+/* TV mode (lib/tv.ts): what the remote has focused stands out from across
+   the room. */
+html.tv :focus {
+    outline: 3px solid var(--brand) !important;
+    outline-offset: 3px !important;
+}
+html.tv [data-tv-scope]:focus,
+html.tv #main-scroll:focus {
+    outline: none !important;
+}

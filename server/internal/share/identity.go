@@ -15,6 +15,8 @@
 package share
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ecdh"
 	"crypto/hmac"
 	"crypto/rand"
@@ -95,20 +97,69 @@ func parsePublicKey(id, b64 string) ([]byte, error) {
 	return pub, nil
 }
 
+// secret is what this Kumo and the one with that public key have in common,
+// for a purpose: only those two can make it.
+func (id *Identity) secret(peerPub []byte, purpose string) ([]byte, error) {
+	pk, err := ecdh.X25519().NewPublicKey(peerPub)
+	if err != nil {
+		return nil, err
+	}
+	shared, err := id.priv.ECDH(pk)
+	if err != nil {
+		return nil, err
+	}
+	mac := hmac.New(sha256.New, shared)
+	mac.Write([]byte(purpose))
+	return mac.Sum(nil), nil
+}
+
 // token is what the guest sends to the host to prove who it is: only those
 // two can make it.
 func (id *Identity) token(peerPub []byte, guest, host string) (string, error) {
-	pk, err := ecdh.X25519().NewPublicKey(peerPub)
+	sum, err := id.secret(peerPub, fmt.Sprintf("kumo-share-v1|guest=%s|host=%s", guest, host))
 	if err != nil {
 		return "", err
 	}
-	secret, err := id.priv.ECDH(pk)
+	return hex.EncodeToString(sum), nil
+}
+
+// sealFor encrypts something for the guest with that public key (the host's
+// AniList login): only it can read it, though it crosses the network as is.
+func (id *Identity) sealFor(guestPub []byte, guest, host string, plain []byte) (string, error) {
+	aead, err := id.cipher(guestPub, guest, host)
 	if err != nil {
 		return "", err
 	}
-	mac := hmac.New(sha256.New, secret)
-	fmt.Fprintf(mac, "kumo-share-v1|guest=%s|host=%s", guest, host)
-	return hex.EncodeToString(mac.Sum(nil)), nil
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(aead.Seal(nonce, nonce, plain, nil)), nil
+}
+
+// openFrom decrypts what the host with that public key sealed for this Kumo.
+func (id *Identity) openFrom(hostPub []byte, guest, host, sealed string) ([]byte, error) {
+	aead, err := id.cipher(hostPub, guest, host)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(sealed)
+	if err != nil || len(raw) < aead.NonceSize() {
+		return nil, errors.New("bad sealed data")
+	}
+	return aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], nil)
+}
+
+func (id *Identity) cipher(peerPub []byte, guest, host string) (cipher.AEAD, error) {
+	key, err := id.secret(peerPub, fmt.Sprintf("kumo-share-v1|seal|guest=%s|host=%s", guest, host))
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
 }
 
 // The headers a guest's requests carry.

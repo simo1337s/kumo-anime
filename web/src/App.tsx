@@ -12,6 +12,7 @@ import { api, onPasswordRequired } from "./lib/api"
 import { connectEvents, setNavigate } from "./lib/events"
 import { useStatus } from "./lib/queries"
 import { accentPreviewStore, passwordStore, useStore } from "./lib/store"
+import { initTV } from "./lib/tv"
 import { setTitleLanguage } from "./lib/utils"
 import HomePage from "./pages/Home"
 
@@ -42,6 +43,18 @@ export default function App() {
 
     useEffect(() => connectEvents(qc), [qc])
     useEffect(() => setNavigate(navigate), [navigate])
+    // The remote's Back (TV mode): the page before, then Home, then out.
+    useEffect(
+        () =>
+            initTV(() => {
+                if (((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) navigate(-1)
+                else if (window.location.pathname !== "/") navigate("/", { replace: true })
+                else return false
+                return true
+            }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [],
+    )
     useEffect(() => {
         const off = onPasswordRequired(() => passwordStore.set(true))
         return () => {

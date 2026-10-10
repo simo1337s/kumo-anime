@@ -1,0 +1,7 @@
+# Built by the workflow (Kumo's server for Android).
+app/src/main/jniLibs/
+.gradle/
+build/
+app/build/
+local.properties
+*.apk

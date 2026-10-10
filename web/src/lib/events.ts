@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query"
 import { toast } from "@/lib/toast"
 import { playbackStore, pluginStore, scanStore, torrentCountStore, trayOpenStore } from "./store"
+import { installIfWanted } from "./tv"
 import type { DownloadItem, PluginState, Status, UpdateStatus } from "./types"
 
 type ServerEvent = { type: string; payload: any }
@@ -99,6 +100,7 @@ export function connectEvents(qc: QueryClient) {
                 // so to devices on the network too).
                 const lan = qc.getQueryData<Status>(["status"])?.client === "lan"
                 qc.setQueryData<UpdateStatus>(["update"], lan ? { ...p, canApply: false, applyNote: "", manualCommand: "" } : p)
+                if (!lan) installIfWanted(p)
                 break
             }
         }

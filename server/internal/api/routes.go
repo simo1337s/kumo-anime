@@ -31,7 +31,11 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/settings", h(s.saveSettings))
 	m.HandleFunc("GET /api/events", s.events)
 	m.HandleFunc("POST /api/auth/anilist", h(s.anilistLogin))
-	m.HandleFunc("POST /api/auth/logout", h(func(r *http.Request) (any, error) { s.app.Platform.Logout(); return nil, nil }))
+	m.HandleFunc("POST /api/auth/logout", h(func(r *http.Request) (any, error) {
+		s.app.Platform.Logout()
+		s.app.Share.LoggedOut()
+		return nil, nil
+	}))
 	m.HandleFunc("POST /api/auth/server-login", s.serverLogin)
 	m.HandleFunc("GET /api/fs/dirs", h(s.listDirs))
 	m.HandleFunc("POST /api/open", h(s.openPath))
@@ -387,6 +391,7 @@ func (s *Server) anilistLogin(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, badRequest("AniList rejected the token: " + err.Error())
 	}
+	s.app.Share.LoggedIn()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()

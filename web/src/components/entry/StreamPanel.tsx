@@ -137,8 +137,10 @@ export function StreamPanel({ entry }: { entry: EntryView }) {
                 <div className="flex items-start gap-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-5">
                     <Terminal className="mt-0.5 size-5 text-amber-300" />
                     <div className="text-sm">
-                        <p className="font-semibold text-amber-200">ani-cli isn’t installed</p>
-                        {canInstallPrograms(status) ? (
+                        <p className="font-semibold text-amber-200">{status?.platform === "android" ? "ani-cli doesn’t run on Android" : "ani-cli isn’t installed"}</p>
+                        {status?.platform === "android" ? (
+                            <p className="mt-1 text-muted">Pick an extension provider from the marketplace, or watch and download from a computer’s library (Settings › Local Anime Library › Library sharing).</p>
+                        ) : canInstallPrograms(status) ? (
                             <p className="mt-1 text-muted">Kumo can install it, with the programs it needs, or pick an extension provider from the marketplace.</p>
                         ) : (
                             <p className="mt-1 text-muted">

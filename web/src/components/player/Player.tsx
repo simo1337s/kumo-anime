@@ -25,6 +25,7 @@ import { prefersHls, randomId, videoCaps } from "@/lib/playback"
 import { useSettings } from "@/lib/queries"
 import { playerStore, type PlayerRequest } from "@/lib/store"
 import type { EntryView, Probe, StreamSource, TrackPrefs } from "@/lib/types"
+import { android, androidApp, move, tv } from "@/lib/tv"
 import { cn, formatDuration, title as animeTitle } from "@/lib/utils"
 import { parseVTT, type Cue } from "@/lib/vtt"
 import { Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger } from "../ui"
@@ -603,17 +604,38 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         const onKey = (e: KeyboardEvent) => {
             if (e.ctrlKey || e.metaKey || e.altKey || theirs(e.target)) return
             const v = videoRef.current
+            const box = containerRef.current
+            // TV (the remote): on the picture, Left/Right seek, OK plays or
+            // pauses and Up goes to the controls; on those, the arrows move
+            // between them (lib/tv) and Down goes back to the picture.
+            const t = e.target as HTMLElement
+            const onPicture = !box || t === box || !box.contains(t) || !!t.closest("[data-tv-skip]")
+            if (tv && box && e.key.startsWith("Arrow") && (!onPicture || e.key === "ArrowUp" || e.key === "ArrowDown")) {
+                poke()
+                if (!onPicture) {
+                    if (!move(e.key === "ArrowUp" ? "up" : e.key === "ArrowDown" ? "down" : e.key === "ArrowLeft" ? "left" : "right", box) && e.key === "ArrowDown") box.focus()
+                } else if (e.key === "ArrowUp") {
+                    box.querySelector<HTMLElement>('[data-tv-controls="bottom"] button')?.focus()
+                }
+                e.preventDefault()
+                e.stopPropagation()
+                return
+            }
             let handled = true
             switch (e.key) {
                 case " ":
                 case "k":
                     if (!e.repeat) togglePlay()
                     break
+                case "Enter":
+                    if (tv && onPicture && !t.closest("[data-tv-skip]")) togglePlay()
+                    else handled = false
+                    break
                 case "ArrowLeft":
-                    seekBy(-5)
+                    seekBy(tv ? -10 : -5)
                     break
                 case "ArrowRight":
-                    seekBy(5)
+                    seekBy(tv ? 10 : 5)
                     break
                 case "j":
                     seekBy(-10)
@@ -687,14 +709,36 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         return () => document.removeEventListener("fullscreenchange", onFs)
     }, [])
 
+    // TV: Skip opening/ending takes the remote's focus when it shows (OK
+    // skips; Left/Right still seek), unless it's on the controls.
+    const skipRef = useRef<HTMLButtonElement>(null)
+    const showingSkip = !!currentSkip
+    useEffect(() => {
+        if (!tv || !showingSkip) return
+        const box = containerRef.current
+        const a = document.activeElement
+        if (!box || a === box || !box.contains(a)) skipRef.current?.focus({ preventScroll: true })
+        return () => {
+            if (document.activeElement === skipRef.current || document.activeElement === document.body) box?.focus({ preventScroll: true })
+        }
+    }, [showingSkip])
+    // The Android app keeps the screen on while a video plays.
+    useEffect(() => {
+        android?.keepAwake?.(!paused)
+        return () => android?.keepAwake?.(false)
+    }, [paused])
+
     // auto-hide controls
     const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const poke = () => {
         setControls(true)
         if (hideTimer.current) clearTimeout(hideTimer.current)
         hideTimer.current = setTimeout(() => {
-            if (!videoRef.current?.paused) setControls(false)
-        }, 2600)
+            if (videoRef.current?.paused) return
+            setControls(false)
+            // TV: the remote's focus doesn't stay on hidden buttons.
+            if (tv && containerRef.current?.querySelector("[data-tv-controls]:focus-within")) containerRef.current.focus()
+        }, tv ? 4000 : 2600)
     }
     useEffect(() => () => void (hideTimer.current && clearTimeout(hideTimer.current)), [])
     useEffect(() => () => report(true), [report])
@@ -707,6 +751,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         <div
             ref={containerRef}
             tabIndex={-1}
+            data-tv-scope
             className={cn("fixed inset-0 z-[80] bg-black outline-none fade-in", !controls && !paused && "cursor-none")}
             onMouseMove={poke}
             onClick={e => e.target === e.currentTarget && togglePlay()}
@@ -778,7 +823,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                             <button className="h-10 rounded-xl bg-white/10 px-4 text-sm font-medium hover:bg-white/15" onClick={close}>
                                 Close
                             </button>
-                            {(req.kind === "local" || sources.length > 0) && (
+                            {(req.kind === "local" || sources.length > 0) && !androidApp && (
                                 <button className="h-10 rounded-xl bg-brand px-4 text-sm font-medium text-white" onClick={openInMpv}>
                                     Open in mpv
                                 </button>
@@ -789,7 +834,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
             )}
 
             {/* top bar */}
-            <div className={cn("absolute inset-x-0 top-0 flex items-center gap-4 bg-gradient-to-b from-black/80 to-transparent px-6 pt-5 pb-14 transition-opacity duration-300", controls || paused ? "opacity-100" : "pointer-events-none opacity-0")}>
+            <div data-tv-controls="top" className={cn("absolute inset-x-0 top-0 flex items-center gap-4 bg-gradient-to-b from-black/80 to-transparent px-6 pt-5 pb-14 transition-opacity duration-300", controls || paused ? "opacity-100" : "pointer-events-none opacity-0")}>
                 <button onClick={close} className="grid size-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur hover:bg-white/20" aria-label="Close player">
                     <ArrowLeft className="size-5" />
                 </button>
@@ -810,7 +855,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
             </div>
 
             {/* bottom controls */}
-            <div className={cn("absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-6 pt-20 pb-5 transition-opacity duration-300", controls || paused ? "opacity-100" : "pointer-events-none opacity-0")}>
+            <div data-tv-controls="bottom" className={cn("absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-6 pt-20 pb-5 transition-opacity duration-300", controls || paused ? "opacity-100" : "pointer-events-none opacity-0")}>
                 {/* scrubber */}
                 <div
                     className="group/seek relative mb-3 h-5 cursor-pointer"
@@ -957,12 +1002,16 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                                 ))}
                             </DropdownContent>
                         </Dropdown>
-                        <CtrlButton onClick={openInMpv} label="Continue in mpv">
-                            <MonitorPlay className="size-5" />
-                        </CtrlButton>
-                        <CtrlButton onClick={toggleFullscreen} label="Fullscreen (f)">
-                            {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
-                        </CtrlButton>
+                        {!androidApp && (
+                            <CtrlButton onClick={openInMpv} label="Continue in mpv">
+                                <MonitorPlay className="size-5" />
+                            </CtrlButton>
+                        )}
+                        {!tv && (
+                            <CtrlButton onClick={toggleFullscreen} label="Fullscreen (f)">
+                                {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
+                            </CtrlButton>
+                        )}
                     </div>
                 </div>
             </div>
@@ -972,7 +1021,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                 would otherwise take its clicks while the controls show. */}
             <div className="absolute right-8 bottom-32 z-10 flex flex-col items-end gap-3">
                 {currentSkip && (
-                    <button onClick={() => seekTo(currentSkip.end)} className="flex h-11 items-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black shadow-2xl rise-in hover:bg-white/90">
+                    <button ref={skipRef} data-tv-skip onClick={() => seekTo(currentSkip.end)} className="flex h-11 items-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black shadow-2xl rise-in hover:bg-white/90">
                         <FastForward className="size-4 fill-black" /> Skip {skipWhat}
                     </button>
                 )}

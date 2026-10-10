@@ -187,11 +187,11 @@ func TestSharedFilesAreTheMatchedOnes(t *testing.T) {
 	if len(files) != 1 || files[0].Path != "/a/1.mkv" {
 		t.Errorf("shared %+v", files)
 	}
-	h := s.Hello(true)
+	h := s.Hello(Caller{Allowed: true})
 	if !h.Shares || h.Files == "" || h.Files != filesVersion(files) {
 		t.Errorf("hello %+v", h)
 	}
-	if h := s.Hello(false); h.Shares || h.Files != "" {
+	if h := s.Hello(Caller{}); h.Shares || h.Files != "" {
 		t.Errorf("hello to a Kumo not allowed: %+v", h)
 	}
 }
