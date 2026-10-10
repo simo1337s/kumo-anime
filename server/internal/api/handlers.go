@@ -612,7 +612,7 @@ func (s *Server) osSources(r *http.Request) (any, error) {
 	q := r.URL.Query()
 	ep, _ := strconv.ParseFloat(q.Get("episode"), 64)
 	dub := q.Get("dub") == "1" || q.Get("dub") == "true"
-	res, err := s.app.Stream.Sources(r.Context(), util2(q.Get("provider"), stream.AniCliProvider), media, ep, dub, q.Get("server"), q.Get("quality"))
+	res, gotDub, err := s.app.Stream.SourcesOrOther(r.Context(), util2(q.Get("provider"), stream.AniCliProvider), media, ep, dub, q.Get("server"), q.Get("quality"))
 	if err != nil {
 		return nil, err
 	}
@@ -626,6 +626,8 @@ func (s *Server) osSources(r *http.Request) (any, error) {
 	return map[string]any{
 		"provider": res.Provider, "episode": res.Episode, "sources": out, "errors": res.Errors, "title": res.Title,
 		"resumeAt": s.app.History.ResumePosition(media.ID, int(ep)), "tracks": s.app.Player.Tracks.Get(media.ID),
+		// The version found: the other one when the asked one has none.
+		"dub": gotDub,
 	}, nil
 }
 
@@ -683,10 +685,11 @@ func (s *Server) osPlay(r *http.Request) (any, error) {
 		return nil, err
 	}
 	provider := util2(body.Provider, stream.AniCliProvider)
-	res, err := s.app.Stream.Sources(r.Context(), provider, media, body.Episode, body.Dub, body.Server, body.Quality)
+	res, gotDub, err := s.app.Stream.SourcesOrOther(r.Context(), provider, media, body.Episode, body.Dub, body.Server, body.Quality)
 	if err != nil {
 		return nil, err
 	}
+	body.Dub = gotDub
 	idx := body.Source
 	if idx < 0 || idx >= len(res.Sources) {
 		idx = 0

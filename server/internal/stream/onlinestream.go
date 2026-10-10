@@ -371,6 +371,36 @@ type SourcesResult struct {
 	Title    string   `json:"title"`
 }
 
+// SourcesOrOther resolves an episode in the version asked for (sub or dub),
+// or in the other one when the provider has no stream of it in that one: an
+// episode that isn't dubbed (yet) plays with subtitles rather than not at
+// all, wherever it's started from (Continue watching, the next episode).
+// gotDub is the version it found.
+func (s *Service) SourcesOrOther(ctx context.Context, provider string, media *anilist.Media, episode float64, dub bool, server, quality string) (res *SourcesResult, gotDub bool, err error) {
+	res, err = s.Sources(ctx, provider, media, episode, dub, server, quality)
+	if (err == nil && len(res.Sources) > 0) || ctx.Err() != nil || !s.supportsDub(ctx, provider) {
+		return res, dub, err
+	}
+	other, oerr := s.Sources(ctx, provider, media, episode, !dub, server, quality)
+	if oerr != nil || len(other.Sources) == 0 {
+		return res, dub, err
+	}
+	return other, !dub, nil
+}
+
+// supportsDub reports a provider that has dubs at all.
+func (s *Service) supportsDub(ctx context.Context, provider string) bool {
+	if provider == AniCliProvider {
+		return true
+	}
+	for _, p := range s.exts.OnlineStreamProviders() {
+		if p.ID() == provider {
+			return p.Settings(ctx).SupportsDub
+		}
+	}
+	return false
+}
+
 // Sources resolves the playable sources of an episode.
 func (s *Service) Sources(ctx context.Context, provider string, media *anilist.Media, episode float64, dub bool, server, quality string) (*SourcesResult, error) {
 	if provider == AniCliProvider {

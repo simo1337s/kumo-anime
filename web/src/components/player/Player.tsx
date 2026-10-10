@@ -222,13 +222,16 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                         setSubKey(pickSub(subOpts, handSub ? p : null, settings?.playback.preferredSubLang ?? "", (res.probe.subtitles ?? []).find(s => s.default)?.typeIndex))
                     }
                 } else {
-                    const res = await api.get<{ sources: StreamSource[]; resumeAt: number; tracks: TrackPrefs | null; title: string }>(
+                    const res = await api.get<{ sources: StreamSource[]; resumeAt: number; tracks: TrackPrefs | null; title: string; dub?: boolean }>(
                         `/api/onlinestream/sources${qs({ provider: req.provider, mediaId: req.mediaId, episode: req.episode, dub: req.dub, server: req.server })}`,
                     )
                     if (cancelled) return
                     prefsRef.current = res.tracks
+                    // The other version, when the one asked for has no stream.
+                    const dub = res.dub ?? !!req.dub
+                    if (dub !== !!req.dub) toast.info(dub ? "This episode is only dubbed: playing the dub" : "No dub of this episode: playing it with subtitles")
                     const media = await api.get<EntryView>(`/api/anime/${req.mediaId}`).catch(() => null)
-                    setTitle(`${animeTitle(media?.media) || res.title || "Episode"} — Episode ${req.episode}${req.dub ? " (Dub)" : ""}`)
+                    setTitle(`${animeTitle(media?.media) || res.title || "Episode"} — Episode ${req.episode}${dub ? " (Dub)" : ""}`)
                     const sorted = [...res.sources].sort((a, b) => qualityRank(b.quality) - qualityRank(a.quality))
                     setSources(sorted)
                     setSourceIdx(0)

@@ -120,3 +120,38 @@ func TestModesUnknown(t *testing.T) {
 		t.Fatalf("remembered %+v", cached)
 	}
 }
+
+// An episode asked for in a version the provider hasn't got plays in the
+// other one (Continue watching asks for the default, dub).
+func TestSourcesOrOther(t *testing.T) {
+	svc, _ := aniCliService(t,
+		"sub-only\tSub Only Show\t3\tsub",
+		"both\tBoth Ways Show\t12\tsub dub",
+	)
+	ctx := context.Background()
+	for _, c := range []struct {
+		id      int
+		title   string
+		dub     bool
+		wantDub bool
+	}{
+		{1, "Sub Only Show", true, false},
+		{1, "Sub Only Show", false, false},
+		{2, "Both Ways Show", true, true},
+		{2, "Both Ways Show", false, false},
+	} {
+		media := &anilist.Media{ID: c.id, Title: anilist.Title{English: c.title}}
+		res, gotDub, err := svc.SourcesOrOther(ctx, AniCliProvider, media, 2, c.dub, "", "")
+		if err != nil || len(res.Sources) == 0 || gotDub != c.wantDub {
+			t.Errorf("%s, dub %v: %v, dub %v, %v", c.title, c.dub, res, gotDub, err)
+		}
+		if err == nil && !strings.Contains(res.Sources[0].URL, map[bool]string{true: "/dub/", false: "/sub/"}[gotDub]) {
+			t.Errorf("%s: %s isn't the %v stream", c.title, res.Sources[0].URL, gotDub)
+		}
+	}
+	// Neither version: the error of the one asked for.
+	media := &anilist.Media{ID: 3, Title: anilist.Title{English: "Nowhere To Be Found"}}
+	if _, _, err := svc.SourcesOrOther(ctx, AniCliProvider, media, 1, true, "", ""); err == nil {
+		t.Error("an anime ani-cli doesn't have played")
+	}
+}
