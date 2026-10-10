@@ -445,7 +445,10 @@ func (l *Local) startFor(ctx context.Context, path string, pl plan, t float64) f
 // last one at or before t, or the next one when it's close (seekAhead) and
 // the last one isn't.
 func (l *Local) seekKeyframe(ctx context.Context, path string, t float64) (float64, bool) {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// A disk waking up, or a file read for the first time, takes a while:
+	// without its keyframe, a copy would start mid-picture (grey until the
+	// next keyframe).
+	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
 	ffprobe := l.settings.Get().Transcode.FfprobePath
 	for _, window := range []float64{20, 120} {

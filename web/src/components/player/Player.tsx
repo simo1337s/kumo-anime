@@ -88,6 +88,9 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
     // only start at a keyframe), so subtitles and times stay in sync.
     const [stream, setStream] = useState<{ url: string; base: number; hls: boolean; id?: string } | null>(null)
     const [restart, setRestart] = useState(0)
+    // A new <video> element (see the picture watchdog).
+    const [videoKey, setVideoKey] = useState(0)
+    const pictureTries = useRef(0)
     // stream
     const [sources, setSources] = useState<StreamSource[]>([])
     const [sourceIdx, setSourceIdx] = useState(0)
@@ -391,7 +394,61 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         // A seek within one keyframe interval sets up the same stream again:
         // it still has to reload.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [videoSrc, stream])
+    }, [videoSrc, stream, videoKey])
+
+    // No picture: a TV's WebView sometimes plays the sound of a converted
+    // file and shows a grey picture, the first time (opened again, it plays).
+    // Sound for a few seconds without one video frame shown: it's opened
+    // again from there, in a new video element, as closing and opening the
+    // player would do; and when even that shows nothing decoded, the video is
+    // converted too.
+    useEffect(() => {
+        const v = videoRef.current
+        if (!v || !videoSrc || req.kind !== "local" || pictureTries.current >= 2) return
+        // Frames shown (requestVideoFrameCallback), or else decoded.
+        const rvfc = "requestVideoFrameCallback" in v
+        let frames = 0
+        let handle = 0
+        const onFrame = () => {
+            frames++
+            handle = v.requestVideoFrameCallback(onFrame)
+        }
+        if (rvfc) handle = v.requestVideoFrameCallback(onFrame)
+        const decoded = () => ("getVideoPlaybackQuality" in v ? v.getVideoPlaybackQuality().totalVideoFrames : 1)
+        const shown = () => (rvfc ? frames : decoded()) > 0
+        let from = -1
+        const timer = setInterval(() => {
+            if (shown()) return clearInterval(timer)
+            if (v.paused || v.readyState < 3) return
+            if (from < 0) {
+                from = v.currentTime
+                return
+            }
+            if (v.currentTime - from < 3) return
+            clearInterval(timer)
+            const at = absTime(v)
+            const tries = ++pictureTries.current
+            if (tries === 1) {
+                startAt.current = method === "direct" ? at : 0
+                if (method !== "direct") {
+                    setStream(null)
+                    setOffset(at)
+                    setRestart(n => n + 1)
+                }
+                setVideoKey(k => k + 1)
+            } else if (decoded() === 0 && method !== "transcode") {
+                toast.info("Converting the video for this device…")
+                startAt.current = 0
+                setOffset(at)
+                setMethod("transcode")
+            }
+        }, 500)
+        return () => {
+            clearInterval(timer)
+            if (rvfc && handle) v.cancelVideoFrameCallback(handle)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [videoSrc, stream, videoKey])
 
     // ------------------------------------------------------------- subtitles
     useEffect(() => {
@@ -423,6 +480,10 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         }
     }, [subKey, subs])
 
+    // A new video element has no track yet.
+    useEffect(() => {
+        trackRef.current = null
+    }, [videoKey])
     useEffect(() => {
         const v = videoRef.current
         if (!v) return
@@ -444,7 +505,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                 /* ignore bad cue */
             }
         }
-    }, [cues, base])
+    }, [cues, base, videoKey])
 
     // -------------------------------------------------------------- progress
     const report = useCallback(
@@ -729,10 +790,10 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
         } catch {
             /* ignore */
         }
-    }, [volume, muted])
+    }, [volume, muted, videoKey])
     useEffect(() => {
         if (videoRef.current) videoRef.current.playbackRate = rate
-    }, [rate])
+    }, [rate, videoKey])
     useEffect(() => {
         const onFs = () => setFullscreen(!!document.fullscreenElement)
         document.addEventListener("fullscreenchange", onFs)
@@ -787,6 +848,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
             onClick={e => e.target === e.currentTarget && togglePlay()}
         >
             <video
+                key={videoKey}
                 ref={videoRef}
                 className="absolute inset-0 size-full"
                 playsInline
