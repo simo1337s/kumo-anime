@@ -107,9 +107,11 @@ const (
 // when asked) and installs them.
 type Checker struct {
 	// API is GitHub's REST API (tests use a fake one) and Repo the
-	// repository, "owner/name".
+	// repository, "owner/name"; RepoID its number, which the API is asked
+	// by when set (a renamed repository's old name can be taken).
 	API    string
 	Repo   string
+	RepoID string
 	Client *http.Client
 	Hub    *events.Hub
 	// Exits ends Kumo when an update needs it to restart or to quit.
@@ -158,9 +160,9 @@ type Checker struct {
 // New makes the checker for this copy of Kumo. It does nothing until Start
 // or a call.
 func New(hub *events.Hub, exits *lifecycle.Exits) *Checker {
-	repo := config.UpdateRepo
+	repo, id := config.UpdateRepo, config.UpdateRepoID
 	if r := strings.TrimSpace(os.Getenv("KUMO_UPDATE_REPO")); r != "" {
-		repo = r
+		repo, id = r, ""
 	}
 	cache, err := os.UserCacheDir()
 	if err != nil {
@@ -169,6 +171,7 @@ func New(hub *events.Hub, exits *lifecycle.Exits) *Checker {
 	c := &Checker{
 		API:            defaultAPI,
 		Repo:           repo,
+		RepoID:         id,
 		Client:         defaultClient,
 		Hub:            hub,
 		Exits:          exits,
@@ -463,7 +466,7 @@ func (c *Checker) describe(err error) (string, string) {
 }
 
 func (c *Checker) check(ctx context.Context) (result, error) {
-	g := &github{api: strings.TrimRight(c.API, "/"), repo: c.Repo, client: c.Client, token: c.Token(ctx), userAgent: "Kumo/" + c.Version}
+	g := &github{api: strings.TrimRight(c.API, "/"), repo: c.Repo, repoID: c.RepoID, client: c.Client, token: c.Token(ctx), userAgent: "Kumo/" + c.Version}
 	if fromReleases(c.GOOS) {
 		return c.checkReleases(ctx, g)
 	}
@@ -476,7 +479,7 @@ func (c *Checker) checkBranch(ctx context.Context, g *github) (result, error) {
 	var repo struct {
 		DefaultBranch string `json:"default_branch"`
 	}
-	if _, err := g.getJSON(ctx, "/repos/"+g.repo, &repo); err != nil {
+	if _, err := g.getJSON(ctx, g.root(), &repo); err != nil {
 		return result{}, err
 	}
 	if repo.DefaultBranch == "" {
@@ -575,7 +578,7 @@ func releaseFile(goos string) string {
 // windows-v<version>, on macOS macos-v<version>.
 func (c *Checker) checkReleases(ctx context.Context, g *github) (result, error) {
 	var releases []release
-	if _, err := g.getJSON(ctx, "/repos/"+g.repo+"/releases?per_page=50", &releases); err != nil {
+	if _, err := g.getJSON(ctx, g.root()+"/releases?per_page=50", &releases); err != nil {
 		return result{}, err
 	}
 	prefix := releasePrefix(c.GOOS)
@@ -720,7 +723,7 @@ func (c *Checker) Apply() error {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		g := &github{api: strings.TrimRight(c.API, "/"), repo: c.Repo, client: c.Client, token: c.Token(c.ctx), userAgent: "Kumo/" + c.Version}
+		g := &github{api: strings.TrimRight(c.API, "/"), repo: c.Repo, repoID: c.RepoID, client: c.Client, token: c.Token(c.ctx), userAgent: "Kumo/" + c.Version}
 		var err error
 		switch c.GOOS {
 		case "windows":

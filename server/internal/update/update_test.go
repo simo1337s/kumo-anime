@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simo1337s/animetest/server/internal/config"
 	"github.com/simo1337s/animetest/server/internal/events"
 	"github.com/simo1337s/animetest/server/internal/lifecycle"
 )
@@ -114,7 +115,7 @@ func newTestChecker(t *testing.T, gh *fakeGitHub) *Checker {
 	t.Helper()
 	c := New(events.NewHub(), lifecycle.NewExits())
 	c.API = gh.URL
-	c.Repo = "o/r"
+	c.Repo, c.RepoID = "o/r", ""
 	c.Client = gh.Client()
 	c.CacheDir = filepath.Join(t.TempDir(), "update")
 	c.Token = func(context.Context) string { return "secret-token" }
@@ -684,5 +685,25 @@ func TestApplyNeedsAnUpdate(t *testing.T) {
 	check(t, c)
 	if err := c.Apply(); err != ErrNoUpdate {
 		t.Fatalf("Apply = %v, want ErrNoUpdate", err)
+	}
+}
+
+// Kumo asks GitHub for its repository by number: its old name, after a
+// rename, could be taken by anyone, who'd then make the updates.
+func TestRepositoryByNumber(t *testing.T) {
+	c := New(events.NewHub(), lifecycle.NewExits())
+	t.Cleanup(c.Stop)
+	if c.RepoID == "" || c.Repo != config.UpdateRepo {
+		t.Fatalf("repo %q, id %q", c.Repo, c.RepoID)
+	}
+	g := &github{repo: c.Repo, repoID: c.RepoID}
+	if g.root() != "/repositories/"+config.UpdateRepoID {
+		t.Errorf("root %q", g.root())
+	}
+	t.Setenv("KUMO_UPDATE_REPO", "me/fork")
+	c2 := New(events.NewHub(), lifecycle.NewExits())
+	t.Cleanup(c2.Stop)
+	if g := (&github{repo: c2.Repo, repoID: c2.RepoID}); g.root() != "/repos/me/fork" {
+		t.Errorf("override: %q", g.root())
 	}
 }

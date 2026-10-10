@@ -22,9 +22,19 @@ import (
 type github struct {
 	api       string // https://api.github.com
 	repo      string // owner/name
+	repoID    string // its number, which stays when it's renamed (or "")
 	client    *http.Client
 	token     string // "" for anonymous requests
 	userAgent string
+}
+
+// root is the repository's address in the API: by its number when known,
+// as the name of a renamed one may be taken by someone else.
+func (g *github) root() string {
+	if g.repoID != "" {
+		return "/repositories/" + g.repoID
+	}
+	return "/repos/" + g.repo
 }
 
 // apiError is an error answer from GitHub.
@@ -124,7 +134,7 @@ type commitInfo struct {
 // commit looks up a branch's (or tag's) commit.
 func (g *github) commit(ctx context.Context, ref string) (*commitInfo, error) {
 	var c commitInfo
-	if _, err := g.getJSON(ctx, "/repos/"+g.repo+"/commits/"+escapeRef(ref), &c); err != nil {
+	if _, err := g.getJSON(ctx, g.root()+"/commits/"+escapeRef(ref), &c); err != nil {
 		return nil, err
 	}
 	if c.SHA == "" {
@@ -137,7 +147,7 @@ func (g *github) commit(ctx context.Context, ref string) (*commitInfo, error) {
 // commit per page, the number of the last page. 0 when unknown.
 func (g *github) commitCount(ctx context.Context, sha string) int {
 	var commits []json.RawMessage
-	h, err := g.getJSON(ctx, "/repos/"+g.repo+"/commits?sha="+url.QueryEscape(sha)+"&per_page=1", &commits)
+	h, err := g.getJSON(ctx, g.root()+"/commits?sha="+url.QueryEscape(sha)+"&per_page=1", &commits)
 	if err != nil {
 		return 0
 	}
@@ -167,7 +177,7 @@ func lastPage(link string) int {
 // recentSubjects lists the subjects of the newest commits up to sha.
 func (g *github) recentSubjects(ctx context.Context, sha string) ([]string, error) {
 	var commits []commitInfo
-	if _, err := g.getJSON(ctx, fmt.Sprintf("/repos/%s/commits?sha=%s&per_page=%d", g.repo, url.QueryEscape(sha), maxChanges), &commits); err != nil {
+	if _, err := g.getJSON(ctx, fmt.Sprintf("%s/commits?sha=%s&per_page=%d", g.root(), url.QueryEscape(sha), maxChanges), &commits); err != nil {
 		return nil, err
 	}
 	out := []string{}
@@ -187,7 +197,7 @@ type comparison struct {
 
 func (g *github) compare(ctx context.Context, base, head string) (*comparison, error) {
 	var cmp comparison
-	if _, err := g.getJSON(ctx, "/repos/"+g.repo+"/compare/"+escapeRef(base)+"..."+escapeRef(head), &cmp); err != nil {
+	if _, err := g.getJSON(ctx, g.root()+"/compare/"+escapeRef(base)+"..."+escapeRef(head), &cmp); err != nil {
 		return nil, err
 	}
 	return &cmp, nil

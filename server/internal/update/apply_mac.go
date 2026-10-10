@@ -89,7 +89,7 @@ func (c *Checker) applyMac(ctx context.Context, g *github, target Version, zipAs
 		return err
 	}
 	path := filepath.Join(dir, filepath.Base(zipAsset.Name))
-	err = c.download(ctx, g, "/repos/"+g.repo+"/releases/assets/"+strconv.FormatInt(zipAsset.ID, 10), "application/octet-stream", path, zipAsset.Size, func(done, total int64) {
+	err = c.download(ctx, g, g.root()+"/releases/assets/"+strconv.FormatInt(zipAsset.ID, 10), "application/octet-stream", path, zipAsset.Size, func(done, total int64) {
 		c.progress(StateDownloading, percent(done, total), "Downloading Kumo "+display(target)+"…")
 	})
 	if err != nil {
@@ -174,6 +174,27 @@ func swapFailure(err error, target Version) string {
 	return msg + " or download the new version from its release page."
 }
 
+// noLinkOnTheWay fails when rel in dir, or a folder on the way to it, is
+// a link an earlier entry made: what's written through links could land
+// out of dir, though each link points inside the app.
+func noLinkOnTheWay(dir, rel string) error {
+	p := dir
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		p = filepath.Join(p, part)
+		fi, err := os.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("unsafe path in the archive: %q goes through a link", rel)
+		}
+	}
+	return nil
+}
+
 // unzipApp unpacks a zip of an app into dir, which must not exist yet, and
 // returns the app. Links are kept (an app's frameworks are made of them)
 // but may not point out of the app; a path that would land outside dir
@@ -201,6 +222,9 @@ func unzipApp(archive, dir string) (string, error) {
 		}
 		tops[top] = true
 		target := filepath.Join(dir, rel)
+		if err := noLinkOnTheWay(dir, rel); err != nil {
+			return "", err
+		}
 		mode := f.Mode()
 		switch {
 		case mode.IsDir():

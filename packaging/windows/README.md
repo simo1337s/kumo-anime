@@ -7,7 +7,7 @@ None of it is for Linux: on Arch, keep installing Kumo from source with
 
 ## Install
 
-Open the [releases](https://github.com/simo1337s/kumo-anime/releases), take the
+Open the [releases](https://github.com/v0-0x/kumo-anime/releases), take the
 newest **Kumo X.Y.Z for Windows** and download one of:
 
 | File | What it is |
@@ -133,7 +133,7 @@ On Windows, with Go, Node.js and Git:
 winget install GoLang.Go
 winget install OpenJS.NodeJS.LTS
 winget install Git.Git
-git clone https://github.com/simo1337s/kumo-anime kumo
+git clone https://github.com/v0-0x/kumo-anime kumo
 cd kumo
 powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
 ```

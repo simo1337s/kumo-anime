@@ -68,7 +68,7 @@ The server also rejects other websites' requests (Origin check) and DNS rebindin
 sudo pacman -S --needed base-devel go nodejs npm electron mpv ffmpeg
 yay -S ani-cli            # sub/dub streaming & downloads (recommended)
 sudo pacman -S yt-dlp     # optional, better downloads
-git clone https://github.com/simo1337s/kumo-anime kumo && cd kumo
+git clone https://github.com/v0-0x/kumo-anime kumo && cd kumo
 cd packaging/arch && makepkg -si
 ```
 
@@ -97,19 +97,19 @@ Turn on **Allow devices on my network** (with a password) to use Kumo from your 
 
 ## Windows
 
-Kumo also runs on Windows 10/11 (64-bit), released separately from the Arch package: get the installer (`Kumo-Setup-X.Y.Z-windows-x64.exe`) or the portable zip from the newest **Kumo X.Y.Z for Windows** [release](https://github.com/simo1337s/kumo-anime/releases) (tag `windows-vX.Y.Z`). Those files are Windows-only; on Arch, use the PKGBUILD above. The installer also offers to install the programs Kumo uses (Git, ani-cli, ffmpeg, mpv, yt-dlp…) with Scoop, and the installed app updates itself from its Home page too.
+Kumo also runs on Windows 10/11 (64-bit), released separately from the Arch package: get the installer (`Kumo-Setup-X.Y.Z-windows-x64.exe`) or the portable zip from the newest **Kumo X.Y.Z for Windows** [release](https://github.com/v0-0x/kumo-anime/releases) (tag `windows-vX.Y.Z`). Those files are Windows-only; on Arch, use the PKGBUILD above. The installer also offers to install the programs Kumo uses (Git, ani-cli, ffmpeg, mpv, yt-dlp…) with Scoop, and the installed app updates itself from its Home page too.
 
 What to install alongside it (ffmpeg, mpv, yt-dlp, ani-cli, qBittorrent), where it keeps its data, how to build it and how releases are made: [packaging/windows/README.md](packaging/windows/README.md).
 
 ## macOS
 
-Kumo runs on macOS 13 Ventura or newer, on Apple silicon and Intel Macs (one universal app): get the disk image (`Kumo-X.Y.Z-macos-universal.dmg`) from the newest **Kumo X.Y.Z for macOS** [release](https://github.com/simo1337s/kumo-anime/releases) (tag `macos-vX.Y.Z`) and drag Kumo to Applications. It isn't notarized by Apple: the first time, allow it in System Settings › Privacy & Security (**Open Anyway**). Kumo downloads the programs it uses (ffmpeg, yt-dlp, ani-cli) from its Settings, with no Homebrew needed, and updates itself from its Home page.
+Kumo runs on macOS 13 Ventura or newer, on Apple silicon and Intel Macs (one universal app): get the disk image (`Kumo-X.Y.Z-macos-universal.dmg`) from the newest **Kumo X.Y.Z for macOS** [release](https://github.com/v0-0x/kumo-anime/releases) (tag `macos-vX.Y.Z`) and drag Kumo to Applications. It isn't notarized by Apple: the first time, allow it in System Settings › Privacy & Security (**Open Anyway**). Kumo downloads the programs it uses (ffmpeg, yt-dlp, ani-cli) from its Settings, with no Homebrew needed, and updates itself from its Home page.
 
 How to open it the first time, where it keeps its data, how to build it: [packaging/macos/README.md](packaging/macos/README.md).
 
 ## Android / Fire TV
 
-Kumo for Android is made for TVs (a Fire TV Stick, Android TV) and plays the libraries the computers at home share, with the remote: get `Kumo-X.Y.Z-android.apk` from the newest **Kumo X.Y.Z for Android** [release](https://github.com/simo1337s/kumo-anime/releases) (tag `android-vX.Y.Z`). On a Fire TV, install the **Downloader** app, allow it in Settings › My Fire TV › Developer options › Install unknown apps, and open the APK's address in it. Then, on a computer with Kumo, turn on **Library sharing** (Settings › Local Anime Library): the TV shows up there. Turn on **Share my library** for it, and if you like **Share my AniList account** (the TV uses your account, with no login on the TV) and **Let it download here** (the TV's downloads and torrents go to that computer, and it becomes where the TV downloads by default). The app updates itself from its Home page; see [android/README.md](android/README.md).
+Kumo for Android is made for TVs (a Fire TV Stick, Android TV) and plays the libraries the computers at home share, with the remote: get `Kumo-X.Y.Z-android.apk` from the newest **Kumo X.Y.Z for Android** [release](https://github.com/v0-0x/kumo-anime/releases) (tag `android-vX.Y.Z`). On a Fire TV, install the **Downloader** app, allow it in Settings › My Fire TV › Developer options › Install unknown apps, and open the APK's address in it. Then, on a computer with Kumo, turn on **Library sharing** (Settings › Local Anime Library): the TV shows up there. Turn on **Share my library** for it, and if you like **Share my AniList account** (the TV uses your account, with no login on the TV) and **Let it download here** (the TV's downloads and torrents go to that computer, and it becomes where the TV downloads by default). The app updates itself from its Home page; see [android/README.md](android/README.md).
 
 ## Development
 

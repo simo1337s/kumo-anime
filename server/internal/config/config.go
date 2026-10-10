@@ -20,8 +20,11 @@ const (
 	DefaultMarketplaceURL = "https://raw.githubusercontent.com/Bas1874/Seanime-Marketplace/refs/heads/main/Marketplace/Main.json"
 
 	// UpdateRepo is the GitHub repository Kumo looks for updates in
-	// ($KUMO_UPDATE_REPO overrides it).
-	UpdateRepo = "simo1337s/kumo-anime"
+	// ($KUMO_UPDATE_REPO overrides it), asked for by its number
+	// (UpdateRepoID): it was renamed once, and an old name can be taken by
+	// anyone, who would then make the updates.
+	UpdateRepo   = "v0-0x/kumo-anime"
+	UpdateRepoID = "1406820679"
 )
 
 // Set when building, with -ldflags "-X <module>/internal/config.AppVersion=…

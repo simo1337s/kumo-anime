@@ -47,7 +47,7 @@ func (c *Checker) applyLinux(ctx context.Context, g *github, target Version) err
 	// The source of exactly the commit the check found. GitHub redirects
 	// to codeload.github.com, with a token of its own in the address.
 	archive := filepath.Join(dir, "source.tar.gz")
-	err := c.download(ctx, g, "/repos/"+g.repo+"/tarball/"+escapeRef(target.Commit), "application/vnd.github+json", archive, 0, func(done, total int64) {
+	err := c.download(ctx, g, g.root()+"/tarball/"+escapeRef(target.Commit), "application/vnd.github+json", archive, 0, func(done, total int64) {
 		c.progress(StateDownloading, percent(done, total), fmt.Sprintf("Downloading Kumo %s… %s", display(target), megabytes(done)))
 	})
 	if err != nil {
@@ -276,7 +276,7 @@ func (c *Checker) applyWindows(ctx context.Context, g *github, target Version, i
 		return err
 	}
 	path := filepath.Join(dir, filepath.Base(inst.Name))
-	err := c.download(ctx, g, "/repos/"+g.repo+"/releases/assets/"+strconv.FormatInt(inst.ID, 10), "application/octet-stream", path, inst.Size, func(done, total int64) {
+	err := c.download(ctx, g, g.root()+"/releases/assets/"+strconv.FormatInt(inst.ID, 10), "application/octet-stream", path, inst.Size, func(done, total int64) {
 		c.progress(StateDownloading, percent(done, total), "Downloading Kumo "+display(target)+"…")
 	})
 	if err != nil {
@@ -319,7 +319,7 @@ func (c *Checker) applyAndroid(ctx context.Context, g *github, target Version, a
 		return err
 	}
 	path := filepath.Join(dir, filepath.Base(apk.Name))
-	err := c.download(ctx, g, "/repos/"+g.repo+"/releases/assets/"+strconv.FormatInt(apk.ID, 10), "application/octet-stream", path, apk.Size, func(done, total int64) {
+	err := c.download(ctx, g, g.root()+"/releases/assets/"+strconv.FormatInt(apk.ID, 10), "application/octet-stream", path, apk.Size, func(done, total int64) {
 		c.progress(StateDownloading, percent(done, total), "Downloading Kumo "+display(target)+"…")
 	})
 	if err != nil {

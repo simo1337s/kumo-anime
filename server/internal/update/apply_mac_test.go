@@ -289,9 +289,15 @@ func TestUnzipAppRefusesUnsafeZips(t *testing.T) {
 	for name, z := range map[string][]byte{
 		"link out of the app": makeZip(t, zipEntry{name: "Kumo.app/Contents/Resources/kumo", data: "x", mode: 0o755}, zipEntry{name: "Kumo.app/evil", link: "../../etc"}),
 		"absolute link":       makeZip(t, zipEntry{name: "Kumo.app/evil", link: "/etc/passwd"}),
-		"path out of it":      makeZip(t, zipEntry{name: "../evil", data: "x", mode: 0o644}),
-		"two apps":            makeZip(t, zipEntry{name: "Kumo.app/a", data: "x", mode: 0o644}, zipEntry{name: "Other.app/a", data: "x", mode: 0o644}),
-		"no app":              makeZip(t, zipEntry{name: "Kumo/a", data: "x", mode: 0o644}),
+		// Each link points inside, but one through the other goes out.
+		"links through links": makeZip(t,
+			zipEntry{name: "Kumo.app/Contents/Resources/kumo", data: "x", mode: 0o755},
+			zipEntry{name: "Kumo.app/Contents/Resources/b", link: "../.."},
+			zipEntry{name: "Kumo.app/Contents/Resources/b/c", link: "../../.."},
+			zipEntry{name: "Kumo.app/Contents/Resources/b/c/PWNED.txt", data: "x", mode: 0o644}),
+		"path out of it": makeZip(t, zipEntry{name: "../evil", data: "x", mode: 0o644}),
+		"two apps":       makeZip(t, zipEntry{name: "Kumo.app/a", data: "x", mode: 0o644}, zipEntry{name: "Other.app/a", data: "x", mode: 0o644}),
+		"no app":         makeZip(t, zipEntry{name: "Kumo/a", data: "x", mode: 0o644}),
 	} {
 		dir := t.TempDir()
 		archive := filepath.Join(dir, "app.zip")
@@ -300,6 +306,9 @@ func TestUnzipAppRefusesUnsafeZips(t *testing.T) {
 		}
 		if app, err := unzipApp(archive, filepath.Join(dir, "out")); err == nil {
 			t.Errorf("%s: unpacked %s", name, app)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "PWNED.txt")); err == nil {
+			t.Errorf("%s: wrote out of the folder", name)
 		}
 	}
 }

@@ -20,7 +20,7 @@
 
 param(
     # The GitHub repository Kumo updates from.
-    [string]$Repo = "simo1337s/kumo-anime",
+    [string]$Repo = "v0-0x/kumo-anime",
     # Close the window at the end without waiting for Enter.
     [switch]$NoPause
 )

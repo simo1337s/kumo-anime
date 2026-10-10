@@ -7,7 +7,7 @@ server with the app's window on top of it.
 ## Install
 
 1. Download `Kumo-X.Y.Z-macos-universal.dmg` from the newest **Kumo X.Y.Z for
-   macOS** [release](https://github.com/simo1337s/kumo-anime/releases) (tag
+   macOS** [release](https://github.com/v0-0x/kumo-anime/releases) (tag
    `macos-vX.Y.Z`).
 2. Open it and drag **Kumo** onto **Applications**.
 3. Open Kumo from your Applications folder.
