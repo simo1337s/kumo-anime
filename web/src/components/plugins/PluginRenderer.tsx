@@ -155,7 +155,10 @@ function Node({ node }: { node: UINode }) {
             )
         }
         case "css":
-            return <style>{String(p.css ?? "")}</style>
+            // Not shown: a plugin's CSS would apply to all of Kumo's pages,
+            // where it could read what's typed in them (passwords) through
+            // the images its rules load.
+            return null
         case "tooltip":
             return (
                 <Tooltip content={String(p.text ?? "")} side={p.side}>

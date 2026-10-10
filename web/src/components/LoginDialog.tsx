@@ -3,6 +3,7 @@ import { ExternalLink, KeyRound } from "lucide-react"
 import { useEffect, useState } from "react"
 import { toast } from "@/lib/toast"
 import { api, desktop } from "@/lib/api"
+import { loginStarted } from "@/lib/login"
 import { useStatus } from "@/lib/queries"
 import { Button, Dialog, Field, Input } from "./ui"
 
@@ -43,6 +44,7 @@ export function LoginDialog({ open, onOpenChange }: { open: boolean; onOpenChang
             if (t) await submit(t)
             return
         }
+        loginStarted()
         window.open(url, "_blank", "noopener")
     }
 
