@@ -199,7 +199,7 @@ func New(hub *events.Hub, exits *lifecycle.Exits) *Checker {
 // which a download could need more than. Contexts bound every request.
 var defaultClient = &http.Client{
 	Transport: &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
+		Proxy:                 util.PublicProxy,
 		DialContext:           util.PublicDialContext(15 * time.Second),
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          10,

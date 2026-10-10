@@ -24,7 +24,7 @@ import (
 var proxyClient = &http.Client{
 	Timeout: 0, // streams can be long
 	Transport: &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
+		Proxy:                 util.PublicProxy,
 		DialContext:           util.PublicDialContext(15 * time.Second),
 		ResponseHeaderTimeout: 30 * time.Second,
 		MaxIdleConnsPerHost:   16,
@@ -48,7 +48,13 @@ func ProxyURL(target string, headers map[string]string) string {
 	return "/api/proxy?" + q.Encode()
 }
 
-var reURIAttr = regexp.MustCompile(`URI="([^"]+)"`)
+// A tag's URI, quoted or not (hls.js takes both).
+var reURIAttr = regexp.MustCompile(`URI=(?:"([^"]*)"|([^,"\s]+))`)
+
+// sameSiteHeaders are the headers a playlist's segments on another host
+// get: what a CDN may check, never a login (Authorization, Cookie…), which
+// is for the playlist's own host.
+var sameSiteHeaders = map[string]bool{"referer": true, "origin": true, "user-agent": true}
 
 // IsDocumentRequest reports a navigation or frame load. Proxied and cached
 // remote content is only ever loaded as media/images/XHR by the app, never
@@ -185,11 +191,22 @@ func ServeProxy(w http.ResponseWriter, r *http.Request) {
 func rewritePlaylist(body []byte, base *url.URL, headers map[string]string) []byte {
 	abs := func(ref string) string {
 		u, err := base.Parse(strings.TrimSpace(ref))
-		if err != nil {
-			return ref
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			return ""
 		}
-		return ProxyURL(u.String(), headers)
+		h := headers
+		if u.Scheme != base.Scheme || !strings.EqualFold(u.Host, base.Host) {
+			h = map[string]string{}
+			for k, v := range headers {
+				if sameSiteHeaders[strings.ToLower(k)] {
+					h[k] = v
+				}
+			}
+		}
+		return ProxyURL(u.String(), h)
 	}
+	// A lone CR ends a line too, for hls.js: a URL after one must be seen.
+	body = bytes.ReplaceAll(bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n")), []byte("\r"), []byte("\n"))
 	var out bytes.Buffer
 	sc := bufio.NewScanner(bytes.NewReader(body))
 	sc.Buffer(make([]byte, 64*1024), 4<<20)
@@ -202,7 +219,7 @@ func rewritePlaylist(body []byte, base *url.URL, headers map[string]string) []by
 		case strings.HasPrefix(trimmed, "#"):
 			out.WriteString(reURIAttr.ReplaceAllStringFunc(line, func(m string) string {
 				sub := reURIAttr.FindStringSubmatch(m)
-				return `URI="` + abs(sub[1]) + `"`
+				return `URI="` + abs(sub[1]+sub[2]) + `"`
 			}))
 		default:
 			out.WriteString(abs(trimmed))

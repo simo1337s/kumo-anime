@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -72,4 +73,55 @@ func PublicDialContext(timeout time.Duration) func(ctx context.Context, network,
 		}
 		return guarded.DialContext(ctx, network, addr)
 	}
+}
+
+// PublicProxy is http.ProxyFromEnvironment for the clients that may reach
+// only public addresses: through a proxy, the proxy connects to the host, not
+// this computer, so PublicDialContext never sees it; the host is checked
+// here instead (each request, redirects too).
+func PublicProxy(req *http.Request) (*url.URL, error) {
+	p, err := http.ProxyFromEnvironment(req)
+	if err != nil || p == nil {
+		return p, err
+	}
+	if err := CheckPublicHost(req.Context(), req.URL.Hostname()); err != nil {
+		return nil, err
+	}
+	// A request to a proxy names its Host as where to go, when it has one.
+	if req.Host != "" {
+		host := req.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		if err := CheckPublicHost(req.Context(), host); err != nil {
+			return nil, err
+		}
+	}
+	return p, nil
+}
+
+// CheckPublicHost fails for a host that is, or resolves to, a local or
+// private address. A name this computer can't resolve passes: the proxy
+// resolves it.
+func CheckPublicHost(ctx context.Context, host string) error {
+	host = strings.Trim(strings.ToLower(host), "[]")
+	if ip := net.ParseIP(host); ip != nil {
+		if IsPrivateIP(ip) {
+			return ErrPrivateAddress
+		}
+		return nil
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return ErrPrivateAddress
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil
+	}
+	for _, ip := range ips {
+		if IsPrivateIP(ip.IP) {
+			return ErrPrivateAddress
+		}
+	}
+	return nil
 }

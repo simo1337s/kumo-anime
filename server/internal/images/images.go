@@ -38,7 +38,7 @@ func New(dir string) *Cache {
 		dir: dir,
 		client: &http.Client{
 			Timeout:   30 * time.Second,
-			Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: util.PublicDialContext(10 * time.Second), MaxIdleConnsPerHost: 8},
+			Transport: &http.Transport{Proxy: util.PublicProxy, DialContext: util.PublicDialContext(10 * time.Second), MaxIdleConnsPerHost: 8},
 		},
 		inflight: map[string]chan struct{}{},
 		queue:    make(chan string, 4096),

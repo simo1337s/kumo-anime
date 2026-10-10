@@ -42,3 +42,29 @@ func TestRewritePlaylist(t *testing.T) {
 		}
 	}
 }
+
+// Every URL hls.js would load goes through the proxy (none left to load
+// from Kumo's own address), and a login header stays with its host.
+func TestRewritePlaylistLeavesNothingOut(t *testing.T) {
+	base, _ := url.Parse("https://cdn.example.com/hls/index.m3u8")
+	h := map[string]string{"Referer": "https://site.example/", "Authorization": "Bearer secret"}
+	in := "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=http://127.0.0.1:43211/api/settings\n#EXT-X-MAP:URI=http://192.168.1.1/init.mp4\n#EXTINF:4.0,\rhttp://127.0.0.1:43211/api/x\nseg.ts\nhttps://evil.example/seg.ts\njavascript:alert(1)\n"
+	out := string(rewritePlaylist([]byte(in), base, h))
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" || strings.HasPrefix(line, "#EXTM3U") || strings.HasPrefix(line, "#EXTINF") {
+			continue
+		}
+		if !strings.Contains(line, "/api/proxy?") && line != "" {
+			t.Errorf("not proxied: %q", line)
+		}
+	}
+	if strings.Contains(out, "127.0.0.1") || strings.Contains(out, "javascript") {
+		t.Errorf("a raw URL is left:\n%s", out)
+	}
+	if !strings.Contains(out, ProxyURL("https://cdn.example.com/hls/seg.ts", h)) {
+		t.Errorf("the playlist's host lost its headers:\n%s", out)
+	}
+	if !strings.Contains(out, ProxyURL("https://evil.example/seg.ts", map[string]string{"Referer": "https://site.example/"})) {
+		t.Errorf("another host got the login, or lost the Referer:\n%s", out)
+	}
+}

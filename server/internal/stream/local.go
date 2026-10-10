@@ -594,8 +594,13 @@ func (l *Local) ServeSubtitle(w http.ResponseWriter, r *http.Request, path strin
 	}
 	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
 	if external != "" {
+		// One of the video's own subtitle files (externalSubs): next to
+		// it, named after it, and a file, not a link to elsewhere.
 		ext := filepath.Clean(external)
-		if filepath.Dir(ext) != filepath.Dir(path) || !library.SubtitleExtensions[strings.ToLower(filepath.Ext(ext))] {
+		base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		fi, err := os.Lstat(ext)
+		if filepath.Dir(ext) != filepath.Dir(path) || !library.SubtitleExtensions[strings.ToLower(filepath.Ext(ext))] ||
+			!strings.HasPrefix(filepath.Base(ext), base) || err != nil || !fi.Mode().IsRegular() {
 			http.Error(w, "invalid subtitle", http.StatusForbidden)
 			return
 		}

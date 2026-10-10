@@ -27,3 +27,24 @@ func TestSequelMarkers(t *testing.T) {
 		}
 	}
 }
+
+// File names from titles: never a path out of the folder, nor one of
+// Windows' device names.
+func TestSanitizeFilename(t *testing.T) {
+	for in, want := range map[string]string{
+		"Re:Zero":       "Re：Zero",
+		"../../.bashrc": "_.._.bashrc",
+		`..\..\win.ini`: "_.._win.ini",
+		"/etc/passwd":   "_etc_passwd",
+		"....":          "untitled",
+		"CON":           "_CON",
+		"nul.txt":       "_nul.txt",
+		"Com1":          "_Com1",
+		"Console Wars":  "Console Wars",
+		"LPT10":         "LPT10",
+	} {
+		if got := SanitizeFilename(in); got != want {
+			t.Errorf("SanitizeFilename(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

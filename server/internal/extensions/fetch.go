@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	pathpkg "path"
 	"strings"
 	"time"
 
@@ -27,15 +28,28 @@ type Fetcher struct {
 	follow   *req.Client
 	noFollow *req.Client
 	plain    *req.Client
-	// AllowedDomains restricts plugin requests (nil = any public host).
-	AllowedDomains []string
+	// AllowedDomains restricts plugin requests (nil = any public host), and
+	// ReadOnlyDomains are more hosts it may read from (GET, HEAD).
+	AllowedDomains  []string
+	ReadOnlyDomains []string
 }
 
 var errPrivateAddress = util.ErrPrivateAddress
 
 func isPrivateIP(ip net.IP) bool { return util.IsPrivateIP(ip) }
 
-func NewFetcher() *Fetcher {
+// NewFetcher makes the fetcher of one extension: its own cookies, which no
+// other extension's requests send.
+func NewFetcher() *Fetcher { return newFetcher(nil, nil) }
+
+// NewPluginFetcher makes a plugin's fetcher, which may reach only those
+// domains (and read from the read-only ones), redirects included.
+func NewPluginFetcher(domains, readOnly []string) *Fetcher {
+	return newFetcher(append([]string{}, domains...), readOnly)
+}
+
+func newFetcher(domains, readOnly []string) *Fetcher {
+	f := &Fetcher{AllowedDomains: domains, ReadOnlyDomains: readOnly}
 	mk := func(impersonate bool, redirects bool) *req.Client {
 		c := req.C().SetTimeout(35 * time.Second)
 		if impersonate {
@@ -44,22 +58,41 @@ func NewFetcher() *Fetcher {
 			c = c.SetUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
 		}
 		c.SetDial(util.PublicDialContext(15 * time.Second))
+		c.SetProxy(util.PublicProxy)
+		// The body is read by Do, up to its limit (not all of it first).
+		c.DisableAutoReadResponse()
 		if !redirects {
 			c.SetRedirectPolicy(req.NoRedirectPolicy())
+		} else {
+			c.SetRedirectPolicy(req.MaxRedirectPolicy(10), func(r *http.Request, _ []*http.Request) error {
+				return f.allowed(r.URL, r.Method)
+			})
 		}
 		return c
 	}
-	return &Fetcher{follow: mk(true, true), noFollow: mk(true, false), plain: mk(false, true)}
+	f.follow, f.noFollow, f.plain = mk(true, true), mk(true, false), mk(false, true)
+	return f
 }
 
-// WithDomains returns a copy restricted to the given domains.
-func (f *Fetcher) WithDomains(domains []string) *Fetcher {
-	c := *f
-	c.AllowedDomains = domains
-	return &c
+// allowed checks a URL (a redirect's too) against what the extension may
+// reach.
+func (f *Fetcher) allowed(u *url.URL, method string) error {
+	if ip := net.ParseIP(u.Hostname()); ip != nil && isPrivateIP(ip) {
+		return errPrivateAddress
+	}
+	if strings.EqualFold(u.Hostname(), "localhost") {
+		return errPrivateAddress
+	}
+	if domainAllowed(u, f.AllowedDomains) {
+		return nil
+	}
+	if (method == http.MethodGet || method == http.MethodHead) && domainAllowed(u, f.ReadOnlyDomains) {
+		return nil
+	}
+	return fmt.Errorf("network access to %s is not allowed for this plugin", u.Hostname())
 }
 
-// Hosts every plugin may reach, whatever its manifest allows.
+// Hosts every plugin may read from (GET), whatever its manifest allows.
 var builtinPluginDomains = []string{
 	"api.github.com", "raw.githubusercontent.com", "shikimori.one", "anilist.co", "graphql.anilist.co",
 	"myanimelist.net", "*.myanimelist.net", "trakt.tv", "*.trakt.tv", "kitsu.io",
@@ -100,7 +133,9 @@ func domainAllowed(u *url.URL, rules []string) bool {
 		if path == "" || path == "/" {
 			return true
 		}
-		if strings.HasSuffix(path, "/") && strings.HasPrefix(u.Path, path) || u.Path == path {
+		// As the server will read it: /api/../admin is /admin.
+		p := pathpkg.Clean("/" + u.Path)
+		if strings.HasSuffix(path, "/") && strings.HasPrefix(p+"/", path) || p == path {
 			return true
 		}
 	}
@@ -134,14 +169,12 @@ func (f *Fetcher) Do(ctx context.Context, fr fetchRequest) (*fetchResponse, erro
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return nil, fmt.Errorf("invalid URL %q", fr.url)
 	}
-	if ip := net.ParseIP(u.Hostname()); ip != nil && isPrivateIP(ip) {
-		return nil, errPrivateAddress
+	method := strings.ToUpper(fr.method)
+	if method == "" {
+		method = http.MethodGet
 	}
-	if strings.EqualFold(u.Hostname(), "localhost") {
-		return nil, errPrivateAddress
-	}
-	if !domainAllowed(u, f.AllowedDomains) {
-		return nil, fmt.Errorf("network access to %s is not allowed for this plugin", u.Hostname())
+	if err := f.allowed(u, method); err != nil {
+		return nil, err
 	}
 	client := f.follow
 	if fr.redirect == "manual" || fr.redirect == "error" {
@@ -157,6 +190,11 @@ func (f *Fetcher) Do(ctx context.Context, fr fetchRequest) (*fetchResponse, erro
 	defer cancel()
 	r := client.R().SetContext(ctx)
 	for k, v := range fr.headers {
+		// The host is the URL's: another one could take the request to
+		// another site (through a proxy, a local one).
+		if strings.EqualFold(k, "Host") {
+			continue
+		}
 		r.SetHeader(k, v)
 	}
 	if fr.body != nil {
@@ -164,10 +202,6 @@ func (f *Fetcher) Do(ctx context.Context, fr fetchRequest) (*fetchResponse, erro
 		if fr.ctype != "" {
 			r.SetHeader("Content-Type", fr.ctype)
 		}
-	}
-	method := strings.ToUpper(fr.method)
-	if method == "" {
-		method = http.MethodGet
 	}
 	resp, err := r.Send(method, fr.url)
 	if err != nil {

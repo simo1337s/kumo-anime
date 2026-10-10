@@ -174,3 +174,41 @@ func TestGoneError(t *testing.T) {
 		t.Errorf("drive gone: %v", err)
 	}
 }
+
+// A video's subtitle files are served (next to it, named after it), not
+// another file there, nor a link to one elsewhere.
+func TestExternalSubtitleIsTheVideos(t *testing.T) {
+	l, video := newTestLocal(t, "")
+	dir := filepath.Dir(video)
+	base := strings.TrimSuffix(filepath.Base(video), filepath.Ext(video))
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	own := write(base+".en.srt", "1\n00:00:01,000 --> 00:00:02,000\nHello\n")
+	other := write("notes.srt", "secret")
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("OUTSIDE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, base+".ja.srt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skip("no symlinks here")
+	}
+	get := func(external string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		l.ServeSubtitle(w, httptest.NewRequest("GET", "/", nil), video, 0, external)
+		return w
+	}
+	if w := get(own); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Hello") {
+		t.Errorf("the video's subtitles: %d %q", w.Code, w.Body)
+	}
+	for _, p := range []string{other, link, filepath.Join(dir, "..", filepath.Base(dir), "notes.srt")} {
+		if w := get(p); w.Code == http.StatusOK {
+			t.Errorf("%s served: %q", p, w.Body)
+		}
+	}
+}

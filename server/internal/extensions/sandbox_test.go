@@ -237,13 +237,12 @@ function init() {
 	if report["leakedGlobals"] != "" {
 		t.Errorf("host globals visible to plugin code: %s", report["leakedGlobals"])
 	}
-	if manga, _ := storeRaw(m.store("noscope"), "manga"); !strings.Contains(manga, "MediaListCollection") {
+	// The user's lists need the "anilist" permission too.
+	if manga, _ := storeRaw(m.store("noscope"), "manga"); strings.Contains(manga, "MediaListCollection") || !strings.Contains(manga, "permission") {
 		t.Errorf("ctx.manga.getCollection() = %s", manga)
 	}
 	for _, c := range rec.Calls() {
-		if !strings.HasPrefix(c, "collection:") {
-			t.Errorf("unexpected host call without permission: %s", c)
-		}
+		t.Errorf("unexpected host call without permission: %s", c)
 	}
 }
 
