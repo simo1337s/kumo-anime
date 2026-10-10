@@ -2,6 +2,8 @@ module github.com/simo1337s/animetest/server
 
 go 1.26.0
 
+toolchain go1.26.9
+
 require (
 	github.com/5rahim/habari v0.1.12
 	github.com/Microsoft/go-winio v0.6.2
