@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 	"testing/fstest"
+	"time"
 
 	"github.com/simo1337s/animetest/server/internal/app"
 )
