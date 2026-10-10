@@ -444,6 +444,11 @@ func (m *Manager) applyTrackPrefs(s *Session, mpv *Mpv, w *trackWatch) {
 	if mode == "" && cfg.AniCli.DefaultMode == "dub" {
 		mode = "dub"
 	}
+	// An audio track picked before a sub/dub choice that doesn't fit it (and
+	// the subtitles picked with it) gives way to the choice.
+	if prefs != nil && (prefs.AudioLang != "" || prefs.AudioTitle != "") && PickByMode(tracks, mode).HasAudio && !AudioFitsMode(prefs.AudioLang, prefs.AudioTitle, mode) {
+		prefs = nil
+	}
 	handAudio := prefs != nil && (prefs.AudioLang != "" || prefs.AudioTitle != "" || prefs.AudioIndex > 0)
 	handSub := prefs != nil && (prefs.SubOff || prefs.SubLang != "" || prefs.SubTitle != "" || prefs.SubIndex > 0)
 	if mode != "" && s.Source == "local" && !handAudio {

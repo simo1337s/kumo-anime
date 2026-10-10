@@ -2,14 +2,15 @@ package api
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/simo1337s/animetest/server/internal/player"
 )
 
 // The sub/dub choice is remembered per anime (the streamMode of its track
 // prefs) and used everywhere: streaming, "continue watching", next episode,
-// and the audio track of local files.
+// and the audio track of local files. Only what's picked is remembered
+// (Sub/Dub buttons, the audio track in the player); the rest follows the
+// default, which is the last choice.
 
 func (s *Server) defaultLanguageMode() string {
 	if s.app.Settings.Get().AniCli.DefaultMode == "dub" {
@@ -33,9 +34,6 @@ func (s *Server) setLanguageMode(mediaID int, mode string) error {
 	if mode != "sub" && mode != "dub" {
 		return badRequest(`mode must be "sub" or "dub"`)
 	}
-	if err := s.followLanguage(mode); err != nil {
-		return err
-	}
 	p := s.app.Player.Tracks.Get(mediaID)
 	if p == nil {
 		p = &player.TrackPrefs{MediaID: mediaID}
@@ -44,7 +42,7 @@ func (s *Server) setLanguageMode(mediaID int, mode string) error {
 		return nil
 	}
 	p.StreamMode = mode
-	if (p.AudioLang != "" || p.AudioTitle != "" || p.AudioIndex > 0) && !audioFitsMode(p.AudioLang, p.AudioTitle, mode) {
+	if (p.AudioLang != "" || p.AudioTitle != "" || p.AudioIndex > 0) && !player.AudioFitsMode(p.AudioLang, p.AudioTitle, mode) {
 		p.AudioLang, p.AudioTitle, p.AudioIndex = "", "", 0
 		p.SubLang, p.SubTitle, p.SubIndex, p.SubOff = "", "", 0, false
 	}
@@ -61,17 +59,6 @@ func (s *Server) followLanguage(mode string) error {
 	cfg.AniCli.DefaultMode = mode
 	_, err := s.app.Settings.Save(cfg)
 	return err
-}
-
-// audioFitsMode reports whether an audio track (by language tag or title)
-// matches sub (original audio) or dub (English) mode.
-func audioFitsMode(lang, title, mode string) bool {
-	l, t := strings.ToLower(strings.TrimSpace(lang)), strings.ToLower(title)
-	english := l == "eng" || l == "en" || strings.Contains(t, "english") || strings.Contains(t, "dub")
-	if mode == "dub" {
-		return english
-	}
-	return !english
 }
 
 func (s *Server) getLanguage(r *http.Request) (any, error) {
@@ -95,6 +82,10 @@ func (s *Server) putLanguage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	if err := s.setLanguageMode(id, body.Mode); err != nil {
+		return nil, err
+	}
+	// Picked: the default for the anime without a choice too.
+	if err := s.followLanguage(body.Mode); err != nil {
 		return nil, err
 	}
 	return map[string]any{"mode": body.Mode, "saved": true}, nil

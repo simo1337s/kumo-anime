@@ -38,7 +38,7 @@ export function MediaCard({ media, listEntry, localCount, downloaded, className,
     const score = media.meanScore ?? media.averageScore
 
     const card = (
-        <Link to={entryUrl(media)} className={cn("group/card focus-ring relative flex flex-col gap-2.5 rounded-lg outline-none", !menu && className)}>
+        <Link to={entryUrl(media)} data-tv-card className={cn("group/card focus-ring relative flex flex-col gap-2.5 rounded-lg outline-none", !menu && className)}>
             <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-surface-2">
                 {cover(media) && (
                     <img
@@ -50,7 +50,7 @@ export function MediaCard({ media, listEntry, localCount, downloaded, className,
                     />
                 )}
                 {/* A hairline, so dark covers don't melt into the page. */}
-                <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-white/[0.07] transition-[box-shadow] duration-300 ring-inset group-hover/card:ring-white/20" />
+                <div data-tv-ring className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-white/[0.07] transition-[box-shadow] duration-300 ring-inset group-hover/card:ring-white/20" />
 
                 <div className="absolute top-2 left-2 flex flex-col items-start gap-1">
                     {behind > 0 && <span className="rounded bg-brand px-1.5 py-0.5 text-[11px] font-semibold text-white">{behind} new</span>}

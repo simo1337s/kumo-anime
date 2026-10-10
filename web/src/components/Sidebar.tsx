@@ -147,7 +147,8 @@ export function Sidebar() {
 
     return (
         <aside className={cn("relative z-40 flex h-full shrink-0 flex-col py-3", wide ? "w-56 px-3" : "w-16 items-center px-2")}>
-            <button onClick={() => navigate("/")} className={cn("focus-ring mb-4 flex h-10 items-center gap-2.5 rounded-md", wide ? "px-2" : "justify-center")} aria-label="Kumo home">
+            {/* Home is the first link below: the remote skips this one. */}
+            <button onClick={() => navigate("/")} data-tv-skip-nav className={cn("focus-ring mb-4 flex h-10 items-center gap-2.5 rounded-md", wide ? "px-2" : "justify-center")} aria-label="Kumo home">
                 <KumoLogo className="size-7" />
                 {wide && <KumoWordmark className="h-[18px] w-auto text-fg" />}
             </button>

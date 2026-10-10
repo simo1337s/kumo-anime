@@ -112,16 +112,23 @@ function scope(): HTMLElement {
     return document.body
 }
 
-function candidates(root: HTMLElement): HTMLElement[] {
+function candidates(root: HTMLElement, current: Element | null = null): HTMLElement[] {
     return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(el => {
         if (el.closest('[aria-hidden="true"], [inert], [data-tv-skip-nav]')) return false
         const r = el.getBoundingClientRect()
         if (r.width < 2 || r.height < 2) return false
         const cs = getComputedStyle(el)
         if (cs.visibility === "hidden" || cs.display === "none") return false
-        // Shown only on mouse hover (a card's extra buttons): not on a TV.
         for (let n: HTMLElement | null = el; n && n !== root; n = n.parentElement) {
-            if (getComputedStyle(n).opacity === "0") return false
+            const ns = getComputedStyle(n)
+            // Shown only on mouse hover (a card's extra buttons): not on a TV.
+            if (ns.opacity === "0") return false
+            // Scrolled out of a row (or a list) the focus isn't in: as far
+            // as the remote goes, it isn't there. In it, it's next in line.
+            if (n !== el && (ns.overflowX !== "visible" || ns.overflowY !== "visible") && !(current && n.contains(current))) {
+                const b = n.getBoundingClientRect()
+                if (r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom) return false
+            }
         }
         return true
     })
@@ -130,7 +137,9 @@ function candidates(root: HTMLElement): HTMLElement[] {
 // The area something is in: a menu at the side (the app's, a page's), or
 // the page. Up and Down stay in it while they can.
 const AREAS = "aside, nav, [role=dialog], [data-tv-scope], main"
-const areaOf = (el: Element | null) => el?.closest(AREAS) ?? null
+// The app's sidebar (Sidebar.tsx), not a page's: one area.
+const inSidebar = (el: Element | null) => !!el?.closest("aside") && !el.closest("main")
+const areaOf = (el: Element | null) => (inSidebar(el) ? el!.closest("aside") : (el?.closest(AREAS) ?? null))
 
 // The nearest candidate in a direction: the closest along it, much
 // preferring those in line with the focused one (the same row or column).
@@ -171,8 +180,14 @@ function nearest(from: DOMRect, dir: Dir, cands: HTMLElement[], current: Element
                 across = gap(from.left, from.right, r.left, r.right)
                 offset = Math.abs(cx - fx)
         }
+        const otherArea = areaOf(el) !== area
+        // Left and Right stay in the row: at its end they go nowhere, unless
+        // to another area (the sidebar).
+        if ((dir === "left" || dir === "right") && across > 0 && !otherArea) continue
+        // Up and Down never go between the app's sidebar and the page.
+        if ((dir === "up" || dir === "down") && inSidebar(el) !== inSidebar(current)) continue
         let score = along + across * 0.6 + offset * 0.1
-        if ((dir === "up" || dir === "down") && areaOf(el) !== area) score += 100000
+        if ((dir === "up" || dir === "down") && otherArea) score += 100000
         if (score < bestScore) {
             bestScore = score
             best = el
@@ -220,11 +235,16 @@ export function focusEl(el: HTMLElement) {
 
 // move moves the focus in a direction; false when there's nowhere to go.
 export function move(dir: Dir, root: HTMLElement = scope()): boolean {
-    const cands = candidates(root)
     const current = document.activeElement as HTMLElement | null
+    const cands = candidates(root, current)
     const inside = current && current !== document.body && root.contains(current) && cands.includes(current)
-    const next = inside ? nearest(current!.getBoundingClientRect(), dir, cands, current) : first(cands)
+    let next = inside ? nearest(current!.getBoundingClientRect(), dir, cands, current) : first(cands)
     if (!next) return false
+    // Into the sidebar: at the page that's open.
+    if (inSidebar(next) && !inSidebar(current)) {
+        const open = cands.find(el => inSidebar(el) && el.getAttribute("aria-current") === "page")
+        if (open) next = open
+    }
     focusEl(next)
     return true
 }

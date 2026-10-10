@@ -571,15 +571,6 @@ func (s *Server) osEpisodes(r *http.Request) (any, error) {
 	}
 	q := r.URL.Query()
 	dub := q.Get("dub") == "1" || q.Get("dub") == "true"
-	// only: the provider has no other version, which is no choice of the
-	// user's (the mode is also local files' audio).
-	if mode := q.Get("dub"); mode != "" && q.Get("only") != "1" {
-		mm := "sub"
-		if dub {
-			mm = "dub"
-		}
-		_ = s.setLanguageMode(media.ID, mm)
-	}
 	return s.app.Stream.Episodes(r.Context(), util2(q.Get("provider"), stream.AniCliProvider), media, dub, q.Get("refresh") == "1")
 }
 
@@ -624,13 +615,6 @@ func (s *Server) osSources(r *http.Request) (any, error) {
 	res, err := s.app.Stream.Sources(r.Context(), util2(q.Get("provider"), stream.AniCliProvider), media, ep, dub, q.Get("server"), q.Get("quality"))
 	if err != nil {
 		return nil, err
-	}
-	if q.Get("dub") != "" { // playing in the in-app player: remember the choice
-		mode := "sub"
-		if dub {
-			mode = "dub"
-		}
-		_ = s.setLanguageMode(media.ID, mode)
 	}
 	// Only the in-app player asks for sources, when it opens an episode: a
 	// new viewing, which may update progress again (rewatch).
@@ -720,7 +704,6 @@ func (s *Server) osPlay(r *http.Request) (any, error) {
 	if body.Dub {
 		mode = "dub"
 	}
-	_ = s.setLanguageMode(media.ID, mode)
 	title := fmt.Sprintf("%s — Episode %s [%s]", media.PreferredTitle(), strconv.FormatFloat(body.Episode, 'f', -1, 64), strings.ToUpper(mode))
 	return s.app.Player.PlayMpv(player.PlayRequest{
 		MediaID: media.ID, Episode: int(body.Episode), Title: title, Source: source, Target: src.URL,

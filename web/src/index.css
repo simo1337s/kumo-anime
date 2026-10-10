@@ -232,7 +232,24 @@ video::cue {
    the room. */
 html.tv :focus {
     outline: 3px solid var(--brand) !important;
-    outline-offset: 3px !important;
+    outline-offset: 1px !important;
+}
+/* Only that: not also the ring keyboards get (focus-ring). */
+html.tv .focus-ring:focus-visible {
+    box-shadow: none;
+}
+/* A card lights up its cover, from the inside: a row that scrolls sideways
+   cuts off anything around it. */
+html.tv [data-tv-card]:focus {
+    outline: none !important;
+}
+html.tv [data-tv-card]:focus [data-tv-ring] {
+    box-shadow:
+        inset 0 0 0 3px var(--brand),
+        inset 0 0 0 5px rgb(0 0 0 / 0.4) !important;
+}
+html.tv [data-tv-card]:focus img {
+    filter: brightness(1.12);
 }
 html.tv [data-tv-scope]:focus,
 html.tv #main-scroll:focus {

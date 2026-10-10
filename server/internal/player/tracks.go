@@ -28,7 +28,31 @@ type TrackPrefs struct {
 
 type TrackStore struct{ db *db.DB }
 
-func NewTrackStore(d *db.DB) *TrackStore { return &TrackStore{db: d} }
+func NewTrackStore(d *db.DB) *TrackStore {
+	s := &TrackStore{db: d}
+	s.forgetUnchosenModes()
+	return s
+}
+
+// forgetUnchosenModes forgets, once, the sub/dub of every anime: Kumo used
+// to save it whenever an episode played, also when it wasn't chosen (the
+// only version there was, the default of the time), and those kept anime
+// from following the default. It's saved when it's picked now.
+func (s *TrackStore) forgetUnchosenModes() {
+	const key = "track-prefs:modes-chosen"
+	if done, _ := s.db.GetKV(key, new(bool)); done {
+		return
+	}
+	if _, err := s.db.Write(`UPDATE track_prefs SET stream_mode = ''`); err == nil {
+		_ = s.db.SetKV(key, true)
+	}
+}
+
+// AudioFitsMode reports whether an audio track (by language tag or title)
+// is the one for sub (original audio) or dub (English).
+func AudioFitsMode(lang, title, mode string) bool {
+	return IsEnglishTrack(lang, title) == (mode == "dub")
+}
 
 func (s *TrackStore) Get(mediaID int) *TrackPrefs {
 	var p TrackPrefs

@@ -280,7 +280,8 @@ function Hero({ item, count, index, onIndex, loading, toolbar }: { item: Continu
                 ) : item ? (
                     <div key={item.media.id} className="max-w-3xl rise-in">
                         <p className="text-sm font-medium text-white/65">Continue watching</p>
-                        <Link to={`/entry?id=${item.media.id}`} className="mt-1.5 block text-4xl leading-[1.1] font-semibold tracking-tight text-white transition-colors hover:text-white/85 md:text-[2.75rem]">
+                        {/* On a TV the cards below are what's picked (the banner follows them). */}
+                        <Link to={`/entry?id=${item.media.id}`} data-tv-skip-nav className="mt-1.5 block text-4xl leading-[1.1] font-semibold tracking-tight text-white transition-colors hover:text-white/85 md:text-[2.75rem]">
                             {title(item.media)}
                         </Link>
                     </div>
@@ -292,7 +293,7 @@ function Hero({ item, count, index, onIndex, loading, toolbar }: { item: Continu
                 )}
             </div>
             {count > 1 && (
-                <div className="absolute right-4 bottom-28 z-20 flex items-center gap-3 md:right-8 xl:right-10">
+                <div data-tv-skip-nav className="absolute right-4 bottom-28 z-20 flex items-center gap-3 md:right-8 xl:right-10">
                     <div className="flex gap-1.5">
                         {Array.from({ length: Math.min(count, 8) }).map((_, i) => (
                             <button
@@ -360,7 +361,7 @@ function ContinueRow({ items, onFocus }: { items: ContinueItem[]; onFocus: (i: n
     return (
         <div ref={ref} className="no-scrollbar -mx-2 flex snap-x scroll-px-2 gap-5 overflow-x-auto px-2 pb-2">
             {items.map((it, i) => (
-                <div key={it.media.id} className="w-[min(82vw,400px)] shrink-0 snap-start" onMouseEnter={() => onFocus(i)}>
+                <div key={it.media.id} className="w-[min(82vw,400px)] shrink-0 snap-start" onMouseEnter={() => onFocus(i)} onFocus={() => onFocus(i)}>
                     <EpisodeCard
                         large
                         image={it.image}
@@ -379,6 +380,7 @@ function ContinueRow({ items, onFocus }: { items: ContinueItem[]; onFocus: (i: n
                         resumeAt={it.resumeAt}
                         onClick={() => play(it)}
                         onRemove={() => remove(it, i)}
+                        onInfo={() => navigate(`/entry?id=${it.media.id}`)}
                     />
                 </div>
             ))}
@@ -407,7 +409,7 @@ function GenreBar({ genres, value, onChange }: { genres: string[]; value: string
                     </button>
                 ))}
             </div>
-            <button onClick={() => ref.current?.scrollBy({ left: 400, behavior: "smooth" })} className="ml-2 grid size-8 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-white/[0.06] hover:text-fg">
+            <button onClick={() => ref.current?.scrollBy({ left: 400, behavior: "smooth" })} data-tv-skip-nav aria-label="More genres" className="ml-2 grid size-8 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-white/[0.06] hover:text-fg">
                 <ChevronRight className="size-4" />
             </button>
         </div>

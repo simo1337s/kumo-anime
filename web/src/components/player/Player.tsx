@@ -152,8 +152,17 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                     // Sub/dub chosen for this anime (or a "dub" default) picks the
                     // audio of dual-audio files, unless a track was picked by hand.
                     const mode = p?.streamMode || (settings?.aniCli.defaultMode === "dub" ? "dub" : "")
-                    const handAudio = !!(settings?.playback.rememberTracks && p && (p.audioLang || p.audioTitle || p.audioIndex))
-                    const handSub = !!(settings?.playback.rememberTracks && p && (p.subOff || p.subLang || p.subTitle || p.subIndex))
+                    let handAudio = !!(settings?.playback.rememberTracks && p && (p.audioLang || p.audioTitle || p.audioIndex))
+                    let handSub = !!(settings?.playback.rememberTracks && p && (p.subOff || p.subLang || p.subTitle || p.subIndex))
+                    // An audio track picked before a sub/dub choice that doesn't
+                    // fit it (and the subtitles picked with it) gives way to the
+                    // choice, in a file that has both.
+                    const english = (a: { lang: string; title: string }) => isEnglishTrack(a.lang, a.title)
+                    const dual = audio.some(english) && audio.some(a => !english(a))
+                    if (handAudio && p && mode && dual && (p.audioLang || p.audioTitle) && isEnglishTrack(p.audioLang, p.audioTitle) !== (mode === "dub")) {
+                        handAudio = false
+                        handSub = false
+                    }
                     let modeAudio = false
                     if (handAudio && p) {
                         const m =
@@ -210,7 +219,7 @@ function Player({ req, onClose }: { req: PlayerRequest; onClose: () => void }) {
                         const full = subOpts.find(o => !o.bitmap && (langIn(o.lang, "eng,en") || /english/i.test(o.title)) && !/sign|song|forced/i.test(o.title))
                         setSubKey(full ? full.key : pickSub(subOpts, null, settings?.playback.preferredSubLang ?? "", (res.probe.subtitles ?? []).find(s => s.default)?.typeIndex))
                     } else {
-                        setSubKey(pickSub(subOpts, p, settings?.playback.preferredSubLang ?? "", (res.probe.subtitles ?? []).find(s => s.default)?.typeIndex))
+                        setSubKey(pickSub(subOpts, handSub ? p : null, settings?.playback.preferredSubLang ?? "", (res.probe.subtitles ?? []).find(s => s.default)?.typeIndex))
                     }
                 } else {
                     const res = await api.get<{ sources: StreamSource[]; resumeAt: number; tracks: TrackPrefs | null; title: string }>(

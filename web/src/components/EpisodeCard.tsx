@@ -1,4 +1,4 @@
-import { Check, CheckCheck, Clock, HardDrive, Minus, Play } from "lucide-react"
+import { Check, CheckCheck, Clock, HardDrive, Info, Minus, Play } from "lucide-react"
 import { cn, formatDuration, img } from "@/lib/utils"
 import { Tooltip } from "./ui"
 
@@ -18,14 +18,16 @@ type Props = {
     onClick?: () => void
     actions?: React.ReactNode
     onRemove?: () => void // "Continue watching": removes the card's item
+    onInfo?: () => void // "Continue watching": opens the anime's page
     className?: string
 }
 
-export function EpisodeCard({ image, number, title, subtitle, runtime, watched, hasFile, progress, resumeAt, aired = true, blur, large, onClick, actions, onRemove, className }: Props) {
+export function EpisodeCard({ image, number, title, subtitle, runtime, watched, hasFile, progress, resumeAt, aired = true, blur, large, onClick, actions, onRemove, onInfo, className }: Props) {
     return (
         <div
             role="button"
             tabIndex={0}
+            data-tv-card
             onClick={e => {
                 // Menus open in portals outside the card, but React still
                 // bubbles their clicks up to here: "Play in mpv" from the
@@ -56,7 +58,7 @@ export function EpisodeCard({ image, number, title, subtitle, runtime, watched, 
                 ) : (
                     <div className="grid size-full place-items-center bg-surface-3 text-3xl font-semibold text-white/15 tabular-nums">{number}</div>
                 )}
-                <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-white/[0.07] transition-[box-shadow] duration-300 ring-inset group-hover/ep:ring-white/20" />
+                <div data-tv-ring className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-white/[0.07] transition-[box-shadow] duration-300 ring-inset group-hover/ep:ring-white/20" />
                 {aired && (
                     <div className="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-200 group-hover/ep:opacity-100">
                         <span className={cn("grid place-items-center rounded-full bg-white/95 text-neutral-950 shadow-lg shadow-black/40", large ? "size-14" : "size-11")}>
@@ -85,22 +87,31 @@ export function EpisodeCard({ image, number, title, subtitle, runtime, watched, 
                         {actions}
                     </div>
                 )}
-                {onRemove && (
+                {(onRemove || onInfo) && (
                     <div
                         // On hover, and always on touch screens, which can't hover.
-                        className="absolute top-2 right-2 opacity-0 transition-opacity group-hover/ep:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+                        className="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-hover/ep:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
                         onClick={e => e.stopPropagation()}
                         onKeyDown={e => e.stopPropagation()}
                     >
-                        <Tooltip content="Remove from Continue watching">
-                            <button
-                                aria-label="Remove from Continue watching"
-                                onClick={onRemove}
-                                className="focus-ring grid size-7 place-items-center rounded-md bg-black/70 text-white transition-colors hover:bg-black/85"
-                            >
-                                <Minus className="size-4" />
-                            </button>
-                        </Tooltip>
+                        {onInfo && (
+                            <Tooltip content="Anime page">
+                                <button aria-label="Anime page" onClick={onInfo} className="focus-ring grid size-7 place-items-center rounded-md bg-black/70 text-white transition-colors hover:bg-black/85">
+                                    <Info className="size-4" />
+                                </button>
+                            </Tooltip>
+                        )}
+                        {onRemove && (
+                            <Tooltip content="Remove from Continue watching">
+                                <button
+                                    aria-label="Remove from Continue watching"
+                                    onClick={onRemove}
+                                    className="focus-ring grid size-7 place-items-center rounded-md bg-black/70 text-white transition-colors hover:bg-black/85"
+                                >
+                                    <Minus className="size-4" />
+                                </button>
+                            </Tooltip>
+                        )}
                     </div>
                 )}
                 {resumeAt !== undefined && resumeAt > 0 && (
