@@ -2,7 +2,9 @@ package app.kumo;
 
 import android.app.Activity;
 import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageInstaller;
 import android.net.Uri;
 import android.os.Build;
@@ -14,6 +16,8 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 
 /**
  * Installs an update: the APK of a newer Kumo, which the server downloaded
@@ -23,7 +27,31 @@ import java.io.OutputStream;
 final class Installer {
     static final String ACTION = "app.kumo.INSTALL_STATUS";
 
+    // The answer carries a secret only this app knows (other apps can start
+    // MainActivity with ACTION too).
+    private static final String EXTRA_SECRET = "app.kumo.SECRET";
+
     private Installer() {
+    }
+
+    /** Whether an install answer comes from an install Kumo asked for. */
+    static boolean isOurs(Context ctx, Intent intent) {
+        String got = intent.getStringExtra(EXTRA_SECRET);
+        return got != null && MessageDigest.isEqual(got.getBytes(), secret(ctx).getBytes());
+    }
+
+    private static synchronized String secret(Context ctx) {
+        SharedPreferences prefs = ctx.getSharedPreferences("kumo", Context.MODE_PRIVATE);
+        String s = prefs.getString("install-secret", null);
+        if (s == null) {
+            byte[] b = new byte[16];
+            new SecureRandom().nextBytes(b);
+            StringBuilder hex = new StringBuilder();
+            for (byte x : b) hex.append(String.format("%02x", x));
+            s = hex.toString();
+            prefs.edit().putString("install-secret", s).commit();
+        }
+        return s;
     }
 
     static void install(Activity a, String path) {
@@ -65,7 +93,8 @@ final class Installer {
                 while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
                 session.fsync(out);
             }
-            Intent back = new Intent(a, MainActivity.class).setAction(ACTION).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            Intent back = new Intent(a, MainActivity.class).setAction(ACTION).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra(EXTRA_SECRET, secret(a));
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             // The installer adds the result to it.
             if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;

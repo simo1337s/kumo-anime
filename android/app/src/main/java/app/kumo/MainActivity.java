@@ -22,6 +22,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -206,6 +207,11 @@ public class MainActivity extends Activity {
                     return;
                 }
                 showMessage("Starting Kumo…", false);
+                // The cookie that proves the WebView is Kumo's (KumoServer.token).
+                CookieManager cookies = CookieManager.getInstance();
+                cookies.setAcceptCookie(true);
+                cookies.setCookie(KumoServer.URL, "kumo_shell=" + server.token() + "; Path=/; HttpOnly; SameSite=Strict");
+                cookies.flush();
                 web.loadUrl(KumoServer.URL);
             });
         }, "kumo-start").start();
@@ -328,6 +334,9 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (intent == null || !Installer.ACTION.equals(intent.getAction())) return;
+        // Only the answer to an install Kumo asked for: any app may start
+        // this activity, and have it start what it gives (EXTRA_INTENT).
+        if (!Installer.isOurs(this, intent)) return;
         int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
             Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);

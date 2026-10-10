@@ -1,6 +1,7 @@
 package app.kumo;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.provider.Settings;
 import android.text.TextUtils;
@@ -12,6 +13,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.SecureRandom;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -80,9 +82,11 @@ final class KumoServer {
         cmd.add(data.getAbsolutePath());
         cmd.add("--port");
         cmd.add(String.valueOf(PORT));
-        cmd.add("--web-ui");
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(files).redirectErrorStream(true);
         environment(pb.environment());
+        // The app's WebView proves it's Kumo's with it (a cookie): other
+        // apps reach 127.0.0.1 too, and get nothing.
+        pb.environment().put("KUMO_SHELL_TOKEN", token());
         synchronized (last) {
             last.clear();
         }
@@ -126,11 +130,30 @@ final class KumoServer {
         }
     }
 
+    /**
+     * What the app's WebView proves it's Kumo's with (in a cookie, see
+     * MainActivity): made once, kept where only this app can read it.
+     */
+    synchronized String token() {
+        SharedPreferences prefs = ctx.getSharedPreferences("kumo", Context.MODE_PRIVATE);
+        String t = prefs.getString("shell-token", null);
+        if (t == null || t.length() < 32) {
+            byte[] b = new byte[24];
+            new SecureRandom().nextBytes(b);
+            StringBuilder hex = new StringBuilder();
+            for (byte x : b) hex.append(String.format("%02x", x));
+            t = hex.toString();
+            prefs.edit().putString("shell-token", t).commit();
+        }
+        return t;
+    }
+
     /** Whether the server answers. */
     boolean ready() {
         HttpURLConnection c = null;
         try {
             c = (HttpURLConnection) new URL(URL + "api/status").openConnection();
+            c.setRequestProperty("X-Kumo-Shell", token());
             c.setConnectTimeout(800);
             c.setReadTimeout(2000);
             return c.getResponseCode() == 200;
