@@ -9,10 +9,12 @@
 # installed copies look for the android-v release with the highest version
 # and update from their Home page (server/internal/update).
 #
-# The APK is signed with packaging/android/kumo.jks (updates must be signed
-# with the same key), or with the repository's ANDROID_KEYSTORE_BASE64,
-# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD
-# secrets when they're set.
+# The APK is signed with Kumo's key, in the repository's secrets
+# ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and
+# ANDROID_KEY_PASSWORD (packaging/android/new-signing-key.sh makes it and puts
+# it there), with the proof that it replaces the first key,
+# packaging/android/kumo.jks, which is public: see "Sign the APK". Without
+# the secrets, nothing is published.
 #
 # Runs on every push to the repository's default branch (except pushes that
 # only change docs or another system's packaging), and by hand from the
@@ -152,24 +154,87 @@ jobs:
           yes | "$sdkmanager" --licenses > /dev/null || true
           "$sdkmanager" "platforms;android-35" "build-tools;34.0.0" > /dev/null
 
+      # Signed with the first key (build.gradle); "Sign the APK" signs it
+      # again, with Kumo's.
       - name: Build the APK
         env:
           KUMO_VERSION: ${{ steps.version.outputs.version }}
           KUMO_VERSION_CODE: ${{ steps.version.outputs.code }}
           APK: ${{ steps.version.outputs.apk }}
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KUMO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KUMO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KUMO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           export JAVA_HOME="${JAVA_HOME_17_X64:-$JAVA_HOME}"
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/kumo.jks"
-            export KUMO_KEYSTORE="$RUNNER_TEMP/kumo.jks"
-          fi
           gradle --no-daemon -p android assembleRelease
           mkdir -p dist/android
           cp android/app/build/outputs/apk/release/app-release.apk "dist/android/$APK"
+
+      # Kumo's key (the secrets) signs the APK for Android 9 and newer, with
+      # the proof (a "lineage") made with the first key, which is public,
+      # that the new key replaces it: a Kumo installed with the first key
+      # updates to it, and from then on refuses an APK only the first key
+      # signs (it may not roll back), nor does it share anything with apps
+      # the first key signs. Older Android versions check the first key, as
+      # before. The same is done first with a throwaway key, and checked,
+      # every time.
+      - name: Sign the APK
+        env:
+          APK: ${{ steps.version.outputs.apk }}
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          apk="dist/android/$APK"
+          unsigned="$RUNNER_TEMP/unsigned.apk"
+          cp "$apk" "$unsigned"
+          first=(--ks packaging/android/kumo.jks --ks-key-alias kumo --ks-pass pass:kumo-android --key-pass pass:kumo-android)
+          firstDigest=$(keytool -list -v -keystore packaging/android/kumo.jks -storepass kumo-android -alias kumo | sed -n 's/^.*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f')
+          # sign <keystore> <alias> <store password variable> <key password variable> <signed APK>
+          sign() {
+            "$bt/apksigner" rotate --out "$RUNNER_TEMP/lineage" \
+              --old-signer "${first[@]}" \
+              --set-installed-data true --set-shared-uid false --set-permission false --set-rollback false --set-auth false \
+              --new-signer --ks "$1" --ks-key-alias "$2" --ks-pass "env:$3" --key-pass "env:$4"
+            "$bt/apksigner" sign --lineage "$RUNNER_TEMP/lineage" --rotation-min-sdk-version 28 \
+              "${first[@]}" --next-signer --ks "$1" --ks-key-alias "$2" --ks-pass "env:$3" --key-pass "env:$4" \
+              --out "$5" "$unsigned"
+            local digest
+            digest=$(keytool -list -v -keystore "$1" -storepass "${!3}" -alias "$2" | sed -n 's/^.*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f')
+            "$bt/apksigner" verify --verbose --print-certs "$5" | tee "$RUNNER_TEMP/verify.txt"
+            "$bt/apksigner" lineage --in "$5" --print-certs | tee "$RUNNER_TEMP/lineage.txt"
+            grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" "$RUNNER_TEMP/verify.txt" || { echo "::error::no v3 signature"; return 1; }
+            grep -qi "$digest" "$RUNNER_TEMP/verify.txt" || { echo "::error::the APK isn't signed with the new key"; return 1; }
+            grep -qiE "Signer #1 .*SHA-256 digest: *$firstDigest" "$RUNNER_TEMP/lineage.txt" || { echo "::error::the lineage doesn't start with the first key"; return 1; }
+            grep -qiE "Signer #2 .*SHA-256 digest: *$digest" "$RUNNER_TEMP/lineage.txt" || { echo "::error::the lineage doesn't end with the new key"; return 1; }
+            grep -qiE "rollback capability *: *true" "$RUNNER_TEMP/lineage.txt" && { echo "::error::the first key may roll back"; return 1; }
+            return 0
+          }
+
+          # A throwaway key (made like Kumo's): the signing and its checks work.
+          # (KUMO_NO_GH: never into the secrets.)
+          XDG_DATA_HOME="$RUNNER_TEMP/throwaway" KUMO_NO_GH=1 bash packaging/android/new-signing-key.sh > /dev/null
+          tk="$RUNNER_TEMP/throwaway/kumo-android-key"
+          export TEST_PASS; TEST_PASS=$(cat "$tk/password")
+          sign "$tk/kumo-release.p12" kumo TEST_PASS TEST_PASS "$RUNNER_TEMP/throwaway.apk"
+          rm -rf "$RUNNER_TEMP/throwaway" "$RUNNER_TEMP/throwaway.apk"
+
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            if [ "$PUBLISH" = true ]; then
+              echo "::error::Kumo's Android key isn't in the repository's secrets: run packaging/android/new-signing-key.sh (android/README.md). Releases aren't signed with the first key alone any more: it's public."
+              exit 1
+            fi
+            echo "::warning::No key in the secrets: this build, not published, stays signed with the first (public) key."
+            exit 0
+          fi
+          ks="$RUNNER_TEMP/kumo-release.keystore"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$ks"
+          export STORE_PASS KEY_PASS
+          [ -n "$KEY_PASS" ] || KEY_PASS=$STORE_PASS
+          sign "$ks" "${KEY_ALIAS:-kumo}" STORE_PASS KEY_PASS "$RUNNER_TEMP/signed.apk"
+          rm -f "$ks"
+          mv "$RUNNER_TEMP/signed.apk" "$apk"
 
       # The server must be in it, stored so that Android extracts it, and
       # the APK signed.

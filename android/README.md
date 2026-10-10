@@ -38,10 +38,20 @@ cd ../android && gradle assembleRelease
 
 ## Signing
 
-An update installs over Kumo only when it's signed with the same key as the
-installed app: the APK is signed with `packaging/android/kumo.jks` (password
-`kumo-android`, alias `kumo`). To sign with a key of your own instead, set the
-repository secrets `ANDROID_KEYSTORE_BASE64` (the keystore, base64),
-`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`;
-installed copies then need to be uninstalled once, as Android refuses an
-update signed with another key.
+Android installs an update over Kumo only when it's signed with the key of
+the installed app, or a key that one passed on to (key rotation, Android 9
+and newer). The first key, `packaging/android/kumo.jks` (password
+`kumo-android`, alias `kumo`), is public, so the releases are signed with a
+key of yours, in the repository's secrets, with the proof the first key
+made that yours replaces it: the installed Kumo updates as before, and then
+refuses an APK only the first key signed.
+
+Make that key once, on your computer, with
+[`packaging/android/new-signing-key.sh`](../packaging/android/new-signing-key.sh):
+it makes it in `~/.local/share/kumo-android-key` (keep a backup: without it,
+an installed Kumo can't update and must be reinstalled) and puts it in the
+secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` with the GitHub CLI (or says
+what to paste where). The release workflow publishes nothing without them.
+On Android 8 and older, which know no key rotation, the first key still
+signs the updates.
