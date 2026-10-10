@@ -36,6 +36,9 @@ type Server struct {
 	logins loginGuard
 	// ForceWebUI is set when no desktop shell can exist (headless mode).
 	ForceWebUI bool
+	// AppOnly: on this device other apps reach 127.0.0.1 too (Android), so
+	// only the app's own window (the shell token) is its user there.
+	AppOnly bool
 }
 
 func New(a *app.App, ui fs.FS) *Server {
@@ -266,6 +269,10 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		}
 		if kind == clientLocal && tok != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(s.app.ShellToken)) == 1 {
 			kind = clientShell
+		}
+		if kind == clientLocal && s.AppOnly {
+			http.Error(w, "Kumo only answers its own app on this device.", http.StatusForbidden)
+			return
 		}
 
 		// Other websites may link to the app, but must not load or call the

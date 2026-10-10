@@ -312,3 +312,18 @@ func TestPasswordGuessing(t *testing.T) {
 		t.Error("still waiting after the right password")
 	}
 }
+
+// On a device where other apps reach 127.0.0.1 (Android), only the app's
+// window, with its token, is answered there, whatever the web UI setting.
+func TestAppOnly(t *testing.T) {
+	s := newTestServer(t)
+	s.AppOnly = true
+	local := "127.0.0.1:5000"
+	if w := do(s, "GET", "/api/settings", local, "", nil); w.Code != http.StatusForbidden {
+		t.Errorf("another app: %d", w.Code)
+	}
+	app := func(r *http.Request) { r.AddCookie(&http.Cookie{Name: "kumo_shell", Value: s.app.ShellToken}) }
+	if w := do(s, "GET", "/api/settings", local, "", app); w.Code != http.StatusOK {
+		t.Errorf("the app's window: %d", w.Code)
+	}
+}
