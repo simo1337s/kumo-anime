@@ -136,7 +136,14 @@ type peer struct {
 	hostAniCli bool
 }
 
-func (p *peer) online(now time.Time) bool { return now.Sub(p.seen) < onlineFor }
+// online: heard from lately. A host that shares with this Kumo is asked
+// every askEvery, and its answer counts until the next one is due: also when
+// its beacons don't come through (the Wi-Fi of some TVs drops them), it
+// doesn't look gone half of the time.
+func (p *peer) online(now time.Time) bool {
+	d := now.Sub(p.seen)
+	return d < onlineFor || (p.shares && p.fails == 0 && d < askEvery+onlineFor)
+}
 
 func (p *peer) lastAround() time.Time {
 	if p.seen.After(p.lastSeen) {
@@ -667,6 +674,7 @@ func (s *Service) ask(ctx context.Context, p *peer) {
 		p.user = h.User
 		tag, takes = h.Account, h.Downloads
 	}
+	aniCliChanged := p.hostAniCli != (h.Shares && h.AniCli)
 	p.hostAniCli = h.Shares && h.AniCli
 	accountChanged := p.hostAccount != tag
 	took := p.hostDownloads
@@ -679,7 +687,7 @@ func (s *Service) ask(ctx context.Context, p *peer) {
 	if took != takes {
 		s.downloadsGranted(p, takes)
 	}
-	if accountChanged || took != takes {
+	if accountChanged || took != takes || aniCliChanged {
 		s.hub.Publish("sharing-updated", nil)
 	}
 	if h.Shares && h.User > 0 && h.User == s.user() {

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -871,6 +872,48 @@ func (s *Server) addTorrents(ctx context.Context, mediaID int, uris []string) (s
 	}
 	save := s.torrentFolder(mediaID, title)
 	return save, s.app.Torrents.Add(ctx, uris, save)
+}
+
+// hostTorrents forwards a torrent client request (op) to the Kumo this
+// one's downloads go to; ok is false when they're this one's. A POST's body
+// goes along.
+func (s *Server) hostTorrents(r *http.Request, op string) (json.RawMessage, bool, error) {
+	// The body stays unread for this one's own client.
+	if host, err := s.app.Share.DownloadHost(); err == nil && host == "" {
+		return nil, false, nil
+	}
+	var body any
+	if r.Method == http.MethodPost {
+		b := json.RawMessage("{}")
+		if op != "start" {
+			if err := decode(r, &b); err != nil {
+				return nil, true, err
+			}
+		}
+		body = b
+	}
+	raw, _, ok, err := s.app.Share.TorrentsHost(r.Context(), op, body)
+	if err != nil {
+		return nil, ok, badRequest(err.Error())
+	}
+	return raw, ok, nil
+}
+
+// hostTorrentStatus is the status of the torrent client of the Kumo this
+// one's downloads go to, with its name (host).
+func (s *Server) hostTorrentStatus(r *http.Request) (map[string]any, bool) {
+	raw, host, ok, err := s.app.Share.TorrentsHost(r.Context(), "status", nil)
+	if !ok {
+		return nil, false
+	}
+	st := map[string]any{}
+	if err != nil {
+		st["client"], st["connected"], st["error"] = "", false, err.Error()
+	} else if json.Unmarshal(raw, &st) != nil {
+		st["error"] = "unexpected answer"
+	}
+	st["host"] = host
+	return st, true
 }
 
 func (s *Server) torrentList(r *http.Request) (any, error) {

@@ -101,19 +101,21 @@ func (d *Driver) SetRemote(r Remote) { d.remote = r }
 // LocalReady reports whether ani-cli runs here.
 func (d *Driver) LocalReady() bool { return Ready(d.settings.Get().AniCli.Path) }
 
-// via is the Remote that runs ani-cli now, nil when it runs here (or
-// nowhere).
+// via is the Remote that runs ani-cli when it isn't here: nil when it is
+// (or there's none). The Remote waits a little for a computer to run it
+// when it knows none right now.
 func (d *Driver) via() Remote {
-	if d.remote == nil || d.LocalReady() || d.remote.Name() == "" {
+	if d.remote == nil || d.LocalReady() {
 		return nil
 	}
 	return d.remote
 }
 
 // Available reports whether ani-cli runs, here or on another computer.
-func (d *Driver) Available() bool { return d.LocalReady() || d.via() != nil }
+func (d *Driver) Available() bool { return d.LocalReady() || d.RemoteName() != "" }
 
-// RemoteName is the computer ani-cli runs on, "" when it runs here.
+// RemoteName is the computer ani-cli runs on, "" when it runs here (or
+// nowhere now).
 func (d *Driver) RemoteName() string {
 	if r := d.via(); r != nil {
 		return r.Name()

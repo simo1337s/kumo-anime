@@ -127,3 +127,62 @@ func (s *Service) SendDownload(ctx context.Context, kind string, what any) (stri
 	}
 	return name, nil
 }
+
+// TorrentsHost asks the Kumo this one's downloads go to about its torrent
+// client (op: status, list, action, start; GET without body, else POST):
+// its torrents are this one's then, a TV's are its computer's. ok is false
+// when the downloads are this one's own.
+func (s *Service) TorrentsHost(ctx context.Context, op string, body any) (raw json.RawMessage, host string, ok bool, err error) {
+	name, err := s.DownloadHost()
+	if err != nil {
+		return nil, name, true, err
+	}
+	if name == "" {
+		return nil, "", false, nil
+	}
+	p := s.host(s.settings.Get().Sharing.DownloadTo)
+	if p == nil {
+		return nil, name, true, errNotShared
+	}
+	method := http.MethodGet
+	var rd io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, name, true, err
+		}
+		method, rd = http.MethodPost, bytes.NewReader(b)
+	}
+	req, err := s.request(ctx, p, method, "/api/peer/torrents/"+op, rd)
+	if err != nil {
+		return nil, name, true, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := s.api.Do(req)
+	if err != nil {
+		return nil, name, true, fmt.Errorf("%s doesn't answer: %w", name, err)
+	}
+	defer resp.Body.Close()
+	raw, err = io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return nil, name, true, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		var e struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(raw, &e) != nil || e.Error == "" {
+			e.Error = strings.TrimSpace(string(raw))
+		}
+		if e.Error == "" {
+			e.Error = resp.Status
+		}
+		return nil, name, true, errors.New(name + ": " + e.Error)
+	}
+	if len(raw) == 0 {
+		raw = json.RawMessage("null")
+	}
+	return raw, name, true, nil
+}

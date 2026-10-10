@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -79,9 +80,50 @@ func (r aniCliRemote) Name() string {
 	return ""
 }
 
+// waitHost is the host that runs ani-cli, asking the hosts again when none
+// is known (this Kumo just started, or hasn't heard from them lately) and
+// waiting a little for their answers.
+func (s *Service) waitHost(ctx context.Context) *peer {
+	if p := s.aniCliHost(); p != nil {
+		return p
+	}
+	// Only a Kumo something shares with can be answered.
+	s.mu.Lock()
+	hosts := false
+	for _, p := range s.peers {
+		hosts = hosts || p.shares
+	}
+	s.mu.Unlock()
+	if !hosts {
+		return nil
+	}
+	s.Refresh()
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer tick.Stop()
+	deadline := time.After(8 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-deadline:
+			return nil
+		case <-tick.C:
+			if p := s.aniCliHost(); p != nil {
+				return p
+			}
+		}
+	}
+}
+
 func (r aniCliRemote) call(ctx context.Context, op string, req AniCliRequest) (*AniCliAnswer, error) {
-	p := r.s.aniCliHost()
+	p := r.s.waitHost(ctx)
 	if p == nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if runtime.GOOS == "android" {
+			return nil, errors.New("ani-cli doesn't run on Android, and no computer sharing its library with this one runs it now (is it on, with Kumo running?)")
+		}
 		return nil, anicli.ErrNotInstalled
 	}
 	body, _ := json.Marshal(req)

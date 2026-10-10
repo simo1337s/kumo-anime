@@ -24,12 +24,19 @@ const stateTone: Record<string, "green" | "blue" | "amber" | "red" | "gray" | "b
 export default function TorrentsPage() {
     const { data: status } = useStatus()
     const navigate = useNavigate()
-    const clientName = status?.settings.torrent.defaultClient
     const { data: clientStatus, refetch: refetchStatus } = useQuery({
         queryKey: ["torrent-client-status"],
-        queryFn: () => api.get<{ client: string; connected: boolean; version: string; error?: string; needsAuth?: boolean }>("/api/torrent-client/status"),
+        queryFn: () => api.get<{ client: string; connected: boolean; version: string; error?: string; needsAuth?: boolean; host?: string }>("/api/torrent-client/status"),
         refetchInterval: 15000,
     })
+    // When downloads go to another Kumo (a TV's to its computer), these are
+    // its torrents, in its client.
+    const host = clientStatus?.host
+    const clientName = host ? clientStatus.client : status?.settings.torrent.defaultClient
+    const clientLabel = clientName === "qbittorrent" ? "qBittorrent" : "Transmission"
+    const on = host ? ` on ${host}` : ""
+    // The host didn't answer: no client to speak of.
+    const hostDown = !!host && !clientStatus?.client
     const { data: list, isLoading } = useTorrentList(!!clientStatus?.connected)
     const [filter, setFilter] = useState<"all" | "active" | "done">("all")
     const [addOpen, setAddOpen] = useState(false)
@@ -68,13 +75,17 @@ export default function TorrentsPage() {
                     <h1 className="text-[1.75rem] font-semibold tracking-tight">Torrents</h1>
                     <p className="mt-1 flex items-center gap-2 text-muted">
                         <span className={cn("size-2 rounded-full", clientStatus?.connected ? "bg-emerald-400" : "bg-rose-400")} />
-                        {clientName === "none" || !clientName
-                            ? "No torrent client configured"
-                            : clientStatus?.connected
-                              ? `${clientStatus.client === "qbittorrent" ? "qBittorrent" : "Transmission"} ${clientStatus.version}`
-                              : clientStatus?.needsAuth
-                                ? `${clientName === "qbittorrent" ? "qBittorrent" : "Transmission"} is running but needs your login`
-                                : `${clientName === "qbittorrent" ? "qBittorrent" : "Transmission"} is not reachable`}
+                        {hostDown
+                            ? `${host} doesn't answer`
+                            : host && clientName === "none"
+                              ? `${host} has no torrent client set up`
+                              : clientName === "none" || !clientName
+                                ? "No torrent client configured"
+                                : clientStatus?.connected
+                                  ? `${clientLabel} ${clientStatus.version}${on}`
+                                  : clientStatus?.needsAuth
+                                    ? `${clientLabel}${on} is running but needs ${host ? "its" : "your"} login`
+                                    : `${clientLabel}${on} is not reachable`}
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -88,7 +99,7 @@ export default function TorrentsPage() {
                             </span>
                         </div>
                     )}
-                    {!clientStatus?.connected && clientName && clientName !== "none" && clientStatus?.needsAuth && (
+                    {!clientStatus?.connected && clientName && clientName !== "none" && clientStatus?.needsAuth && !host && (
                         <Button variant="primary" icon={<Settings2 className="size-4" />} onClick={() => navigate("/settings?tab=torrent-client")}>
                             Fix login in settings
                         </Button>
@@ -98,18 +109,23 @@ export default function TorrentsPage() {
                             Start client
                         </Button>
                     )}
-                    <Button icon={<Plus className="size-4" />} onClick={() => setAddOpen(true)} disabled={!clientName || clientName === "none"}>
+                    <Button icon={<Plus className="size-4" />} onClick={() => setAddOpen(true)} disabled={hostDown || !clientName || clientName === "none"}>
                         Add magnet
                     </Button>
                 </div>
             </div>
 
-            {(!clientName || clientName === "none") && (
+            {host && !hostDown && clientName === "none" && (
+                <EmptyState icon={<Magnet className="size-6" />} title={`Set up a torrent client on ${host}`}>
+                    This device's downloads go to {host}. Choose qBittorrent or Transmission in Kumo's settings there, and its torrents show up here.
+                </EmptyState>
+            )}
+            {!host && (!clientName || clientName === "none") && (
                 <EmptyState icon={<Magnet className="size-6" />} title="Connect a torrent client" action={<Link to="/settings?tab=torrent-client"><Button variant="primary">Open settings</Button></Link>}>
                     Kumo works with qBittorrent (Web UI) and Transmission to download anime straight into your library.
                 </EmptyState>
             )}
-            {clientName && clientName !== "none" && !clientStatus?.connected && clientStatus?.error && (
+            {(hostDown || (clientName && clientName !== "none")) && !clientStatus?.connected && clientStatus?.error && (
                 <div className="mb-6 rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200">{clientStatus.error}</div>
             )}
 
@@ -129,12 +145,12 @@ export default function TorrentsPage() {
                     {!isLoading && torrents.length === 0 && <EmptyState icon={<Magnet className="size-6" />} title="No torrents" />}
                     <div className="flex flex-col gap-3">
                         {torrents.map(t => (
-                            <TorrentRow key={t.hash} t={t} onAction={a => act([t.hash], a)} canOpen={status?.client !== "lan"} />
+                            <TorrentRow key={t.hash} t={t} onAction={a => act([t.hash], a)} canOpen={status?.client !== "lan" && !host} />
                         ))}
                     </div>
                 </>
             )}
-            <AddMagnetDialog open={addOpen} onOpenChange={setAddOpen} />
+            <AddMagnetDialog open={addOpen} onOpenChange={setAddOpen} host={host} />
         </div>
     )
 }
@@ -198,14 +214,14 @@ function TorrentRow({ t, onAction, canOpen }: { t: Torrent; onAction: (a: string
     )
 }
 
-function AddMagnetDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+function AddMagnetDialog({ open, onOpenChange, host }: { open: boolean; onOpenChange: (v: boolean) => void; host?: string }) {
     const [magnet, setMagnet] = useState("")
     const [busy, setBusy] = useState(false)
     const add = async () => {
         setBusy(true)
         try {
             await api.post("/api/torrent-client/add", { magnet })
-            toast.success("Added to the torrent client")
+            toast.success(host ? `Sent to ${host}'s torrent client` : "Added to the torrent client")
             setMagnet("")
             onOpenChange(false)
         } catch (e: any) {
@@ -219,7 +235,7 @@ function AddMagnetDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
             open={open}
             onOpenChange={onOpenChange}
             title="Add a torrent"
-            description="Paste a magnet link or a .torrent URL. It is saved to your library folder."
+            description={`Paste a magnet link or a .torrent URL. It is saved to ${host ? `${host}'s` : "your"} library folder.`}
             footer={
                 <Button variant="primary" loading={busy} disabled={!magnet.trim()} onClick={add}>
                     Add

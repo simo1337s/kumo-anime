@@ -472,6 +472,26 @@ func TestDownloadsToHost(t *testing.T) {
 	if w.Code == http.StatusOK || !strings.HasPrefix(errorOf(w), hostName+": ") {
 		t.Fatalf("not sent to the host: %d %s", w.Code, w.Body)
 	}
+	// Its torrents are the host's: the client, the list, the actions.
+	var st struct {
+		Host   string `json:"host"`
+		Client string `json:"client"`
+	}
+	if w := do(guest, "GET", "/api/torrent-client/status", local, "", nil); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil || st.Host != hostName {
+		t.Fatalf("status: %d %s", w.Code, w.Body)
+	}
+	if w := do(guest, "POST", "/api/torrent-client/action", local, `{"hashes":["ab"],"action":"pause"}`, nil); !strings.HasPrefix(errorOf(w), hostName+": ") {
+		t.Fatalf("action not sent to the host: %d %s", w.Code, w.Body)
+	}
+	// Only for a Kumo allowed to download there.
+	other, _ := sharingServer(t)
+	req, _ = http.NewRequest("GET", hostSrv.URL+"/api/peer/torrents/list", nil)
+	if err := other.app.Share.Sign(req, hid, host.app.Share.Whoami().Key); err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode == http.StatusOK {
+		t.Fatalf("another Kumo listed the host's torrents: %v %v", resp, err)
+	}
 
 	// Not allowed any more: saved here again.
 	no := false
@@ -479,6 +499,14 @@ func TestDownloadsToHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "downloads to stay here", asked(func() bool { return guest.app.Settings.Get().Sharing.DownloadTo == "" }))
+	st.Host = ""
+	if w := do(guest, "GET", "/api/torrent-client/status", local, "", nil); json.Unmarshal(w.Body.Bytes(), &st) != nil || st.Host != "" {
+		t.Fatalf("status still the host's: %s", w.Body)
+	}
+	// Its own client again, the body read there.
+	if w := do(guest, "POST", "/api/torrent-client/action", local, `{"hashes":["ab"],"action":"pause"}`, nil); strings.Contains(errorOf(w), "JSON") || strings.HasPrefix(errorOf(w), hostName) {
+		t.Fatalf("action: %d %s", w.Code, w.Body)
+	}
 }
 
 func errorOf(w *httptest.ResponseRecorder) string {

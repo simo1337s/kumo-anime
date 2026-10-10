@@ -43,6 +43,8 @@ export function connectEvents(qc: QueryClient) {
                 break
             case "sharing-updated":
                 qc.invalidateQueries({ queryKey: ["sharing"] })
+                // Whether a computer runs ani-cli for this one (features).
+                qc.invalidateQueries({ queryKey: ["status"] })
                 break
             case "history-updated":
                 // Watched on another Kumo of the same account: Continue

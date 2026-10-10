@@ -166,10 +166,32 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/torrents/providers", h(func(r *http.Request) (any, error) { return s.app.Torrents.Providers(), nil }))
 	m.HandleFunc("POST /api/torrents/search", h(s.torrentSearch))
 	m.HandleFunc("POST /api/torrents/download", h(s.torrentDownload))
-	m.HandleFunc("GET /api/torrent-client/status", h(func(r *http.Request) (any, error) { return s.app.Torrents.Status(r.Context()), nil }))
-	m.HandleFunc("GET /api/torrent-client/list", h(s.torrentList))
-	m.HandleFunc("POST /api/torrent-client/action", h(s.torrentAction))
-	m.HandleFunc("POST /api/torrent-client/start", h(func(r *http.Request) (any, error) { return nil, s.app.Torrents.StartClient(r.Context()) }))
+	// When this Kumo's downloads go to another (a TV's to its computer), its
+	// torrents are that one's (hostTorrents).
+	m.HandleFunc("GET /api/torrent-client/status", h(func(r *http.Request) (any, error) {
+		if st, ok := s.hostTorrentStatus(r); ok {
+			return st, nil
+		}
+		return s.app.Torrents.Status(r.Context()), nil
+	}))
+	m.HandleFunc("GET /api/torrent-client/list", h(func(r *http.Request) (any, error) {
+		if raw, ok, err := s.hostTorrents(r, "list"); ok {
+			return raw, err
+		}
+		return s.torrentList(r)
+	}))
+	m.HandleFunc("POST /api/torrent-client/action", h(func(r *http.Request) (any, error) {
+		if raw, ok, err := s.hostTorrents(r, "action"); ok {
+			return raw, err
+		}
+		return s.torrentAction(r)
+	}))
+	m.HandleFunc("POST /api/torrent-client/start", h(func(r *http.Request) (any, error) {
+		if raw, ok, err := s.hostTorrents(r, "start"); ok {
+			return raw, err
+		}
+		return nil, s.app.Torrents.StartClient(r.Context())
+	}))
 	m.HandleFunc("POST /api/torrent-client/add", h(s.torrentAdd))
 	m.HandleFunc("GET /api/autodownloader/rules", h(func(r *http.Request) (any, error) { return s.app.AutoDL.Rules() }))
 	m.HandleFunc("POST /api/autodownloader/rules", h(s.saveRule))

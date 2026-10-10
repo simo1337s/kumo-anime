@@ -125,6 +125,21 @@ func (s *Server) peerRoutes() {
 		}
 		return a, nil
 	})))
+	// The torrent client, for a Kumo allowed to download onto this one: its
+	// downloads go here, its torrent page shows this one's.
+	torrents := func(fn http.HandlerFunc) http.HandlerFunc {
+		return shared(func(w http.ResponseWriter, r *http.Request) {
+			if !peerOf(r).Downloads {
+				writeJSON(w, http.StatusForbidden, map[string]any{"error": "this Kumo doesn't take downloads from yours"})
+				return
+			}
+			fn(w, r)
+		})
+	}
+	m.HandleFunc("GET /api/peer/torrents/status", torrents(h(func(r *http.Request) (any, error) { return s.app.Torrents.Status(r.Context()), nil })))
+	m.HandleFunc("GET /api/peer/torrents/list", torrents(h(s.torrentList)))
+	m.HandleFunc("POST /api/peer/torrents/action", torrents(h(s.torrentAction)))
+	m.HandleFunc("POST /api/peer/torrents/start", torrents(h(func(r *http.Request) (any, error) { return nil, s.app.Torrents.StartClient(r.Context()) })))
 	// Downloads from a Kumo allowed to download onto this one.
 	m.HandleFunc("POST /api/peer/downloads/{kind}", shared(h(s.peerDownload)))
 	m.HandleFunc("GET /api/peer/local/probe", shared(h(func(r *http.Request) (any, error) {
