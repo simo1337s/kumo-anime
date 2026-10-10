@@ -34,6 +34,14 @@ files:
 
 beforePack: ./check-server.js # fails the build when the server is missing
 
+# Kumo's app can't be used as a Node.js to run other code (with its
+# permissions, on macOS): no ELECTRON_RUN_AS_NODE, NODE_OPTIONS or --inspect.
+# main.js starts the server with spawn, which doesn't need them.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+
 win:
   icon: icon.png
   target:
