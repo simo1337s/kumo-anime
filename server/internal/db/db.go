@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
 type DB struct {
@@ -131,7 +129,7 @@ func Open(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	conn, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)")
+	conn, err := sql.Open(driver, source(path))
 	if err != nil {
 		return nil, err
 	}

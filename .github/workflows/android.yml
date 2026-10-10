@@ -103,8 +103,9 @@ jobs:
           touch "$dist/.keep"
 
       # With the NDK (cgo): Go needs it for 32-bit ARM, and it makes the
-      # server use Android's own DNS. The app ships it as its "native
-      # library" libkumo.so, for each kind of device.
+      # server use Android's own DNS and SQLite built with Android's C
+      # library (see server/internal/db/driver_android.go). The app ships it
+      # as its "native library" libkumo.so, for each kind of device.
       - name: Build the server for Android
         working-directory: server
         env:

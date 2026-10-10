@@ -15,6 +15,7 @@ import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -29,6 +30,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -42,6 +44,7 @@ public class MainActivity extends Activity {
     private FrameLayout root;
     private WebView web;
     private TextView message;
+    private ScrollView messageScroll;
     private View fullscreen;
     private WebChromeClient.CustomViewCallback fullscreenDone;
     private WifiManager.MulticastLock multicast;
@@ -65,7 +68,10 @@ public class MainActivity extends Activity {
         int pad = (int) (32 * getResources().getDisplayMetrics().density);
         message.setPadding(pad, pad, pad, pad);
         message.setText("Starting Kumo…");
-        root.addView(message, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        messageScroll = new ScrollView(this);
+        messageScroll.setFillViewport(true);
+        messageScroll.addView(message, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(messageScroll, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
         // The other Kumo apps announce themselves by multicast, which Wi-Fi
@@ -105,7 +111,7 @@ public class MainActivity extends Activity {
                 if (!loaded && url.startsWith(KumoServer.URL)) {
                     loaded = true;
                     web.setVisibility(View.VISIBLE);
-                    message.setVisibility(View.GONE);
+                    messageScroll.setVisibility(View.GONE);
                     web.requestFocus();
                 }
             }
@@ -115,7 +121,7 @@ public class MainActivity extends Activity {
                 if (req.isForMainFrame() && !KumoServer.get(MainActivity.this).running()) {
                     loaded = false;
                     web.setVisibility(View.INVISIBLE);
-                    message.setVisibility(View.VISIBLE);
+                    messageScroll.setVisibility(View.VISIBLE);
                     startServer();
                 }
             }
@@ -170,11 +176,12 @@ public class MainActivity extends Activity {
                 long until = System.currentTimeMillis() + 40_000;
                 while (!server.ready()) {
                     if (!server.running()) {
-                        failure = "Kumo's server stopped.";
+                        failure = "Kumo's server stopped.\n\n" + server.whyStopped();
                         break;
                     }
                     if (System.currentTimeMillis() > until) {
-                        failure = "Kumo's server doesn't answer.";
+                        String lines = server.lastLines();
+                        failure = "Kumo's server doesn't answer." + (lines.isEmpty() ? "" : "\n\n" + lines);
                         break;
                     }
                     Thread.sleep(250);
@@ -186,14 +193,25 @@ public class MainActivity extends Activity {
             main.post(() -> {
                 starting = false;
                 if (error != null) {
-                    String lines = server.lastLines();
-                    message.setText(error + (lines.isEmpty() ? "" : "\n\n" + lines) + "\n\nPress OK to try again.");
+                    Log.e("kumo", error);
+                    showMessage(error + "\n\nPress OK to try again.", true);
                     return;
                 }
-                message.setText("Starting Kumo…");
+                showMessage("Starting Kumo…", false);
                 web.loadUrl(KumoServer.URL);
             });
         }, "kumo-start").start();
+    }
+
+    /** The screen before Kumo shows: starting, or why it didn't. */
+    private void showMessage(String text, boolean error) {
+        message.setText(text);
+        // An error has the details (the server's last lines): smaller, from the top, scrolling.
+        message.setTextSize(TypedValue.COMPLEX_UNIT_SP, error ? 14 : 20);
+        message.setGravity(error ? Gravity.START | Gravity.TOP : Gravity.CENTER);
+        messageScroll.scrollTo(0, 0);
+        // The remote's Up and Down scroll it.
+        if (error) messageScroll.requestFocus();
     }
 
     @Override
@@ -203,8 +221,8 @@ public class MainActivity extends Activity {
         if (!starting && !KumoServer.get(this).running()) {
             loaded = false;
             web.setVisibility(View.INVISIBLE);
-            message.setVisibility(View.VISIBLE);
-            message.setText("Starting Kumo…");
+            messageScroll.setVisibility(View.VISIBLE);
+            showMessage("Starting Kumo…", false);
             startServer();
         }
     }
@@ -243,7 +261,7 @@ public class MainActivity extends Activity {
             case KeyEvent.KEYCODE_ENTER:
                 // Kumo didn't start: OK tries again.
                 if (!loaded && !starting && down) {
-                    message.setText("Starting Kumo…");
+                    showMessage("Starting Kumo…", false);
                     startServer();
                     return true;
                 }
