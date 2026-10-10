@@ -3,6 +3,7 @@ package history
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/simo1337s/animetest/server/internal/db"
 )
@@ -39,6 +40,13 @@ func TestMergeKeepsTheNewest(t *testing.T) {
 	}
 	if got := s.Since(0, 10); len(got) != 2 || got[0].UpdatedAt > got[1].UpdatedAt {
 		t.Errorf("since 0, oldest first: %+v", got)
+	}
+	// From the future: taken as from now, so what's saved here next wins.
+	if ok, _ := s.Merge(Entry{MediaID: 1, Episode: 2, Position: 5, Duration: 1400, UpdatedAt: here + 10*365*24*3600}); !ok {
+		t.Error("a newer position wasn't taken")
+	}
+	if e := s.Get(1, 2); e.UpdatedAt > time.Now().Add(maxAhead).Unix() {
+		t.Errorf("a time from the future was kept: %+v", e)
 	}
 	if ok, _ := s.Merge(Entry{MediaID: 0, Episode: 1, UpdatedAt: here}); ok {
 		t.Error("a bad entry was taken")

@@ -132,7 +132,7 @@ func (r aniCliRemote) call(ctx context.Context, op string, req AniCliRequest) (*
 		return nil, err
 	}
 	hr.Header.Set("Content-Type", "application/json")
-	resp, err := r.s.slow.Do(hr)
+	resp, err := r.s.do(r.s.slow, hr)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

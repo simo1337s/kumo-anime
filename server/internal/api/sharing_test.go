@@ -115,6 +115,48 @@ func TestLibrarySharing(t *testing.T) {
 		t.Errorf("content type %q", ct)
 	}
 
+	// Only the files the host shares: not one it ignores, nor one not
+	// matched to an anime, though in its library.
+	for _, f := range []*library.LocalFile{{MediaID: 21, Episode: 2, Ignored: true}, {MediaID: 0}} {
+		p, _ := addEpisode(t, host, 0, 0)
+		f.Path, f.Dir, f.Name, f.Kind = p, filepath.Dir(p), filepath.Base(p), "main"
+		if err := host.app.Files.Save(f); err != nil {
+			t.Fatal(err)
+		}
+		if w := do(guest, "GET", "/api/local/file?"+url.Values{"path": {share.RemotePath(hostID, p)}}.Encode(), local, "", nil); w.Code == http.StatusOK || w.Code == http.StatusPartialContent {
+			t.Errorf("a file the host doesn't share was read: %+v", f)
+		}
+	}
+
+	// A request the guest made can't be sent again by someone who saw it.
+	req, _ := http.NewRequest("GET", hostSrv.URL+"/api/peer/local/file?"+url.Values{"path": {path}}.Encode(), nil)
+	if err := guest.app.Share.Sign(req, hostID, host.app.Share.Whoami().Key); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []int{http.StatusOK, http.StatusUnauthorized} {
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("request sent %d time(s): %d", i+1, resp.StatusCode)
+		}
+		if i == 0 && resp.Header.Get(share.HeaderReply) == "" {
+			t.Error("the host's answer doesn't prove it's the host")
+		}
+	}
+	// Another Kumo is never this computer, whatever it may do.
+	trusted := false
+	host.mux.HandleFunc("GET /api/peer/zz-trusted", shared(func(w http.ResponseWriter, r *http.Request) { trusted = isTrusted(r) }))
+	req, _ = http.NewRequest("GET", hostSrv.URL+"/api/peer/zz-trusted", nil)
+	if err := guest.app.Share.Sign(req, hostID, host.app.Share.Whoami().Key); err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusOK || trusted {
+		t.Errorf("a peer's request is trusted as this computer's: %v %v", resp, err)
+	}
+
 	// Watching on the guest is the guest's: its history (and its list,
 	// AniList or local), never the host's.
 	if w := do(guest, "POST", "/api/playback/progress", local, `{"mediaId":21,"episode":1,"position":300,"duration":1420,"source":"local"}`, nil); w.Code != http.StatusOK {

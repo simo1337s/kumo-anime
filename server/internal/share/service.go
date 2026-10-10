@@ -3,6 +3,7 @@ package share
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -34,6 +35,9 @@ const (
 	onlineFor = 16 * time.Second
 	// How often a guest asks a host whether its library changed.
 	askEvery = 30 * time.Second
+	// A Kumo that proved who it is this lately keeps its address: beacons
+	// don't move it (see heard).
+	verifiedFor = time.Minute
 	// Failed requests in a row after which a host's library is gone.
 	maxFails = 3
 )
@@ -41,6 +45,7 @@ const (
 // Library is what a host shares: its library's files.
 type Library interface {
 	All() ([]*library.LocalFile, error)
+	Get(path string) (*library.LocalFile, error)
 }
 
 // History is the watch history (where each episode was stopped), which
@@ -134,6 +139,10 @@ type peer struct {
 	hostDownloads bool
 	// hostAniCli: it runs ani-cli for this Kumo.
 	hostAniCli bool
+	// verified: when it last proved who it is (a request or an answer
+	// signed); offset: how far its clock is ahead of this one's.
+	verified time.Time
+	offset   time.Duration
 }
 
 // online: heard from lately. A host that shares with this Kumo is asked
@@ -398,8 +407,9 @@ func (s *Service) heard(b beacon, from net.IP) {
 	now := time.Now()
 	wasOnline := p.online(now)
 	p.name, p.version, p.seen = cleanName(b.Name), b.Version, now
-	// One added by hand keeps its address.
-	if p.manual == "" && (!p.addr.Equal(from) || p.port != b.Port) {
+	// One added by hand keeps its address, and one that proved who it is
+	// lately too: anyone can repeat its beacons from elsewhere.
+	if p.manual == "" && now.Sub(p.verified) > verifiedFor && (!p.addr.Equal(from) || p.port != b.Port) {
 		p.addr, p.port = from, b.Port
 		if p.allowed || p.shares {
 			s.save()
@@ -442,8 +452,9 @@ type Caller struct {
 	Account, Downloads bool
 }
 
-// Verify checks a request from another Kumo, and notes it as seen.
-func (s *Service) Verify(r *http.Request) (Caller, error) {
+// Verify checks a request from another Kumo, and notes it as seen. The
+// answer (w) gets what proves it comes from this Kumo.
+func (s *Service) Verify(w http.ResponseWriter, r *http.Request) (Caller, error) {
 	if !s.settings.Get().Sharing.Enabled {
 		return Caller{}, errors.New("library sharing is off")
 	}
@@ -451,7 +462,15 @@ func (s *Service) Verify(r *http.Request) (Caller, error) {
 	if !isLocalNetwork(ip) {
 		return Caller{}, errors.New("not from the local network")
 	}
-	c, err := s.id.verify(r)
+	now := time.Now()
+	c, sig, err := s.id.verify(r, now)
+	if sig != nil {
+		date := now.UTC().Format(http.TimeFormat)
+		if reply, err := sig.reply(date); err == nil {
+			w.Header().Set("Date", date)
+			w.Header().Set(HeaderReply, reply)
+		}
+	}
 	if err != nil {
 		return Caller{}, err
 	}
@@ -469,7 +488,7 @@ func (s *Service) Verify(r *http.Request) (Caller, error) {
 	if c.port > 0 && c.port <= 65535 && p.manual == "" {
 		p.addr, p.port = ip, c.port
 	}
-	p.seen = time.Now()
+	p.seen, p.verified = now, now
 	caller := Caller{ID: p.id, Name: p.name, Allowed: p.allowed, Account: p.allowed && p.account, Downloads: p.allowed && p.downloads}
 	s.mu.Unlock()
 	if !wasOnline {
@@ -567,6 +586,15 @@ func (s *Service) SharedFiles() ([]*library.LocalFile, error) {
 		}
 	}
 	return out, nil
+}
+
+// Shares reports a file this Kumo shares (see SharedFiles).
+func (s *Service) Shares(path string) bool {
+	if path == "" || IsRemote(path) {
+		return false
+	}
+	f, err := s.library.Get(path)
+	return err == nil && f != nil && f.MediaID != 0 && !f.Ignored
 }
 
 func filesVersion(files []*library.LocalFile) string {
@@ -753,7 +781,7 @@ func (s *Service) pushHistory() {
 				return
 			}
 			req.Header.Set("Content-Type", "application/json")
-			if resp, err := s.api.Do(req); err == nil {
+			if resp, err := s.do(s.api, req); err == nil {
 				resp.Body.Close()
 			}
 		}()
@@ -825,19 +853,81 @@ func (s *Service) publish(changed bool) {
 	}
 }
 
-// request makes a signed request to a host.
+// request makes a signed request to a host (sent with do).
 func (s *Service) request(ctx context.Context, p *peer, method, path string, body io.Reader) (*http.Request, error) {
 	s.mu.Lock()
-	base, host, pub := p.baseURL(), p.id, p.pub
+	base := p.baseURL()
 	s.mu.Unlock()
 	req, err := http.NewRequestWithContext(ctx, method, base+path, body)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.id.sign(req.Header, host, pub, s.Name(), s.settings.Get().Server.Port, s.user()); err != nil {
+	return s.sign(req, p)
+}
+
+type signedKey struct{}
+
+// signed is a request signed for a host: what checks its answer.
+type signed struct {
+	p      *peer
+	sig    *signature
+	offset time.Duration
+}
+
+// sign signs a request for a host, by its clock as far as this Kumo knows it.
+func (s *Service) sign(req *http.Request, p *peer) (*http.Request, error) {
+	s.mu.Lock()
+	host, pub, off := p.id, p.pub, p.offset
+	s.mu.Unlock()
+	sig, err := s.id.sign(req, host, pub, s.Name(), s.settings.Get().Server.Port, s.user(), time.Now().Add(off), false)
+	if err != nil {
 		return nil, err
 	}
-	return req, nil
+	return req.WithContext(context.WithValue(req.Context(), signedKey{}, &signed{p: p, sig: sig, offset: off})), nil
+}
+
+// do sends a request made by request, and checks its answer comes from the
+// host: a computer that took its address can't answer for it. A host whose
+// clock is far from this one's refuses the request, with its time (proven):
+// it's sent once more, by that time.
+func (s *Service) do(c *http.Client, req *http.Request) (*http.Response, error) {
+	for try := 0; ; try++ {
+		sr, _ := req.Context().Value(signedKey{}).(*signed)
+		if sr == nil {
+			return nil, errors.New("unsigned request")
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		date := resp.Header.Get("Date")
+		want, err := sr.sig.reply(date)
+		if err != nil || resp.Header.Get(HeaderReply) == "" || !hmac.Equal([]byte(want), []byte(resp.Header.Get(HeaderReply))) {
+			resp.Body.Close()
+			return nil, fmt.Errorf("the answer can't be checked as %s's (is the latest Kumo running there, with library sharing on?)", s.nameOf(sr.p))
+		}
+		off := sr.offset
+		if t, err := http.ParseTime(date); err == nil {
+			off = time.Until(t).Round(time.Second)
+		}
+		s.mu.Lock()
+		sr.p.verified, sr.p.offset = time.Now(), off
+		s.mu.Unlock()
+		moved := off-sr.offset > clockSkew/2 || sr.offset-off > clockSkew/2
+		if resp.StatusCode != http.StatusUnauthorized || !moved || try > 0 {
+			return resp, nil
+		}
+		resp.Body.Close()
+		again := req.Clone(req.Context())
+		if req.GetBody != nil {
+			if again.Body, err = req.GetBody(); err != nil {
+				return nil, err
+			}
+		}
+		if req, err = s.sign(again, sr.p); err != nil {
+			return nil, err
+		}
+	}
 }
 
 // Sign signs a request to the Kumo with that ID and public key (as its
@@ -847,7 +937,8 @@ func (s *Service) Sign(req *http.Request, hostID, hostKey string) error {
 	if err != nil {
 		return err
 	}
-	return s.id.sign(req.Header, hostID, pub, s.Name(), s.settings.Get().Server.Port, s.user())
+	_, err = s.id.sign(req, hostID, pub, s.Name(), s.settings.Get().Server.Port, s.user(), time.Now(), false)
+	return err
 }
 
 func (s *Service) getJSON(ctx context.Context, p *peer, path string, out any) error {
@@ -855,7 +946,7 @@ func (s *Service) getJSON(ctx context.Context, p *peer, path string, out any) er
 	if err != nil {
 		return err
 	}
-	resp, err := s.api.Do(req)
+	resp, err := s.do(s.api, req)
 	if err != nil {
 		return err
 	}

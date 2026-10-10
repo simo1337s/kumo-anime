@@ -182,12 +182,18 @@ func (s *Store) Since(t int64, limit int) []*Entry {
 	return out
 }
 
+// How far ahead of this Kumo's clock another's entries may be.
+const maxAhead = 5 * time.Minute
+
 // Merge takes an entry from another Kumo on the same account when it's
 // newer than this one's, with its time, and reports whether it did.
 func (s *Store) Merge(e Entry) (bool, error) {
 	if e.MediaID <= 0 || e.Episode < 0 || e.UpdatedAt <= 0 || e.Position < 0 || e.Duration < 0 {
 		return false, nil
 	}
+	// Not from the future (a few minutes aside: clocks differ): it would
+	// stay over every position saved here after it.
+	e.UpdatedAt = min(e.UpdatedAt, time.Now().Add(maxAhead).Unix())
 	res, err := s.db.Write(`INSERT INTO watch_history(media_id, episode, position, duration, source, updated_at)
 		VALUES(?, ?, ?, ?, ?, ?)
 		ON CONFLICT(media_id, episode) DO UPDATE SET position = excluded.position, duration = excluded.duration,

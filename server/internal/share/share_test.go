@@ -2,6 +2,9 @@ package share
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +25,15 @@ import (
 type fakeLibrary []*library.LocalFile
 
 func (f fakeLibrary) All() ([]*library.LocalFile, error) { return f, nil }
+
+func (f fakeLibrary) Get(path string) (*library.LocalFile, error) {
+	for _, x := range f {
+		if x.Path == path {
+			return x, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
 
 func openDB(t *testing.T) *db.DB {
 	t.Helper()
@@ -63,34 +75,119 @@ func TestIdentityStaysAndTokensCheck(t *testing.T) {
 
 	// a asks b: b checks it's a.
 	bPub, _ := parsePublicKey(b.ID, b.PublicKey())
-	req, _ := http.NewRequest("GET", "http://x/api/peer/hello", nil)
-	if err := a.sign(req.Header, b.ID, bPub, "Desk PC\n", 43211, 0); err != nil {
-		t.Fatal(err)
+	aPub, _ := parsePublicKey(a.ID, a.PublicKey())
+	now := time.Now()
+	signed := func(method, target, body string, at time.Time, ticket bool) (*http.Request, *signature) {
+		t.Helper()
+		var rd io.Reader
+		if body != "" {
+			rd = strings.NewReader(body)
+		}
+		req, _ := http.NewRequest(method, target, rd)
+		sig, err := a.sign(req, b.ID, bPub, "Desk PC\n", 43211, 7, at, ticket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return req, sig
 	}
-	c, err := b.verify(req)
+	// As it reaches the host.
+	received := func(req *http.Request) *http.Request {
+		r := req.Clone(req.Context())
+		if req.GetBody != nil {
+			r.Body, _ = req.GetBody()
+		}
+		r.GetBody = nil
+		return r
+	}
+	req, sig := signed("GET", "http://x/api/peer/hello", "", now, false)
+	c, hostSig, err := b.verify(received(req), now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.id != a.ID || c.name != "Desk PC" || c.port != 43211 {
+	if c.id != a.ID || c.name != "Desk PC" || c.port != 43211 || c.user != 7 {
 		t.Errorf("caller %+v", c)
+	}
+	// The host's answer proves it's b: a can check it, and only b's does.
+	date := now.UTC().Format(http.TimeFormat)
+	got, _ := hostSig.reply(date)
+	if want, _ := sig.reply(date); got != want || got == "" {
+		t.Error("the host's answer doesn't check")
+	}
+	third, _ := LoadIdentity(openDB(t))
+	impostor := &signature{id: third, peerPub: aPub, guest: a.ID, host: b.ID, nonce: sig.nonce}
+	if forged, _ := impostor.reply(date); forged == got {
+		t.Error("another Kumo answered for b")
+	}
+
+	// Sent again: refused.
+	if _, _, err := b.verify(received(req), now); err == nil {
+		t.Error("a request was taken twice")
+	}
+	// Changed on the way: refused.
+	req, _ = signed("POST", "http://x/api/peer/history", `[{"mediaId":1}]`, now, false)
+	changed := received(req)
+	changed.Body = io.NopCloser(strings.NewReader(`[{"mediaId":2}]`))
+	if _, _, err := b.verify(changed, now); err == nil {
+		t.Error("a changed body passed")
+	}
+	if _, _, err := b.verify(received(req), now); err != nil {
+		t.Errorf("the body as sent: %v", err)
+	}
+	req, _ = signed("GET", "http://x/api/peer/hello", "", now, false)
+	moved := received(req)
+	moved.URL.Path = "/api/peer/files"
+	if _, _, err := b.verify(moved, now); err == nil {
+		t.Error("a request taken to another endpoint passed")
+	}
+	req, _ = signed("GET", "http://x/api/peer/hello", "", now, false)
+	other := received(req)
+	other.Header.Set(headerUser, "8")
+	if _, _, err := b.verify(other, now); err == nil {
+		t.Error("a changed account passed")
+	}
+	// Too old, or from the future: refused, though answered (with the
+	// host's time, proven).
+	req, _ = signed("GET", "http://x/api/peer/hello", "", now.Add(-time.Hour), false)
+	if _, s, err := b.verify(received(req), now); !errors.Is(err, errClock) || s == nil {
+		t.Errorf("an old request: %v", err)
+	}
+	// A ticket (mpv): only a file, for a while, and again.
+	req, _ = signed("GET", "http://x/api/peer/local/file?path=%2Fa%2F1.mkv", "", now.Add(-time.Hour), true)
+	for range 2 {
+		if _, _, err := b.verify(received(req), now); err != nil {
+			t.Errorf("ticket: %v", err)
+		}
+	}
+	if _, _, err := b.verify(received(req), now.Add(ticketFor+time.Hour)); err == nil {
+		t.Error("an expired ticket passed")
+	}
+	req, _ = signed("GET", "http://x/api/peer/files", "", now, true)
+	if _, _, err := b.verify(received(req), now); err == nil {
+		t.Error("a ticket for something else than a file passed")
 	}
 
 	// A third Kumo can't pass for a, nor a's token be used with another key.
-	third, _ := LoadIdentity(openDB(t))
-	forged := req.Clone(req.Context())
+	req, _ = signed("GET", "http://x/api/peer/hello", "", now, false)
+	forged := received(req)
 	forged.Header.Set(headerKey, third.PublicKey())
-	if _, err := b.verify(forged); err == nil {
+	if _, _, err := b.verify(forged, now); err == nil {
 		t.Error("a key that isn't a's passed for a")
 	}
-	forged = req.Clone(req.Context())
+	forged = received(req)
 	forged.Header.Set(headerID, third.ID)
 	forged.Header.Set(headerKey, third.PublicKey())
-	if _, err := b.verify(forged); err == nil {
+	if _, _, err := b.verify(forged, now); err == nil {
 		t.Error("a's token passed for another Kumo")
 	}
 	// Made for b, it means nothing to a third Kumo.
-	if _, err := third.verify(req); err == nil {
+	if _, _, err := third.verify(received(req), now); err == nil {
 		t.Error("a token for b passed with another host")
+	}
+	// An older Kumo's request: told so.
+	old := received(req)
+	old.Header.Del(headerTime)
+	if _, _, err := b.verify(old, now); !errors.Is(err, errOldPeer) {
+		t.Errorf("older Kumo: %v", err)
 	}
 }
 
@@ -234,8 +331,17 @@ func TestForwarding(t *testing.T) {
 	guest := newService(t, openDB(t))
 	hostID, _ := LoadIdentity(openDB(t))
 	var got []string
+	impostor := false
 	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := hostID.verify(r); err != nil {
+		now := time.Now()
+		_, sig, err := hostID.verify(r, now)
+		if sig != nil && !impostor {
+			date := now.UTC().Format(http.TimeFormat)
+			reply, _ := sig.reply(date)
+			w.Header().Set("Date", date)
+			w.Header().Set(HeaderReply, reply)
+		}
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
@@ -286,6 +392,17 @@ func TestForwarding(t *testing.T) {
 	if w.Code != http.StatusOK || w.Body.String() != want {
 		t.Errorf("playlist %d:\n%s", w.Code, w.Body)
 	}
+
+	// Something else at the host's address (it can't prove it's the host):
+	// its answer isn't taken.
+	impostor = true
+	w = httptest.NewRecorder()
+	guest.Forward(w, httptest.NewRequest("GET", "/api/local/file?"+url.Values{"path": {file}}.Encode(), nil), "file")
+	if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "abcd") {
+		t.Errorf("an answer that isn't the host's: %d %q", w.Code, w.Body)
+	}
+	impostor = false
+	got = got[:3]
 
 	// Not shared any more: nothing is forwarded.
 	guest.peers[hostID.ID].shares = false

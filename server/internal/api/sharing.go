@@ -51,12 +51,14 @@ func (s *Server) servePeer(w http.ResponseWriter, r *http.Request, next http.Han
 		next.ServeHTTP(w, r)
 		return
 	}
-	c, err := s.app.Share.Verify(r)
+	c, err := s.app.Share.Verify(w, r)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "not a Kumo app this one knows: " + err.Error()})
 		return
 	}
-	next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), peerKey{}, c)))
+	// Another device: never this computer (isTrusted).
+	ctx := context.WithValue(r.Context(), ctxKey{}, clientLAN)
+	next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, peerKey{}, c)))
 }
 
 func peerOf(r *http.Request) share.Caller {
@@ -76,6 +78,18 @@ func shared(fn http.HandlerFunc) http.HandlerFunc {
 		}
 		fn(w, r)
 	}
+}
+
+// sharedFile wraps the endpoints about a file (?path=): one this Kumo
+// shares, not any of its library's (an ignored one, say).
+func (s *Server) sharedFile(fn http.HandlerFunc) http.HandlerFunc {
+	return shared(func(w http.ResponseWriter, r *http.Request) {
+		if !s.app.Share.Shares(r.URL.Query().Get("path")) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "that file isn't shared"})
+			return
+		}
+		fn(w, r)
+	})
 }
 
 func (s *Server) peerRoutes() {
@@ -142,17 +156,20 @@ func (s *Server) peerRoutes() {
 	m.HandleFunc("POST /api/peer/torrents/start", torrents(h(func(r *http.Request) (any, error) { return nil, s.app.Torrents.StartClient(r.Context()) })))
 	// Downloads from a Kumo allowed to download onto this one.
 	m.HandleFunc("POST /api/peer/downloads/{kind}", shared(h(s.peerDownload)))
-	m.HandleFunc("GET /api/peer/local/probe", shared(h(func(r *http.Request) (any, error) {
+	m.HandleFunc("GET /api/peer/local/probe", s.sharedFile(h(func(r *http.Request) (any, error) {
 		return s.app.Local.Probe(r.Context(), r.URL.Query().Get("path"))
 	})))
-	m.HandleFunc("GET /api/peer/local/file", shared(s.localFile))
-	m.HandleFunc("GET /api/peer/local/transcode", shared(s.localTranscode))
-	m.HandleFunc("GET /api/peer/local/seekpoint", shared(h(s.localSeekPoint)))
-	m.HandleFunc("GET /api/peer/local/subtitle", shared(s.localSubtitle))
+	m.HandleFunc("GET /api/peer/local/file", s.sharedFile(s.localFile))
+	m.HandleFunc("GET /api/peer/local/transcode", s.sharedFile(s.localTranscode))
+	m.HandleFunc("GET /api/peer/local/seekpoint", s.sharedFile(h(s.localSeekPoint)))
+	m.HandleFunc("GET /api/peer/local/subtitle", s.sharedFile(s.localSubtitle))
 	m.HandleFunc("POST /api/peer/local/hls", shared(h(func(r *http.Request) (any, error) {
 		var req stream.HLSRequest
 		if err := decode(r, &req); err != nil {
 			return nil, err
+		}
+		if !s.app.Share.Shares(req.Path) {
+			return nil, notFound("that file isn't shared")
 		}
 		return s.app.HLS.Start(r.Context(), req)
 	})))

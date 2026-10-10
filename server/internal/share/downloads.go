@@ -107,7 +107,7 @@ func (s *Service) SendDownload(ctx context.Context, kind string, what any) (stri
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.api.Do(req)
+	resp, err := s.do(s.api, req)
 	if err != nil {
 		return "", fmt.Errorf("%s doesn't answer: %w", name, err)
 	}
@@ -160,7 +160,7 @@ func (s *Service) TorrentsHost(ctx context.Context, op string, body any) (raw js
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := s.api.Do(req)
+	resp, err := s.do(s.api, req)
 	if err != nil {
 		return nil, name, true, fmt.Errorf("%s doesn't answer: %w", name, err)
 	}
